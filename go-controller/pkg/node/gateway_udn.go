@@ -470,6 +470,13 @@ func (udng *UserDefinedNetworkGateway) addNetwork() error {
 	if (config.IsModeDPU() || config.IsModeFull()) && udng.openflowManager == nil {
 		return fmt.Errorf("openflow manager has not been provided for network: %s", udng.NetInfo.GetNetworkName())
 	}
+	// Temporary workaround: the teardown of a previous CUDN VRF leaves the
+	// Uplink VF down, and the host only reprograms its addresses and routes
+	// once it is up again. Both Uplink gateway resolution and VRF creation
+	// below depend on that configuration being back.
+	if err := udng.ensureUplinkVFUp(); err != nil {
+		return err
+	}
 	udng.updateAdvertisementStatus()
 
 	nodeSubnets, err := udng.getLocalSubnets()
@@ -665,9 +672,12 @@ func (udng *UserDefinedNetworkGateway) delNetwork() error {
 			errs = append(errs, fmt.Errorf("unable to delete iprules for network %s, err: %v", udng.GetNetworkName(), err))
 		}
 	}
-	// delete the VRF device for this network
+	// delete the VRF device for this network. Temporary workaround: hand the
+	// Uplink VF back to the host once the VRF that held it is gone.
 	if err := udng.vrfManager.DeleteVRF(vrfDeviceName); err != nil {
 		errs = append(errs, fmt.Errorf("unable to delete VRF device %s for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err))
+	} else if err := udng.setUplinkVFDown(); err != nil {
+		errs = append(errs, err)
 	}
 	if config.IsModeDPU() || config.IsModeFull() {
 		// delete the openflows for this network
