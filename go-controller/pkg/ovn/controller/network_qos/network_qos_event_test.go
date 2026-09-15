@@ -24,10 +24,12 @@ func newEventTestController(tb testing.TB) (*Controller, cache.Indexer) {
 	c := &Controller{
 		NetInfo:            &util.DefaultNetInfo{},
 		nqosLister:         nqoslister.NewNetworkQoSLister(indexer),
+		nqosQueue:          workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 		nqosPodQueue:       workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 		nqosNamespaceQueue: workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),
 	}
 	tb.Cleanup(c.nqosPodQueue.ShutDown)
+	tb.Cleanup(c.nqosQueue.ShutDown)
 	tb.Cleanup(c.nqosNamespaceQueue.ShutDown)
 	return c, indexer
 }
