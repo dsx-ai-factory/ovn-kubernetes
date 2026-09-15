@@ -161,6 +161,16 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 		}
 	}
 	podNs, err := c.nqosNamespaceLister.Get(podNsStr)
+	if apierrors.IsNotFound(err) {
+		// Namespace deletion can overtake queued Pod events. Its old labels
+		// are unavailable, so resync policies to remove stale source and
+		// destination addresses without guessing which selectors matched.
+		affected := sets.New[string]()
+		for _, nqos := range nqoses {
+			affected.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
+		}
+		return affected, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get namespace %s: %v", pod.Namespace, err)
 	}
