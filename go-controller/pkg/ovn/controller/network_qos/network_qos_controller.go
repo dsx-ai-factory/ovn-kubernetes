@@ -387,9 +387,22 @@ func (c *Controller) onNQOSPodAdd(obj interface{}) {
 	if !c.hasNetworkQoS() {
 		return
 	}
-	key, err := cache.MetaNamespaceKeyFunc(obj)
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting Pod but received %T", obj))
+		return
+	}
+	if pod == nil {
+		utilruntime.HandleError(fmt.Errorf("empty pod"))
+		return
+	}
+	// Policy reconciliation excludes host-network Pods from address sets.
+	if pod.Spec.HostNetwork {
+		return
+	}
+	key, err := cache.MetaNamespaceKeyFunc(pod)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", pod, err))
 		return
 	}
 	klog.V(6).Infof("Adding Pod in Network QoS controller %s", key)
@@ -401,8 +414,24 @@ func (c *Controller) onNQOSPodUpdate(oldObj, newObj interface{}) {
 	if !c.hasNetworkQoS() {
 		return
 	}
-	oldPod := oldObj.(*corev1.Pod)
-	newPod := newObj.(*corev1.Pod)
+	oldPod, ok := oldObj.(*corev1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting Pod but received %T", oldObj))
+		return
+	}
+	newPod, ok := newObj.(*corev1.Pod)
+	if !ok {
+		utilruntime.HandleError(fmt.Errorf("expecting Pod but received %T", newObj))
+		return
+	}
+	if oldPod == nil || newPod == nil {
+		utilruntime.HandleError(fmt.Errorf("empty pod"))
+		return
+	}
+	// Policy reconciliation excludes host-network Pods from address sets.
+	if oldPod.Spec.HostNetwork && newPod.Spec.HostNetwork {
+		return
+	}
 
 	// don't process resync or objects that are marked for deletion
 	if oldPod.ResourceVersion == newPod.ResourceVersion ||
@@ -450,22 +479,23 @@ func (c *Controller) onNQOSPodDelete(obj interface{}) {
 	if !c.hasNetworkQoS() {
 		return
 	}
+	// Derive the key first so key-only tombstones (DeletedFinalStateUnknown
+	// without a typed object) still enqueue the delete instead of being dropped.
+	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for pod delete object %#v: %v", obj, err))
+		return
+	}
+	// Policy reconciliation excludes host-network Pods from address sets. Skip
+	// the enqueue only when we can confirm the deleted Pod used host networking;
+	// key-only tombstones fall through and are reconciled from the cache.
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
-		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-		if !ok {
-			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %#v", obj))
-			return
-		}
-		pod, ok = tombstone.Obj.(*corev1.Pod)
-		if !ok {
-			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a Pod: %#v", tombstone.Obj))
-			return
+		if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+			pod, _ = tombstone.Obj.(*corev1.Pod)
 		}
 	}
-	key, err := cache.MetaNamespaceKeyFunc(pod)
-	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for pod %+v: %v", pod, err))
+	if pod != nil && pod.Spec.HostNetwork {
 		return
 	}
 	klog.V(6).Infof("Deleting Pod Network QoS %s", key)
