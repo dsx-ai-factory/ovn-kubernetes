@@ -328,6 +328,9 @@ func (c *Controller) onNQOSDelete(obj interface{}) {
 
 // onNQOSNamespaceAdd queues the namespace for processing.
 func (c *Controller) onNQOSNamespaceAdd(obj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -338,6 +341,9 @@ func (c *Controller) onNQOSNamespaceAdd(obj interface{}) {
 
 // onNQOSNamespaceUpdate queues the namespace for processing.
 func (c *Controller) onNQOSNamespaceUpdate(oldObj, newObj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	oldNamespace := oldObj.(*corev1.Namespace)
 	newNamespace := newObj.(*corev1.Namespace)
 
@@ -362,6 +368,9 @@ func (c *Controller) onNQOSNamespaceUpdate(oldObj, newObj interface{}) {
 
 // onNQOSNamespaceDelete queues the namespace for processing.
 func (c *Controller) onNQOSNamespaceDelete(obj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -373,6 +382,9 @@ func (c *Controller) onNQOSNamespaceDelete(obj interface{}) {
 
 // onNQOSPodAdd queues the pod for processing.
 func (c *Controller) onNQOSPodAdd(obj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -384,6 +396,9 @@ func (c *Controller) onNQOSPodAdd(obj interface{}) {
 
 // onNQOSPodUpdate queues the pod for processing.
 func (c *Controller) onNQOSPodUpdate(oldObj, newObj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	oldPod := oldObj.(*corev1.Pod)
 	newPod := newObj.(*corev1.Pod)
 
@@ -430,6 +445,9 @@ func (c *Controller) podNetworkResolver() func(nadKey string) string {
 
 // onNQOSPodDelete queues the pod for processing.
 func (c *Controller) onNQOSPodDelete(obj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
