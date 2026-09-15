@@ -127,6 +127,10 @@ func reconcilePodForDestinations(nqosState *networkQoSState, podNs *corev1.Names
 }
 
 func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string], error) {
+	nqoses, err := c.getAllNetworkQoSes()
+	if err != nil || len(nqoses) == 0 {
+		return nil, err
+	}
 	podNsStr, podName, err := cache.SplitMetaNamespaceKey(podKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to split pod key %s: %v", podKey, err)
@@ -159,10 +163,6 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 	podNs, err := c.nqosNamespaceLister.Get(podNsStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get namespace %s: %v", pod.Namespace, err)
-	}
-	nqoses, err := c.getAllNetworkQoSes()
-	if err != nil {
-		return nil, err
 	}
 	affectedNetworkQoSes := sets.Set[string]{}
 	for _, nqos := range nqoses {
