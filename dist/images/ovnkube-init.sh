@@ -83,6 +83,11 @@ else
   cluster_tls="certificate-authority: /tmp/k8s-cacert.crt"
 fi
 
+k8s_auth="token: $K8S_TOKEN"
+if [[ -n ${K8S_TOKEN_FILE:-} ]]; then
+  k8s_auth="tokenFile: $K8S_TOKEN_FILE"
+fi
+
 cat > /tmp/kubeconfig.yaml <<EOF
 apiVersion: v1
 kind: Config
@@ -94,7 +99,7 @@ clusters:
 users:
 - name: ovn-kube
   user:
-    token: $K8S_TOKEN
+    $k8s_auth
 contexts:
 - name: default
   context:

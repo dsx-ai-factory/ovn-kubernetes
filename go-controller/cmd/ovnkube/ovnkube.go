@@ -608,8 +608,8 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				wg.Done()
 			}()
 
-			if config.Kubernetes.Token == "" {
-				nodeErr = fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
+			if config.Kubernetes.Token == "" && config.Kubernetes.TokenFile == "" {
+				nodeErr = fmt.Errorf("cannot initialize node without a token; provide --k8s-token or --k8s-token-file")
 				return
 			}
 

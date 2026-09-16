@@ -164,7 +164,10 @@ ovs_user_id=${OVS_USER_ID:-""}
 # ovs options
 ovs_options=${OVS_OPTIONS:-""}
 
-if [[ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]]; then
+if [[ -n ${K8S_TOKEN_FILE:-} ]]; then
+  # A remote rotating token must not fall back to the DPU cluster's token.
+  k8s_token=""
+elif [[ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]]; then
   k8s_token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
 else
   k8s_token=${K8S_TOKEN}
@@ -3243,7 +3246,7 @@ cleanup-ovn-node() {
     [[ -n ${K8S_CACERT:-} ]] && cleanup_api_args+=("--k8s-cacert=${K8S_CACERT}")
   fi
   /usr/bin/ovnkube --cleanup-node ${K8S_NODE} --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
-    --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${k8s_cacert} \
+    "${cleanup_api_args[@]}" \
     --loglevel=${ovnkube_loglevel} \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     --ovn-config-namespace ${ovn_kubernetes_namespace}
