@@ -1727,6 +1727,40 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 				"kubernetes kubeconfig file \"/foo/bar/baz\" not found",
 				"-k8s-kubeconfig=/foo/bar/baz")
 		})
+
+		Context("apiserver certificate verification", func() {
+			It("is enabled by default", func() {
+				kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer os.Remove(kubeCAFile)
+
+				err = runInit(app, 1, cfgFile, "-k8s-apiserver=https://localhost:8443",
+					"-k8s-cacert="+kubeCAFile, "-k8s-token=this-is-a-token")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(Kubernetes.InsecureSkipTLSVerify).To(gomega.BeFalse())
+				gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
+			})
+
+			// runType 1 is command-line args, runType 2 is the config file. The
+			// scrambled config file data of runType 3 is not valid for a boolean.
+			for _, runType := range []int{1, 2} {
+				It(fmt.Sprintf("(%d) is skipped, without needing a CA certificate, when k8s-insecure-skip-tls-verify is set", runType), func() {
+					err := runInit(app, runType, cfgFile, "-k8s-apiserver=https://localhost:8443",
+						"-k8s-token=this-is-a-token", "-k8s-insecure-skip-tls-verify=true")
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(Kubernetes.InsecureSkipTLSVerify).To(gomega.BeTrue())
+					gomega.Expect(Kubernetes.CAData).To(gomega.BeEmpty())
+				})
+			}
+
+			It("ignores a CA certificate when verification is skipped", func() {
+				err := runInit(app, 1, cfgFile, "-k8s-apiserver=https://localhost:8443",
+					"-k8s-token=this-is-a-token", "-k8s-cacert=/foo/bar/baz.cert", "-k8s-insecure-skip-tls-verify=true")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(Kubernetes.CACert).To(gomega.BeEmpty())
+				gomega.Expect(Kubernetes.CAData).To(gomega.BeEmpty())
+			})
+		})
 	})
 
 	Describe("OVN Kube Node config", func() {

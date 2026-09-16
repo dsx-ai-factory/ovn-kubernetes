@@ -8,6 +8,20 @@
 
 OVS_RUNDIR=/var/run/openvswitch
 
+# OVNK8S_INSECURE_SKIP_TLS_VERIFY - do not verify the Kubernetes API server certificate, so that no CA
+# certificate is needed to reach it. The DPU then authenticates with the SPIFFE/SPIRE issued
+# K8S_TOKEN alone. INSECURE: enable only when the API server endpoint and the network path to it
+# are trusted.
+ovnk8s_insecure_skip_tls_verify=${OVNK8S_INSECURE_SKIP_TLS_VERIFY:-"false"}
+
+# kubectl_opts is applied to every kubectl invocation through the wrapper below, so that the TLS
+# verification setting cannot be missed by a call site.
+kubectl_opts=()
+
+kubectl() {
+  command kubectl "${kubectl_opts[@]}" "$@"
+}
+
 # wait_for_event [attempts=<num>] function_to_call [arguments_to_function]
 #
 # Processes running inside the container should immediately start, so we
@@ -60,7 +74,14 @@ ovs_ready() {
 }
 
 echo "generate kubeconfig ..."
-echo $K8S_CACERT_DATA | base64 -d > /tmp/k8s-cacert.crt
+if [[ ${ovnk8s_insecure_skip_tls_verify} == "true" ]]; then
+  echo "WARNING: Kubernetes API server certificate verification is disabled"
+  kubectl_opts+=("--insecure-skip-tls-verify=true")
+  cluster_tls="insecure-skip-tls-verify: true"
+else
+  echo $K8S_CACERT_DATA | base64 -d > /tmp/k8s-cacert.crt
+  cluster_tls="certificate-authority: /tmp/k8s-cacert.crt"
+fi
 
 cat > /tmp/kubeconfig.yaml <<EOF
 apiVersion: v1
@@ -69,7 +90,7 @@ clusters:
 - name: cluster
   cluster:
     server: $K8S_APISERVER
-    certificate-authority: /tmp/k8s-cacert.crt
+    $cluster_tls
 users:
 - name: ovn-kube
   user:

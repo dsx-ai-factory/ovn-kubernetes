@@ -237,7 +237,8 @@ func adjustNodeName() string {
 
 // newKubernetesRestConfig create a Kubernetes rest config from either a kubeconfig,
 // TLS properties, or an apiserver URL. If the CA certificate data is passed in the
-// CAData in the KubernetesConfig, the CACert path is ignored.
+// CAData in the KubernetesConfig, the CACert path is ignored. When InsecureSkipTLSVerify is
+// set, the apiserver certificate is not verified and no CA certificate is needed.
 func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error) {
 	var kconfig *rest.Config
 	var err error
@@ -246,26 +247,34 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		if (conf.Token == "" && conf.TokenFile == "" && conf.CertDir == "") || len(conf.CAData) == 0 {
+		// A CA certificate is what verification needs, so it is not required when
+		// verification is skipped. Credentials are still required either way.
+		if conf.Token == "" && conf.TokenFile == "" && conf.CertDir == "" {
+			return nil, fmt.Errorf("TLS-secured apiservers require token/cert")
+		}
+		if !conf.InsecureSkipTLSVerify && len(conf.CAData) == 0 {
 			return nil, fmt.Errorf("TLS-secured apiservers require token/cert and CA certificate")
 		}
-		if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
+		// CAData and Insecure are mutually exclusive as far as client-go is
+		// concerned, so only one of them is ever set below.
+		tlsConfig := rest.TLSClientConfig{CAData: conf.CAData}
+		if conf.InsecureSkipTLSVerify {
+			tlsConfig = rest.TLSClientConfig{Insecure: true}
+		} else if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
 			return nil, err
 		}
 		kconfig = &rest.Config{
 			Host:            conf.APIServer,
 			BearerToken:     conf.Token,
 			BearerTokenFile: conf.TokenFile,
-			TLSClientConfig: rest.TLSClientConfig{CAData: conf.CAData},
+			TLSClientConfig: tlsConfig,
 		}
 		if conf.CertDir != "" {
+			tlsConfig.KeyFile = filepath.Join(conf.CertDir, certNamePrefix+"-current.pem")
+			tlsConfig.CertFile = filepath.Join(conf.CertDir, certNamePrefix+"-current.pem")
 			kconfig = &rest.Config{
-				Host: conf.APIServer,
-				TLSClientConfig: rest.TLSClientConfig{
-					KeyFile:  filepath.Join(conf.CertDir, certNamePrefix+"-current.pem"),
-					CertFile: filepath.Join(conf.CertDir, certNamePrefix+"-current.pem"),
-					CAData:   conf.CAData,
-				},
+				Host:            conf.APIServer,
+				TLSClientConfig: tlsConfig,
 			}
 		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {

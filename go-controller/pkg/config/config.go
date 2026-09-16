@@ -477,16 +477,23 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	BootstrapKubeconfig     string        `gcfg:"bootstrap-kubeconfig"`
-	CertDir                 string        `gcfg:"cert-dir"`
-	CertDuration            time.Duration `gcfg:"cert-duration"`
-	Kubeconfig              string        `gcfg:"kubeconfig"`
-	CACert                  string        `gcfg:"cacert"`
-	CACertData              string        `gcfg:"cacert-data"`
-	CAData                  []byte
-	APIServer               string `gcfg:"apiserver"`
-	Token                   string `gcfg:"token"`
-	TokenFile               string `gcfg:"tokenFile"`
+	BootstrapKubeconfig string        `gcfg:"bootstrap-kubeconfig"`
+	CertDir             string        `gcfg:"cert-dir"`
+	CertDuration        time.Duration `gcfg:"cert-duration"`
+	Kubeconfig          string        `gcfg:"kubeconfig"`
+	CACert              string        `gcfg:"cacert"`
+	CACertData          string        `gcfg:"cacert-data"`
+	CAData              []byte
+	APIServer           string `gcfg:"apiserver"`
+	Token               string `gcfg:"token"`
+	TokenFile           string `gcfg:"tokenFile"`
+	// InsecureSkipTLSVerify disables verification of the Kubernetes API server
+	// certificate. It exists for ovnkube-node-dpu deployments where the API
+	// server CA certificate is not available on the DPU and the only
+	// credential is a SPIFFE/SPIRE issued token. Enabling it leaves the
+	// connection open to interception, so it must only be used when the API
+	// server endpoint and the network path to it are trusted.
+	InsecureSkipTLSVerify   bool   `gcfg:"insecure-skip-tls-verify"`
 	CompatServiceCIDR       string `gcfg:"service-cidr"`
 	RawServiceCIDRs         string `gcfg:"service-cidrs"`
 	ServiceCIDRs            []*net.IPNet
@@ -1601,6 +1608,15 @@ var K8sFlags = []cli.Flag{
 		Usage:       "the Base64 encoded Kubernetes API CA certificate data (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.CACertData,
 	},
+	&cli.BoolFlag{
+		Name: "k8s-insecure-skip-tls-verify",
+		Usage: "skip verification of the Kubernetes API server certificate, so that no CA certificate is " +
+			"required to reach it. Intended for ovnkube-node-dpu deployments where the DPU authenticates with a " +
+			"SPIFFE/SPIRE issued token only. INSECURE: this disables API server certificate validation and must " +
+			"only be enabled when the API server endpoint and the network path to it are trusted",
+		Value:       Kubernetes.InsecureSkipTLSVerify,
+		Destination: &cliConfig.Kubernetes.InsecureSkipTLSVerify,
+	},
 	&cli.StringFlag{
 		Name:        "k8s-token",
 		Usage:       "the Kubernetes API authentication token (not required if --k8s-kubeconfig is given)",
@@ -2328,7 +2344,14 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes kubeconfig file %q not found", Kubernetes.Kubeconfig)
 	}
 
-	if Kubernetes.CACert != "" || Kubernetes.CACertData != "" {
+	if Kubernetes.InsecureSkipTLSVerify {
+		// A CA certificate cannot be combined with skipped verification, and the
+		// one found in the service account directory belongs to the local cluster
+		// rather than to the API server this component talks to.
+		klog.Warning("Kubernetes API server certificate verification is disabled")
+		Kubernetes.CACert = ""
+		Kubernetes.CACertData = ""
+	} else if Kubernetes.CACert != "" || Kubernetes.CACertData != "" {
 		var bytes []byte
 		var err error
 		if Kubernetes.CACert != "" {

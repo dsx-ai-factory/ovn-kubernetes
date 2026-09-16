@@ -5,12 +5,16 @@ package util
 
 import (
 	"context"
+	"encoding/pem"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -114,6 +118,155 @@ func TestNewClientset(t *testing.T) {
 			} else {
 				assert.NotNil(t, res)
 			}
+		})
+	}
+}
+
+func TestNewKubernetesRestConfigInsecureSkipTLSVerify(t *testing.T) {
+	tests := []struct {
+		desc             string
+		inpConfig        config.KubernetesConfig
+		errExpected      bool
+		expectedInsecure bool
+		expectedCAData   []byte
+	}{
+		{
+			desc: "certificate verification is enabled by default",
+			inpConfig: config.KubernetesConfig{
+				APIServer: "https://1.2.3.4:6443",
+				Token:     "testToken",
+				CAData:    []byte(validCACert),
+			},
+			expectedCAData: []byte(validCACert),
+		},
+		{
+			desc: "a CA certificate is required when verification is enabled",
+			inpConfig: config.KubernetesConfig{
+				APIServer: "https://1.2.3.4:6443",
+				Token:     "testToken",
+			},
+			errExpected: true,
+		},
+		{
+			desc: "no CA certificate is required when verification is skipped",
+			inpConfig: config.KubernetesConfig{
+				APIServer:             "https://1.2.3.4:6443",
+				Token:                 "testToken",
+				InsecureSkipTLSVerify: true,
+			},
+			expectedInsecure: true,
+		},
+		{
+			desc: "CA data is dropped when verification is skipped",
+			inpConfig: config.KubernetesConfig{
+				APIServer:             "https://1.2.3.4:6443",
+				Token:                 "testToken",
+				CAData:                []byte(validCACert),
+				InsecureSkipTLSVerify: true,
+			},
+			expectedInsecure: true,
+		},
+		{
+			desc: "credentials are still required when verification is skipped",
+			inpConfig: config.KubernetesConfig{
+				APIServer:             "https://1.2.3.4:6443",
+				InsecureSkipTLSVerify: true,
+			},
+			errExpected: true,
+		},
+		{
+			desc: "client certificates are kept when verification is skipped",
+			inpConfig: config.KubernetesConfig{
+				APIServer:             "https://1.2.3.4:6443",
+				CertDir:               "/some/cert/dir",
+				InsecureSkipTLSVerify: true,
+			},
+			expectedInsecure: true,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			kconfig, err := newKubernetesRestConfig(&tc.inpConfig)
+			if tc.errExpected {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedInsecure, kconfig.TLSClientConfig.Insecure)
+			assert.Equal(t, tc.expectedCAData, kconfig.TLSClientConfig.CAData)
+		})
+	}
+}
+
+// TestNewKubernetesClientsetInsecureSkipTLSVerify exercises real TLS handshakes against an
+// apiserver whose certificate is signed by an unknown CA, which is the situation on
+// a DPU where the Kubernetes CA certificate is not available.
+func TestNewKubernetesClientsetInsecureSkipTLSVerify(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	apiserver := httptest.NewTLSServer(handler)
+	defer apiserver.Close()
+
+	apiserverCA := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: apiserver.Certificate().Raw})
+
+	tests := []struct {
+		desc           string
+		inpConfig      config.KubernetesConfig
+		errExpected    bool
+		reqErrExpected bool
+	}{
+		{
+			desc: "accepts an apiserver certificate signed by the configured CA",
+			inpConfig: config.KubernetesConfig{
+				APIServer: apiserver.URL,
+				Token:     "testToken",
+				CAData:    apiserverCA,
+			},
+		},
+		{
+			desc: "rejects an apiserver certificate signed by an unknown CA",
+			inpConfig: config.KubernetesConfig{
+				APIServer: apiserver.URL,
+				Token:     "testToken",
+				CAData:    []byte(validCACert),
+			},
+			reqErrExpected: true,
+		},
+		{
+			desc: "fails without a CA certificate",
+			inpConfig: config.KubernetesConfig{
+				APIServer: apiserver.URL,
+				Token:     "testToken",
+			},
+			errExpected: true,
+		},
+		{
+			desc: "accepts an apiserver certificate signed by an unknown CA when verification is skipped",
+			inpConfig: config.KubernetesConfig{
+				APIServer:             apiserver.URL,
+				Token:                 "testToken",
+				InsecureSkipTLSVerify: true,
+			},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			clientset, err := NewKubernetesClientset(&tc.inpConfig)
+			if tc.errExpected {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			_, err = clientset.Discovery().RESTClient().Get().AbsPath("/healthz").DoRaw(context.Background())
+			if tc.reqErrExpected {
+				assert.ErrorContains(t, err, "certificate")
+				return
+			}
+			assert.NoError(t, err)
 		})
 	}
 }

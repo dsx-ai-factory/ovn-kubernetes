@@ -370,6 +370,11 @@ fi
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
 # OVN_SIMULATE_DPU - use simulated DPU operations instead of SR-IOV/switchdev hardware operations
 ovn_simulate_dpu=${OVN_SIMULATE_DPU:-"false"}
+# OVNK8S_INSECURE_SKIP_TLS_VERIFY - do not verify the Kubernetes API server certificate, so that no CA
+# certificate is needed to reach it. Only honored in dpu mode, where the DPU authenticates with a
+# SPIFFE/SPIRE issued token only. INSECURE: enable only when the API server endpoint and the
+# network path to it are trusted.
+ovnk8s_insecure_skip_tls_verify=${OVNK8S_INSECURE_SKIP_TLS_VERIFY:-"false"}
 # OVN_DPU_HOST_GATEWAY_REPRESENTOR_INTERFACE - the DPU-side representor interface for the host's uplink (PF)
 ovn_dpu_host_gateway_representor_interface=${OVN_DPU_HOST_GATEWAY_REPRESENTOR_INTERFACE:-""}
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - is the net device to be used for management port
@@ -2105,6 +2110,7 @@ ovnkube-controller-with-node() {
     [[ -n ${K8S_TOKEN_FILE} ]] && cluster_access_opts+="--k8s-token-file=${K8S_TOKEN_FILE} "
     [[ -n ${K8S_CACERT_DATA} ]] && cluster_access_opts+="--k8s-cacert-data=${K8S_CACERT_DATA} "
     [[ -n ${K8S_CACERT} ]] && cluster_access_opts+="--k8s-cacert=${K8S_CACERT} "
+    [[ ${ovnk8s_insecure_skip_tls_verify} == "true" ]] && cluster_access_opts+="--k8s-insecure-skip-tls-verify "
   fi
 
   echo "=============== ovnkube-controller-with-node --init-ovnkube-controller-with-node=========="
@@ -3222,6 +3228,20 @@ cleanup-ovn-node() {
   done
 
   echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node --cleanup-node"
+  local cleanup_api_args=("--k8s-token=${k8s_token}" "--k8s-apiserver=${K8S_APISERVER}" "--k8s-cacert=${k8s_cacert}")
+  if [[ ${ovnkube_node_mode} == "dpu" && ${ovnk8s_insecure_skip_tls_verify} == "true" ]]; then
+    # No CA certificate is available to verify the DPU host cluster with, so pass none.
+    cleanup_api_args=("--k8s-apiserver=${K8S_APISERVER}" "--k8s-insecure-skip-tls-verify")
+    if [[ -n ${K8S_TOKEN_FILE:-} ]]; then
+      cleanup_api_args+=("--k8s-token-file=${K8S_TOKEN_FILE}")
+    else
+      cleanup_api_args+=("--k8s-token=${k8s_token}")
+    fi
+  elif [[ ${ovnkube_node_mode} == "dpu" && -n ${K8S_TOKEN_FILE:-} ]]; then
+    cleanup_api_args=("--k8s-token-file=${K8S_TOKEN_FILE}" "--k8s-apiserver=${K8S_APISERVER}")
+    [[ -n ${K8S_CACERT_DATA:-} ]] && cleanup_api_args+=("--k8s-cacert-data=${K8S_CACERT_DATA}")
+    [[ -n ${K8S_CACERT:-} ]] && cleanup_api_args+=("--k8s-cacert=${K8S_CACERT}")
+  fi
   /usr/bin/ovnkube --cleanup-node ${K8S_NODE} --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${k8s_cacert} \
     --loglevel=${ovnkube_loglevel} \
