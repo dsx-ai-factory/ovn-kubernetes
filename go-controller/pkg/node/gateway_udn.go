@@ -1045,8 +1045,15 @@ func addUDNMasqIPNeighbors(bridgeName string, v4MasqIPs, v6MasqIPs *udn.Masquera
 // delUDNMasqIPNeighbors removes the kernel neighbor entries previously added
 // by addUDNMasqIPNeighbors.
 func delUDNMasqIPNeighbors(bridgeName string, v4MasqIPs, v6MasqIPs *udn.MasqueradeIPs) error {
-	link, err := util.LinkSetUp(bridgeName)
+	link, err := util.GetNetLinkOps().LinkByName(bridgeName)
 	if err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			// Neighbor entries belong to the link: a link that is gone has
+			// none left to delete. In practice only an admin-owned Uplink
+			// bridge can be deleted under a running network.
+			klog.Infof("Link %s not found, no masquerade IP neighbor entries to delete", bridgeName)
+			return nil
+		}
 		return fmt.Errorf("unable to get link for %s: %v", bridgeName, err)
 	}
 	var errs []error
