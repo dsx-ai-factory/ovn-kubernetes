@@ -197,6 +197,13 @@ func (c *openflowManager) delNetworkFromUplinkBridge(nInfo util.NetInfo, bridgeN
 
 	bridge.resetFlowCacheToNormal()
 	if err := bridge.syncFlows(); err != nil {
+		// An admin may delete the Uplink bridge before its last network is
+		// torn down: nothing is left to clean up, stop tracking it.
+		if _, lookupErr := ovsops.GetBridge(c.ovsClient, bridgeName); errors.Is(lookupErr, libovsdbclient.ErrNotFound) {
+			klog.Infof("Uplink bridge %s no longer exists, treating its flows as cleaned up", bridgeName)
+			delete(c.uplinkBridges, bridgeName)
+			return nil
+		}
 		return fmt.Errorf("failed to clean up unused uplink bridge %s flows: %w", bridgeName, err)
 	}
 	delete(c.uplinkBridges, bridgeName)
