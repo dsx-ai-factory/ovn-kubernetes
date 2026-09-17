@@ -85,44 +85,10 @@ func (c *ClientSet) getPod(namespace, name string) (*corev1.Pod, error) {
 	return pod, nil
 }
 
-// rateLimitedGetPod reads a Pod object from the informer cache. On a cache miss,
-// and only when useAPIServer is true, it falls back to a live read from the
-// apiserver. liveFetched reports whether the apiserver was queried, so that
-// callers can bound the number of live reads they do and avoid hammering the
-// apiserver when a pod is slow to appear in the cache.
-func (c *ClientSet) rateLimitedGetPod(namespace, name string, useAPIServer bool) (pod *corev1.Pod, liveFetched bool, err error) {
-	pod, err = c.podLister.Pods(namespace).Get(name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return nil, false, err
-	}
-	if pod != nil {
-		return pod, false, nil
-	}
-
-	if !useAPIServer {
-		// Cache miss and the live-fetch budget is spent; surface the lister's
-		// NotFound without touching the apiserver.
-		return nil, false, err
-	}
-
-	// The pod wasn't in our local cache, ask the apiserver for it directly.
-	// This counts as a live fetch whether or not the pod is found there.
-	pod, err = c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, true, err
-	}
-	return pod, true, nil
-}
-
 // GetPodAnnotations obtains the pod UID and annotation from the cache or apiserver
 func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 	namespace, name, nadName string, annotCond podAnnotWaitCond) (*corev1.Pod, map[string]string, *util.PodAnnotation, error) {
 	var notFoundCount uint
-	var liveFetchCount uint
-	// Cap the number of live apiserver reads so that a pod which is slow to
-	// appear in the local informer cache does not make us hammer the apiserver
-	// on every retry. After this many live fetches we rely solely on the cache.
-	const maxLiveFetches uint = 5
 
 	for {
 		select {
@@ -133,27 +99,15 @@ func GetPodWithAnnotations(ctx context.Context, getter PodInfoGetter,
 			}
 			return nil, nil, nil, fmt.Errorf("%s waiting for annotations: %w", detail, ctx.Err())
 		default:
-			useAPIServer := liveFetchCount < maxLiveFetches
-			pod, liveFetched, err := getter.rateLimitedGetPod(namespace, name, useAPIServer)
-			if liveFetched {
-				liveFetchCount++
-			}
+			pod, err := getter.getPod(namespace, name)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
 					return nil, nil, nil, fmt.Errorf("failed to get pod for annotations: %v", err)
 				}
-				if liveFetched {
-					// A live read is authoritative: the apiserver itself does
-					// not have the pod. Fail right away, kubelet will retry the CNI ADD if needed.
-					return nil, nil, nil, fmt.Errorf("pod %s/%s not found in the apiserver: %v", namespace, name, err)
-				}
-				// Cache-only miss (live-fetch budget spent): the pod isn't in
-				// the informer cache, because the cache is lagging or the pod
-				// was deleted. Tolerate ~4s of this, then give up so kubelet
-				// retries rather than holding the request until ctx expires.
+				// Allow up to 1 second for pod to be found
 				notFoundCount++
-				if notFoundCount >= 20 {
-					return nil, nil, nil, fmt.Errorf("timed out waiting for pod %s/%s to appear in the informer cache", namespace, name)
+				if notFoundCount >= 5 {
+					return nil, nil, nil, fmt.Errorf("timed out waiting for pod after 1s: %v", err)
 				}
 				// drop through to try again
 			} else if pod != nil {
