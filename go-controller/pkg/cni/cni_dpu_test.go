@@ -5,6 +5,7 @@
 package cni
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -48,6 +49,7 @@ var _ = Describe("cni_dpu tests", func() {
 		existingMockLink.On("Attrs").Return(&netlink.LinkAttrs{HardwareAddr: ovntest.MustParseMAC("00:00:00:01:02:03")})
 
 		pr = PodRequest{
+			ctx:          context.Background(),
 			Command:      CNIAdd,
 			PodNamespace: "foo-ns",
 			PodName:      "bar-pod",

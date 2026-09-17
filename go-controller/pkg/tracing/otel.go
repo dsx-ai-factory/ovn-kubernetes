@@ -53,6 +53,7 @@ type spanNamePrefixKey struct{}
 type spansDisabledKey struct{}
 type retryLoopKey struct{}
 type operationKey struct{}
+type spanAttrsKey struct{}
 
 var (
 	initOnce   sync.Once
@@ -109,7 +110,6 @@ func Init(component string, cfg config.TracingConfig, attrs ...attribute.KeyValu
 			initErr = fmt.Errorf("failed to create OTLP trace exporter: %w", err)
 			return
 		}
-
 		resourceAttrs := append([]attribute.KeyValue{
 			attribute.String(ResourceAttrServiceName, cfg.ServiceName),
 			attribute.String(ResourceAttrServiceComponent, component),
@@ -200,6 +200,27 @@ func ContextWithSpanNamePrefix(ctx context.Context, prefix string) context.Conte
 	return context.WithValue(ctx, spanNamePrefixKey{}, prefix)
 }
 
+// ContextWithSpanAttrs carries attributes that every span started from the
+// returned context is decorated with.
+func ContextWithSpanAttrs(ctx context.Context, attrs ...attribute.KeyValue) context.Context {
+	if len(attrs) == 0 {
+		return ctx
+	}
+	existing := SpanAttrsFromContext(ctx)
+	// copy rather than append in place: the slice in ctx is shared with any
+	// other context derived from it, possibly on another goroutine
+	merged := make([]attribute.KeyValue, 0, len(existing)+len(attrs))
+	merged = append(merged, existing...)
+	merged = append(merged, attrs...)
+	return context.WithValue(ctx, spanAttrsKey{}, merged)
+}
+
+// SpanAttrsFromContext returns the attributes carried by ctx, if any.
+func SpanAttrsFromContext(ctx context.Context) []attribute.KeyValue {
+	attrs, _ := ctx.Value(spanAttrsKey{}).([]attribute.KeyValue)
+	return attrs
+}
+
 // ContextWithRetryLoop annotates ctx when reconcile work is driven from the retry loop.
 func ContextWithRetryLoop(ctx context.Context, retry bool) context.Context {
 	if !retry {
@@ -253,7 +274,8 @@ func StartSpan(ctx context.Context, operation string) (context.Context, trace.Sp
 		return noopTracer.Start(ctx, "")
 	}
 	prefix := SpanNamePrefixFromContext(ctx)
-	return Tracer(prefix).Start(ctx, SpanName(ctx, operation))
+	return Tracer(prefix).Start(ctx, SpanName(ctx, operation),
+		trace.WithAttributes(SpanAttrsFromContext(ctx)...))
 }
 
 // StartTrace starts a reconcile span from propagated trace context.
@@ -278,14 +300,16 @@ func StartTrace(ctx context.Context, annotations map[string]string) (context.Con
 
 	prefix := SpanNamePrefixFromContext(ctx)
 	name := SpanName(ctx, string(OperationFromContext(ctx)))
+	attrs := trace.WithAttributes(SpanAttrsFromContext(ctx)...)
 	if spanRelationshipMode == SpanRelationshipModeParent {
 		remoteParentCtx := trace.ContextWithRemoteSpanContext(ctx, linkedSC)
-		return Tracer(prefix).Start(remoteParentCtx, name)
+		return Tracer(prefix).Start(remoteParentCtx, name, attrs)
 	}
 
 	opts := []trace.SpanStartOption{
 		trace.WithNewRoot(),
 		trace.WithLinks(trace.Link{SpanContext: linkedSC}),
+		attrs,
 	}
 	return Tracer(prefix).Start(ctx, name, opts...)
 }
@@ -330,4 +354,10 @@ func PodAttrs(namespace, podName, podUID string) []attribute.KeyValue {
 		attribute.String(SpanAttrK8sPodName, podName),
 		attribute.String(SpanAttrK8sPodUID, podUID),
 	}
+}
+
+// PodAnnotationKeysAttr names the pod annotations a patch is meant to write.
+// A single patch can carry several of them, so this is always a slice.
+func PodAnnotationKeysAttr(keys ...string) attribute.KeyValue {
+	return attribute.StringSlice(SpanAttrPodAnnotationKeys, keys)
 }

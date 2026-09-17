@@ -25,6 +25,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -776,7 +777,7 @@ func UpdatePodAnnotationWithRetry(ctx context.Context, podLister listers.PodList
 	}
 
 	return UpdatePodWithRetryOrRollback(
-		ctx,
+		tracing.ContextWithSpanAttrs(ctx, tracing.PodAnnotationKeysAttr(types.OvnPodAnnotationName)),
 		podLister,
 		kube,
 		pod,

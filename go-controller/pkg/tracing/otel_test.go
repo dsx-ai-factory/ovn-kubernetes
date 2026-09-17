@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
@@ -317,6 +318,48 @@ func TestStartTraceParentChildModeCreatesChildSpan(t *testing.T) {
 	}
 	if trace.SpanFromContext(ctx) != span {
 		t.Fatalf("expected returned context to carry the started span")
+	}
+}
+
+func TestContextSpanAttrsDecorateSpansStartedFromContext(t *testing.T) {
+	oldEnableTracing := config.OVNKubernetesFeature.EnableTracing
+	config.OVNKubernetesFeature.EnableTracing = true
+	defer func() { config.OVNKubernetesFeature.EnableTracing = oldEnableTracing }()
+
+	sr := &endedSpanRecorder{}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	oldTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	defer otel.SetTracerProvider(oldTP)
+
+	base := ContextWithSpanNamePrefix(context.Background(), "test.component")
+	ctx := ContextWithSpanAttrs(base, PodAnnotationKeysAttr("k8s.ovn.org/pod-networks"))
+	ctx = ContextWithSpanAttrs(ctx, attribute.String(SpanAttrK8sNADKey, "namespace/nad"))
+	_, span := StartSpan(ctx, "patch")
+	span.End()
+
+	// the attributes belong to the context they were added to, not the one
+	// they were derived from
+	_, undecorated := StartSpan(base, "patch")
+	undecorated.End()
+
+	spans := sr.ended()
+	if len(spans) != 2 {
+		t.Fatalf("expected 2 spans, got %d", len(spans))
+	}
+	got := map[attribute.Key]attribute.Value{}
+	for _, attr := range spans[0].Attributes() {
+		got[attr.Key] = attr.Value
+	}
+	keys := got[attribute.Key(SpanAttrPodAnnotationKeys)].AsStringSlice()
+	if len(keys) != 1 || keys[0] != "k8s.ovn.org/pod-networks" {
+		t.Fatalf("expected annotation keys attribute, got %v", keys)
+	}
+	if nadKey := got[attribute.Key(SpanAttrK8sNADKey)].AsString(); nadKey != "namespace/nad" {
+		t.Fatalf("expected accumulated NAD key attribute, got %q", nadKey)
+	}
+	if len(spans[1].Attributes()) != 0 {
+		t.Fatalf("expected no attributes on span started from the base context, got %v", spans[1].Attributes())
 	}
 }
 

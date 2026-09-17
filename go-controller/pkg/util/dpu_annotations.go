@@ -13,6 +13,7 @@ import (
 	listers "k8s.io/client-go/listers/core/v1"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -240,8 +241,9 @@ func UnmarshalPodDPUConnStatus(annotations map[string]string, nadKey string) (*D
 }
 
 // UpdatePodDPUConnStatusWithRetry updates the DPU connection status annotation
-// on the pod retrying on conflict
-func UpdatePodDPUConnStatusWithRetry(podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, dpuConnStatus *DPUConnectionStatus, nadKey string) error {
+// on the pod retrying on conflict. This is the DPU side of the handshake: the
+// host waits on this annotation before completing CNI ADD.
+func UpdatePodDPUConnStatusWithRetry(ctx context.Context, podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, dpuConnStatus *DPUConnectionStatus, nadKey string) error {
 	updatePodAnnotationNoRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var err error
 		pod.Annotations, err = MarshalPodDPUConnStatus(pod.Annotations, dpuConnStatus, nadKey)
@@ -252,7 +254,7 @@ func UpdatePodDPUConnStatusWithRetry(podLister listers.PodLister, kube kube.Inte
 	}
 
 	return UpdatePodWithRetryOrRollback(
-		context.Background(),
+		tracing.ContextWithSpanAttrs(ctx, tracing.PodAnnotationKeysAttr(DPUConnectionStatusAnnot)),
 		podLister,
 		kube,
 		pod,
@@ -261,8 +263,10 @@ func UpdatePodDPUConnStatusWithRetry(podLister listers.PodLister, kube kube.Inte
 }
 
 // UpdatePodDPUConnDetailsWithRetry updates the DPU connection details
-// annotation on the pod retrying on conflict
-func UpdatePodDPUConnDetailsWithRetry(podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, dpuConnDetails *DPUConnectionDetails, nadKey string) error {
+// annotation on the pod retrying on conflict. This is the host side of the
+// handshake: it publishes the VF coordinates the DPU needs to plumb the
+// representor.
+func UpdatePodDPUConnDetailsWithRetry(ctx context.Context, podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, dpuConnDetails *DPUConnectionDetails, nadKey string) error {
 	updatePodAnnotationNoRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var err error
 		pod.Annotations, err = MarshalPodDPUConnDetails(pod.Annotations, dpuConnDetails, nadKey)
@@ -273,7 +277,7 @@ func UpdatePodDPUConnDetailsWithRetry(podLister listers.PodLister, kube kube.Int
 	}
 
 	return UpdatePodWithRetryOrRollback(
-		context.Background(),
+		tracing.ContextWithSpanAttrs(ctx, tracing.PodAnnotationKeysAttr(DPUConnectionDetailsAnnot)),
 		podLister,
 		kube,
 		pod,

@@ -498,7 +498,8 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (response *Response, err erro
 					}
 
 					err = util.UpdatePodWithRetryOrRollback(
-						pr.ctx,
+						tracing.ContextWithSpanAttrs(pr.ctx,
+							tracing.PodAnnotationKeysAttr(util.DPUConnectionDetailsAnnot)),
 						clientset.podLister,
 						&kube.Kube{KClient: clientset.kclient},
 						pod,

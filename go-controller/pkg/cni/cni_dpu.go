@@ -24,6 +24,7 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podL
 		return fmt.Errorf("failed to get pod %s/%s to update connection details for NAD %s: %v", pr.PodNamespace, pr.PodName, pr.nadName, err)
 	}
 	err = util.UpdatePodDPUConnDetailsWithRetry(
+		pr.ctx,
 		podLister,
 		kube,
 		pod,

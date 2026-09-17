@@ -26,6 +26,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -148,7 +149,7 @@ func allocatePodAnnotation(
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
-		ctx,
+		tracing.ContextWithSpanAttrs(ctx, tracing.PodAnnotationKeysAttr(types.OvnPodAnnotationName)),
 		podLister,
 		kube,
 		pod,
@@ -243,7 +244,7 @@ func allocatePodAnnotationWithTunnelID(
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
-		ctx,
+		tracing.ContextWithSpanAttrs(ctx, tracing.PodAnnotationKeysAttr(types.OvnPodAnnotationName)),
 		podLister,
 		kube,
 		pod,

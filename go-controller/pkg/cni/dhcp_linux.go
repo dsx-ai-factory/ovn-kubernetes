@@ -36,6 +36,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -453,7 +454,12 @@ func (pr *PodRequest) updateDHCPAndDPUAnnotations(clientset *ClientSet, kubecli 
 		}
 		return pod, nil, nil
 	}
-	if err := util.UpdatePodWithRetryOrRollback(pr.ctx, clientset.podLister, kubecli, pod, updateFn); err != nil {
+	annotationKeys := []string{types.OvnPodAnnotationName}
+	if dpuConnDetails != nil {
+		annotationKeys = append(annotationKeys, util.DPUConnectionDetailsAnnot)
+	}
+	ctx := tracing.ContextWithSpanAttrs(pr.ctx, tracing.PodAnnotationKeysAttr(annotationKeys...))
+	if err := util.UpdatePodWithRetryOrRollback(ctx, clientset.podLister, kubecli, pod, updateFn); err != nil {
 		return fmt.Errorf("failed to update the DHCP and DPU annotations of pod %s/%s: %w",
 			pr.PodNamespace, pr.PodName, err)
 	}
@@ -516,7 +522,8 @@ func (pr *PodRequest) updatePodNetworksAnnotationWithDHCPResult(clientset *Clien
 		pod.Annotations = annotations
 		return pod, nil, nil
 	}
-	return util.UpdatePodWithRetryOrRollback(pr.ctx, clientset.podLister, &kube.Kube{KClient: clientset.kclient}, pod, updateFn)
+	ctx := tracing.ContextWithSpanAttrs(pr.ctx, tracing.PodAnnotationKeysAttr(types.OvnPodAnnotationName))
+	return util.UpdatePodWithRetryOrRollback(ctx, clientset.podLister, &kube.Kube{KClient: clientset.kclient}, pod, updateFn)
 }
 
 // execDHCPDel releases the DHCP lease by executing the DHCP plugin's DEL command.
