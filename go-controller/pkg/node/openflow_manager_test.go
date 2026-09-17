@@ -357,6 +357,70 @@ func TestOpenFlowManagerKeepsExistingUplinkBridgeOnCleanupFailure(t *testing.T) 
 	}
 }
 
+// An Uplink bridge the admin deleted skips its port check and every flow sync
+// instead of exiting the process on its vanished ports, like a bridge whose
+// check failed; it stays registered until its last network's cleanup.
+func TestOpenFlowManagerPortCheckSkipsDeletedUplinkBridge(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	fexec := ovntest.NewLooseCompareFakeExec()
+	if err := util.SetExec(fexec); err != nil {
+		t.Fatalf("failed to set fake exec: %v", err)
+	}
+	t.Cleanup(util.ResetRunner)
+
+	type physPort = struct {
+		physIntf string
+		ofport   int
+	}
+	ofm := &openflowManager{
+		defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
+		uplinkBridges: map[string]*openflowBridge{
+			"uup1": newOpenflowBridge(bridgeconfig.TestUplinkBridgeConfig("uup1", "eth2", "1")),
+			// uup2's physical port lost its netdevice: OVS reports ofport -1.
+			"uup2": newOpenflowBridge(bridgeconfig.TestUplinkBridgeConfig("uup2", "eth3", "1")),
+			// uup3 was deleted.
+			"uup3": newOpenflowBridge(bridgeconfig.TestUplinkBridgeConfig("uup3", "eth4", "1")),
+		},
+		ovsClient: newUplinkBridgeOVSClient(t, map[string]physPort{
+			"uup1": {physIntf: "eth2", ofport: 1},
+			"uup2": {physIntf: "eth3", ofport: -1},
+		}),
+	}
+
+	ofm.checkUplinkBridgePorts()
+	if _, found := ofm.getUplinkBridge("uup3"); !found {
+		t.Fatal("expected the deleted bridge to stay registered until its network cleanup")
+	}
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: "ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -"})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: "ovs-ofctl -O OpenFlow13 --bundle replace-flows uup1 -"})
+	ofm.syncFlows()
+	for _, bridgeName := range []string{"uup2", "uup3"} {
+		if found, err := ofm.syncUplinkBridgeFlows(bridgeName); found || err != nil {
+			t.Fatalf("expected the gateway sync of %s to be skipped and reported as not found, got found=%v err=%v",
+				bridgeName, found, err)
+		}
+	}
+	if !fexec.CalledMatchesExpected() {
+		t.Fatalf("expected both syncs to skip the failed bridges: %s", fexec.ErrorDesc())
+	}
+
+	// The deleted bridge is back with the same ports: the next check clears it.
+	ofm.ovsClient = newUplinkBridgeOVSClient(t, map[string]physPort{
+		"uup1": {physIntf: "eth2", ofport: 1},
+		"uup3": {physIntf: "eth4", ofport: 1},
+	})
+	ofm.checkUplinkBridgePorts()
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: "ovs-ofctl -O OpenFlow13 --bundle replace-flows uup3 -"})
+	if found, err := ofm.syncUplinkBridgeFlows("uup3"); !found || err != nil {
+		t.Fatalf("expected the gateway sync of the recreated bridge to succeed, got found=%v err=%v", found, err)
+	}
+	if !fexec.CalledMatchesExpected() {
+		t.Fatalf("expected the recreated bridge flows to be replaced: %s", fexec.ErrorDesc())
+	}
+}
+
 func TestOpenFlowManagerDeletesGroupCacheWithFlowCache(t *testing.T) {
 	ofm := &openflowManager{
 		defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),

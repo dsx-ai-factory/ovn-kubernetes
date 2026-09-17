@@ -44,6 +44,9 @@ type openflowManager struct {
 	// channel to indicate we need to update flows immediately
 	flowChan  chan struct{}
 	ovsClient libovsdbclient.Client
+	// portCheckFailed lists the uplink bridges whose last port check failed;
+	// their flows are not synced until a check passes.
+	portCheckFailed map[string]struct{}
 }
 
 type openflowBridge struct {
@@ -246,6 +249,12 @@ func (c *openflowManager) syncUplinkBridgeFlows(bridgeName string) (bool, error)
 
 	bridge, found := c.uplinkBridges[bridgeName]
 	if !found {
+		return false, nil
+	}
+	if _, failed := c.portCheckFailed[bridgeName]; failed {
+		// Reported as not found: a gateway programming the bridge retries,
+		// while a network leaving it only needs its configuration dropped.
+		klog.Errorf("Skipping flow sync for bridge %s because its port check failed", bridgeName)
 		return false, nil
 	}
 	if err := bridge.syncFlows(); err != nil {
@@ -453,11 +462,9 @@ func (c *openflowManager) requestFlowSync() {
 	}
 }
 
+// syncFlows syncs the flows of every managed bridge, skipping the uplink
+// bridges whose last port check failed.
 func (c *openflowManager) syncFlows() {
-	c.syncFlowsSkippingUplinkBridges(nil)
-}
-
-func (c *openflowManager) syncFlowsSkippingUplinkBridges(skippedUplinkBridges map[string]struct{}) {
 	if err := c.defaultBridge.syncFlows(); err != nil {
 		klog.Errorf("Failed to sync flows for bridge %s: %v",
 			c.defaultBridge.GetBridgeName(), err)
@@ -470,9 +477,12 @@ func (c *openflowManager) syncFlowsSkippingUplinkBridges(skippedUplinkBridges ma
 		}
 	}
 
+	c.uplinkBridgesMu.Lock()
+	failed := c.portCheckFailed
+	c.uplinkBridgesMu.Unlock()
 	_ = c.forEachUplinkBridge(func(bridgeName string, bridge *openflowBridge) error {
-		if _, skip := skippedUplinkBridges[bridgeName]; skip {
-			klog.Errorf("Skipping flow sync for bridge %s because port check failed", bridgeName)
+		if _, skip := failed[bridgeName]; skip {
+			klog.Errorf("Skipping flow sync for bridge %s because its port check failed", bridgeName)
 			return nil
 		}
 		if err := bridge.syncFlows(); err != nil {
@@ -719,14 +729,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 						continue
 					}
 				}
-				failedUplinkBridgeChecks := map[string]struct{}{}
-				for bridgeName, config := range c.getUplinkBridgePortConfigurations() {
-					if err := checkPorts(c.ovsClient, config.netConfigs, config.physIntf, config.ofPortPhys, "", ""); err != nil {
-						klog.Errorf("Checkports failed for bridge %s: %v", bridgeName, err)
-						failedUplinkBridgeChecks[bridgeName] = struct{}{}
-						continue
-					}
-				}
+				c.checkUplinkBridgePorts()
 				// Localnet topology patch ports are created and removed asynchronously by
 				// ovn-controller. Re-render static flows before each periodic sync so
 				// priority-102 NORMAL flows follow the current bridge membership.
@@ -734,7 +737,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 					klog.Errorf("Failed to refresh gateway bridge flows: %v", err)
 					continue
 				}
-				c.syncFlowsSkippingUplinkBridges(failedUplinkBridgeChecks)
+				c.syncFlows()
 			case <-c.localnetPortChan:
 				// Port events identify localnet ports but not their bridge membership,
 				// while Bridge events identify managed bridge membership changes but
@@ -757,6 +760,9 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 					timer.Reset(syncPeriod)
 				}
 			case <-c.flowChan:
+				// Requests reset the periodic timer: check the uplink bridge
+				// ports here too, or a bridge whose check failed stays skipped.
+				c.checkUplinkBridgePorts()
 				c.syncFlows()
 				timer.Reset(syncPeriod)
 			case <-stopChan:
@@ -884,9 +890,29 @@ func getOfport(ovsClient libovsdbclient.Client, name string) (string, error) {
 	return fmt.Sprintf("%d", *iface.Ofport), nil
 }
 
-// This assumes ofPortPhys doesn't change, which we'll still consider as fatal.
-// For the N/S gateway we should not have a situation where the patch's OF port changes,
-// so will make this check specific to localnet ports.
+// checkUplinkBridgePorts runs checkPorts on every uplink bridge and records
+// the bridges whose flows must not be synced until a check passes. An admin
+// may delete an Uplink bridge at any time: its ports vanish from OVSDB with
+// it and checkPorts would exit, so a bridge gone from OVSDB only skips its
+// sync. Its last network's cleanup deregisters it.
+func (c *openflowManager) checkUplinkBridgePorts() {
+	failed := map[string]struct{}{}
+	for bridgeName, config := range c.getUplinkBridgePortConfigurations() {
+		if _, err := ovsops.GetBridge(c.ovsClient, bridgeName); errors.Is(err, libovsdbclient.ErrNotFound) {
+			klog.Warningf("Uplink bridge %s no longer exists, skipping its port check", bridgeName)
+			failed[bridgeName] = struct{}{}
+			continue
+		}
+		if err := checkPorts(c.ovsClient, config.netConfigs, config.physIntf, config.ofPortPhys, "", ""); err != nil {
+			klog.Errorf("Checkports failed for bridge %s: %v", bridgeName, err)
+			failed[bridgeName] = struct{}{}
+		}
+	}
+	c.uplinkBridgesMu.Lock()
+	c.portCheckFailed = failed
+	c.uplinkBridgesMu.Unlock()
+}
+
 func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys, hostRepName, ofPortHost string) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
