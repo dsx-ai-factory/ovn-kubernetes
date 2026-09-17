@@ -1623,7 +1623,7 @@ func (udng *UserDefinedNetworkGateway) syncUplinkBridgeFlows() error {
 	}
 	if !found {
 		return newUplinkGatewayError(uplinkv1alpha1.UplinkStateReasonGatewayProgrammingFailed,
-			fmt.Errorf("uplink bridge %s not found", udng.openflowBridgeName))
+			fmt.Errorf("uplink bridge %s not found or failing its port check", udng.openflowBridgeName))
 	}
 	return nil
 }
