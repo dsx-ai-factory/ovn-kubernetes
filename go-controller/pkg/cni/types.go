@@ -193,9 +193,6 @@ type PodRequest struct {
 
 type PodInfoGetter interface {
 	getPod(namespace, name string) (*corev1.Pod, error)
-	// rateLimitedGetPod behaves like getPod but reports whether it performed a
-	// live apiserver read, so callers can bound how often they hit the apiserver.
-	rateLimitedGetPod(namespace, name string, useAPIServer bool) (*corev1.Pod, bool, error)
 }
 
 type ClientSet struct {
