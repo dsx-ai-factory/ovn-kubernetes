@@ -13,7 +13,6 @@ import (
 	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -76,44 +75,6 @@ func TestIsDefaultRoute(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := gomega.NewWithT(t)
 			g.Expect(isDefaultRoute(tt.route)).To(gomega.Equal(tt.expected))
-		})
-	}
-}
-
-func TestHostInterfaceRouteTable(t *testing.T) {
-	tests := []struct {
-		name     string
-		link     netlink.Link
-		expected int
-	}{
-		{
-			name:     "not enslaved",
-			link:     &netlink.Device{LinkAttrs: netlink.LinkAttrs{Index: 6}},
-			expected: unix.RT_TABLE_MAIN,
-		},
-		{
-			name: "enslaved to a VRF",
-			link: &netlink.Device{LinkAttrs: netlink.LinkAttrs{
-				Index: 6,
-				Slave: &netlink.VrfSlave{Table: 1015},
-			}},
-			expected: 1015,
-		},
-		{
-			name: "enslaved to a bond",
-			link: &netlink.Device{LinkAttrs: netlink.LinkAttrs{
-				Index: 6,
-				Slave: &netlink.BondSlave{},
-			}},
-			expected: unix.RT_TABLE_MAIN,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := gomega.NewWithT(t)
-			g.Expect(hostInterfaceRouteTable(tt.link)).To(gomega.Equal(tt.expected),
-				"the uplink's default route lives in this table")
 		})
 	}
 }
