@@ -10,6 +10,7 @@ import (
 	"net"
 	"sync/atomic"
 
+	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/stretchr/testify/mock"
 
 	corev1 "k8s.io/api/core/v1"
@@ -144,6 +145,31 @@ func newFakeKubeClientWithPod(pod *corev1.Pod) *fake.Clientset {
 	return fake.NewSimpleClientset(&corev1.PodList{Items: []corev1.Pod{*pod}})
 }
 
+// A host with quad-port ConnectX-9 cards presents pf0 through pf3 on every
+// card, and every PF has its own VF index space, so (pfId, vfId) names one
+// function per card. These are two cards of such a host, as reported by the
+// DPU serving it: the PF MAC and the eswitch device behind it are the only
+// things that tell the cards apart.
+const (
+	cardOnePFMAC   = "dc:73:fc:22:20:b0"
+	cardOneESwitch = "0005:06:00.0"
+	cardOneVF9Rep  = "A56c1pf0vf9"
+
+	cardTwoPFMAC   = "dc:73:fc:22:20:a0"
+	cardTwoESwitch = "0005:03:00.0"
+	cardTwoVF9Rep  = "A53c1pf0vf9"
+)
+
+// cx9PortParams builds the devlink port parameters sriovnet derives from a
+// ConnectX-9 host PF MAC. Host PFs are external functions of controller 1.
+func cx9PortParams(eswitch string, pfNumber uint16) *sriovnet.RepresentorPortParams {
+	return &sriovnet.RepresentorPortParams{
+		ECPF:             eswitch,
+		ControllerNumber: 1,
+		PFNumber:         pfNumber,
+	}
+}
+
 var _ = Describe("Node DPU tests", func() {
 	var sriovnetOpsMock utilMocks.SriovnetOps
 	var netlinkOpsMock utilMocks.NetLinkOps
@@ -161,6 +187,17 @@ var _ = Describe("Node DPU tests", func() {
 
 	origSriovnetOps := util.GetSriovnetOps()
 	origNetlinkOps := util.GetNetLinkOps()
+
+	// expectRepLookupByPFMAC registers the DPU side representor lookup for a
+	// pod whose connection details carry pfMac: the MAC resolves the card's
+	// eswitch port, then the VF index is resolved within that card.
+	expectRepLookupByPFMAC := func(pfMAC, eswitch string, vfIndex uint32, rep string) {
+		portParams := cx9PortParams(eswitch, 0)
+		sriovnetOpsMock.On("GetPFRepresentorPortParamsFromMAC", ovntest.MustParseMAC(pfMAC)).
+			Return(portParams, nil)
+		sriovnetOpsMock.On("GetVfRepresentorFromPortParams", portParams, vfIndex).
+			Return(rep, nil)
+	}
 
 	BeforeEach(func() {
 		Expect(config.PrepareTestConfig()).To(Succeed())
@@ -181,7 +218,7 @@ var _ = Describe("Node DPU tests", func() {
 		apbExternalRouteClient := adminpolicybasedrouteclient.NewSimpleClientset()
 		factoryMock = factorymocks.NodeWatchFactory{}
 		cnnci := newCommonNodeNetworkControllerInfo(nil, &kubeMock, apbExternalRouteClient, &factoryMock, nil, "", routeManager,
-			"", "", []string{"00:00:00:01:02:03"})
+			"", "", []string{cardOnePFMAC, cardTwoPFMAC})
 		dnnc = newDefaultNodeNetworkController(cnnci, nil, nil, routeManager, nil, nil)
 
 		podInformer = coreinformermocks.PodInformer{}
@@ -214,7 +251,7 @@ var _ = Describe("Node DPU tests", func() {
 		var scd util.DPUConnectionDetails
 
 		BeforeEach(func() {
-			vfRep = "pf0vf9"
+			vfRep = cardOneVF9Rep
 			vfPciAddress = "0000:03:00.0"
 			vfLink = &linkMock.Link{}
 			ip, ipnet, _ := net.ParseCIDR(fakeIP)
@@ -236,7 +273,7 @@ var _ = Describe("Node DPU tests", func() {
 			scd = util.DPUConnectionDetails{
 				PfId:      "0",
 				VfId:      "9",
-				PfMAC:     "00:00:00:01:02:03",
+				PfMAC:     cardOnePFMAC,
 				SandboxId: "a8d09931",
 			}
 			podAnnot, err := util.MarshalPodDPUConnDetails(nil, &scd, types.DefaultNetworkName)
@@ -248,8 +285,11 @@ var _ = Describe("Node DPU tests", func() {
 			sriovnetOpsMock.On("GetRepresentorVFMissPktRate", vfRep).Return(uint64(0), uint64(0), nil)
 		})
 
-		It("Fails if GetVfRepresentorDPU fails", func() {
-			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return("", fmt.Errorf("failed to get VF representor"))
+		It("Fails if the VF representor lookup fails", func() {
+			sriovnetOpsMock.On("GetPFRepresentorPortParamsFromMAC", ovntest.MustParseMAC(cardOnePFMAC)).
+				Return(cx9PortParams(cardOneESwitch, 0), nil)
+			sriovnetOpsMock.On("GetVfRepresentorFromPortParams", cx9PortParams(cardOneESwitch, 0), uint32(9)).
+				Return("", fmt.Errorf("failed to get VF representor"))
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
 			// call addRepPort()
@@ -259,8 +299,23 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
+		// The card's eswitch port is looked up by the published PF MAC, so a
+		// MAC no card reports must fail rather than degrade to the index
+		// lookup, which would resolve some other card's representor.
+		It("Fails without falling back to the index lookup if no card reports the PF MAC", func() {
+			sriovnetOpsMock.On("GetPFRepresentorPortParamsFromMAC", ovntest.MustParseMAC(cardOnePFMAC)).
+				Return(nil, fmt.Errorf("no matching devlink port found with MAC address %s", cardOnePFMAC))
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+
+			err := dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("no matching devlink port"))
+			sriovnetOpsMock.AssertNotCalled(GinkgoT(), "GetVfRepresentorDPU", mock.Anything, mock.Anything)
+			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+		})
+
 		It("Fails if GetPCIFromDeviceName fails", func() {
-			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+			expectRepLookupByPFMAC(cardOnePFMAC, cardOneESwitch, 9, vfRep)
 			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return("", fmt.Errorf("could not find PCI Address"))
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
@@ -271,8 +326,47 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
+		// Connection details written by an ovnkube-node-dpu-host that predates
+		// pfMac carry only the indices, so the legacy lookup must stay
+		// reachable for pods that are already running across an upgrade.
+		It("Uses the index lookup when pfMac is absent", func() {
+			scd.PfMAC = ""
+			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").
+				Return("", fmt.Errorf("index lookup reached"))
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+
+			err := dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)
+			Expect(err).To(MatchError(ContainSubstring("index lookup reached")))
+			sriovnetOpsMock.AssertNotCalled(GinkgoT(), "GetPFRepresentorPortParamsFromMAC", mock.Anything)
+			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+		})
+
+		// The regression test for quad-port ConnectX-9 hosts: pfId 0 / vfId 9
+		// exists on every card, so two pods reporting the same pair must plumb
+		// different representors. Both calls stop right after resolution,
+		// which is recorded on the connection details.
+		It("Resolves one pfId and vfId pair to a different representor per card", func() {
+			cardTwoSCD := scd
+			cardTwoSCD.PfMAC = cardTwoPFMAC
+
+			expectRepLookupByPFMAC(cardOnePFMAC, cardOneESwitch, 9, cardOneVF9Rep)
+			expectRepLookupByPFMAC(cardTwoPFMAC, cardTwoESwitch, 9, cardTwoVF9Rep)
+			sriovnetOpsMock.On("GetPCIFromDeviceName", cardOneVF9Rep).
+				Return("", fmt.Errorf("stop after resolution"))
+			sriovnetOpsMock.On("GetPCIFromDeviceName", cardTwoVF9Rep).
+				Return("", fmt.Errorf("stop after resolution"))
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
+
+			Expect(dnnc.addRepPort(&pod, &scd, types.DefaultNetworkName, ifInfo, clientset)).NotTo(Succeed())
+			Expect(dnnc.addRepPort(&pod, &cardTwoSCD, types.DefaultNetworkName, ifInfo, clientset)).NotTo(Succeed())
+
+			Expect(scd.ConnPrivateInfo.ConnVFRepName).To(Equal(cardOneVF9Rep))
+			Expect(cardTwoSCD.ConnPrivateInfo.ConnVFRepName).To(Equal(cardTwoVF9Rep))
+			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
+		})
+
 		It("Fails if configure OVS fails", func() {
-			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+			expectRepLookupByPFMAC(cardOnePFMAC, cardOneESwitch, 9, vfRep)
 			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
 			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 
@@ -298,7 +392,7 @@ var _ = Describe("Node DPU tests", func() {
 		})
 
 		It("Fails if configure OVS fails but OVS interface is added", func() {
-			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+			expectRepLookupByPFMAC(cardOnePFMAC, cardOneESwitch, 9, vfRep)
 			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
 			// Seed the harness with a pre-existing OVS port for vfRep owned by
 			// a different iface-id: cni.ConfigureOVS (libovsdb path) will fail
@@ -337,7 +431,7 @@ var _ = Describe("Node DPU tests", func() {
 			var ovsCleanup *libovsdbtest.Context
 
 			BeforeEach(func() {
-				sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(vfRep, nil)
+				expectRepLookupByPFMAC(cardOnePFMAC, cardOneESwitch, 9, vfRep)
 				sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return(vfPciAddress, nil)
 
 				// Seed an OVSDB harness with an empty br-int so cni.ConfigureOVS
@@ -432,7 +526,7 @@ var _ = Describe("Node DPU tests", func() {
 			scd = util.DPUConnectionDetails{
 				PfId:      "0",
 				VfId:      "9",
-				PfMAC:     "00:00:00:01:02:03",
+				PfMAC:     cardOnePFMAC,
 				SandboxId: "a8d09931",
 			}
 			sriovnetOpsMock.On("SetRepresentorVFMissPktRate", vfRep, uint(0), uint(0)).Return(nil)
@@ -500,5 +594,73 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
+	})
+
+	Context("podReadyToAddDPU", func() {
+		var scd util.DPUConnectionDetails
+
+		BeforeEach(func() {
+			scd = util.DPUConnectionDetails{
+				PfId:      "0",
+				VfId:      "9",
+				PfMAC:     cardOnePFMAC,
+				SandboxId: "a8d09931",
+			}
+		})
+
+		It("Claims a pod whose PF MAC belongs to one of this DPU's host PFs", func() {
+			annotations, err := util.MarshalPodDPUConnDetails(nil, &scd, types.DefaultNetworkName)
+			Expect(err).ToNot(HaveOccurred())
+			pod.Annotations = annotations
+
+			Expect(dnnc.podReadyToAddDPU(&pod, types.DefaultNetworkName)).To(Equal(&scd))
+		})
+
+		// A host PF served by another DPU shares the pfId and vfId space with
+		// this one, so the MAC is what keeps the two DPUs from both claiming
+		// the pod.
+		It("Ignores a pod whose PF MAC belongs to another DPU", func() {
+			scd.PfMAC = "dc:73:fc:21:fc:60"
+			annotations, err := util.MarshalPodDPUConnDetails(nil, &scd, types.DefaultNetworkName)
+			Expect(err).ToNot(HaveOccurred())
+			pod.Annotations = annotations
+
+			Expect(dnnc.podReadyToAddDPU(&pod, types.DefaultNetworkName)).To(BeNil())
+		})
+	})
+
+	Context("dpuConnectionDetailChanged", func() {
+		base := util.DPUConnectionDetails{
+			PfId:      "0",
+			VfId:      "9",
+			PfMAC:     cardOnePFMAC,
+			SandboxId: "a8d09931",
+		}
+		withField := func(mutate func(*util.DPUConnectionDetails)) *util.DPUConnectionDetails {
+			changed := base
+			mutate(&changed)
+			return &changed
+		}
+
+		DescribeTable("reports whether the pod needs replumbing",
+			func(older, newer *util.DPUConnectionDetails, expected bool) {
+				Expect(dpuConnectionDetailChanged(older, newer)).To(Equal(expected))
+			},
+			Entry("both absent", nil, nil, false),
+			Entry("details appeared", nil, &base, true),
+			Entry("details removed", &base, nil, true),
+			Entry("identical details", &base, &base, false),
+			// pfMac is the only field that changes when a pod moves to an
+			// identically indexed VF on another card, so missing it would
+			// leave the old card's representor plumbed.
+			Entry("PF MAC changed", &base,
+				withField(func(d *util.DPUConnectionDetails) { d.PfMAC = cardTwoPFMAC }), true),
+			Entry("PF index changed", &base,
+				withField(func(d *util.DPUConnectionDetails) { d.PfId = "1" }), true),
+			Entry("VF index changed", &base,
+				withField(func(d *util.DPUConnectionDetails) { d.VfId = "10" }), true),
+			Entry("sandbox changed", &base,
+				withField(func(d *util.DPUConnectionDetails) { d.SandboxId = "b9e1a042" }), true),
+		)
 	})
 })

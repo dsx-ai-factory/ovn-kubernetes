@@ -48,6 +48,8 @@ type SriovnetOps interface {
 	GetPfPciFromAux(auxDev string) (string, error)
 	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
 	GetPfRepresentorDPU(pfID string) (string, error)
+	GetPFRepresentorPortParamsFromMAC(mac net.HardwareAddr) (*sriovnet.RepresentorPortParams, error)
+	GetVfRepresentorFromPortParams(pp *sriovnet.RepresentorPortParams, vfIndex uint32) (string, error)
 	IsVfPciVfioBound(pciAddr string) bool
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error
@@ -131,6 +133,21 @@ func (defaultSriovnetOps) GetPfRepresentorDPU(pfID string) (string, error) {
 func (defaultSriovnetOps) GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {
 	//nolint:staticcheck
 	return sriovnet.GetVfRepresentorDPU(pfID, vfIndex)
+}
+
+// GetPFRepresentorPortParamsFromMAC returns the devlink port parameters (eswitch
+// device, controller number and PF number) of the host PF whose function MAC is
+// mac. Those parameters anchor GetVfRepresentorFromPortParams on one specific
+// eswitch, which a PF index alone cannot do on a host carrying several PFs with
+// the same index: every quad-port ConnectX-9 card exposes pf0 through pf3, so
+// the phys_port_name the deprecated GetVfRepresentorDPU matches on is shared by
+// every card. It errors when no port, or more than one port, reports mac.
+func (defaultSriovnetOps) GetPFRepresentorPortParamsFromMAC(mac net.HardwareAddr) (*sriovnet.RepresentorPortParams, error) {
+	return sriovnet.GetPFRepresentorPortParamsFromMAC(mac)
+}
+
+func (defaultSriovnetOps) GetVfRepresentorFromPortParams(pp *sriovnet.RepresentorPortParams, vfIndex uint32) (string, error) {
+	return sriovnet.GetVfRepresentorFromPortParams(pp, vfIndex)
 }
 
 func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error) {

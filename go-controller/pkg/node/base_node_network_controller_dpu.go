@@ -85,7 +85,7 @@ func (bnnc *BaseNodeNetworkController) delDPUPodForNAD(pod *corev1.Pod, dpuCD *u
 			errs = append(errs, fmt.Errorf("failed to remove the old DPU connection status annotation for %s: %v", podDesc, err))
 		}
 	}
-	vfRepName, err := util.GetDPUOps().GetPortRepresentor(dpuCD.PfId, dpuCD.VfId)
+	vfRepName, err := util.ResolveDPUConnectionRepresentor(dpuCD)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to get old VF representor for %s, dpuConnDetail %+v Representor port may have been deleted: %v", podDesc, dpuCD, err))
 	} else {
@@ -104,7 +104,10 @@ func dpuConnectionDetailChanged(oldDPUCD, newDPUCD *util.DPUConnectionDetails) b
 	if (oldDPUCD != nil && newDPUCD == nil) || (oldDPUCD == nil && newDPUCD != nil) {
 		return true
 	}
-	if oldDPUCD.PfId != newDPUCD.PfId ||
+	// PfMAC identifies which host PF the indices below belong to, so a pod
+	// reallocated to an identically indexed VF on another card changes only the
+	// MAC. Missing it would leave the old card's representor plumbed.
+	if oldDPUCD.PfId != newDPUCD.PfId || oldDPUCD.PfMAC != newDPUCD.PfMAC ||
 		oldDPUCD.VfId != newDPUCD.VfId || oldDPUCD.SandboxId != newDPUCD.SandboxId {
 		return true
 	}
@@ -280,7 +283,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	ifInfo *cni.PodInterfaceInfo, getter cni.PodInfoGetter) error {
 
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
-	vfRepName, err := util.GetDPUOps().GetPortRepresentor(dpuCD.PfId, dpuCD.VfId)
+	vfRepName, err := util.ResolveDPUConnectionRepresentor(dpuCD)
 	if err != nil {
 		klog.Infof("Failed to get VF representor for %s dpuConnDetail %+v: %v", podDesc, dpuCD, err)
 		return err

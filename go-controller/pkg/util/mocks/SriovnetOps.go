@@ -135,6 +135,36 @@ func (_m *SriovnetOps) GetPCIFromDeviceName(netdevName string) (string, error) {
 	return r0, r1
 }
 
+// GetPFRepresentorPortParamsFromMAC provides a mock function with given fields: mac
+func (_m *SriovnetOps) GetPFRepresentorPortParamsFromMAC(mac net.HardwareAddr) (*sriovnet.RepresentorPortParams, error) {
+	ret := _m.Called(mac)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPFRepresentorPortParamsFromMAC")
+	}
+
+	var r0 *sriovnet.RepresentorPortParams
+	var r1 error
+	if rf, ok := ret.Get(0).(func(net.HardwareAddr) (*sriovnet.RepresentorPortParams, error)); ok {
+		return rf(mac)
+	}
+	if rf, ok := ret.Get(0).(func(net.HardwareAddr) *sriovnet.RepresentorPortParams); ok {
+		r0 = rf(mac)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*sriovnet.RepresentorPortParams)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(net.HardwareAddr) error); ok {
+		r1 = rf(mac)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetPciFromNetDevice provides a mock function with given fields: name
 func (_m *SriovnetOps) GetPciFromNetDevice(name string) (string, error) {
 	ret := _m.Called(name)
@@ -613,6 +643,34 @@ func (_m *SriovnetOps) GetVfRepresentorDPU(pfID string, vfIndex string) (string,
 
 	if rf, ok := ret.Get(1).(func(string, string) error); ok {
 		r1 = rf(pfID, vfIndex)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetVfRepresentorFromPortParams provides a mock function with given fields: pp, vfIndex
+func (_m *SriovnetOps) GetVfRepresentorFromPortParams(pp *sriovnet.RepresentorPortParams, vfIndex uint32) (string, error) {
+	ret := _m.Called(pp, vfIndex)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetVfRepresentorFromPortParams")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*sriovnet.RepresentorPortParams, uint32) (string, error)); ok {
+		return rf(pp, vfIndex)
+	}
+	if rf, ok := ret.Get(0).(func(*sriovnet.RepresentorPortParams, uint32) string); ok {
+		r0 = rf(pp, vfIndex)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(*sriovnet.RepresentorPortParams, uint32) error); ok {
+		r1 = rf(pp, vfIndex)
 	} else {
 		r1 = ret.Error(1)
 	}

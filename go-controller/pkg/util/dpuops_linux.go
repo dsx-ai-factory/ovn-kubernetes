@@ -92,6 +92,14 @@ type DPUOps interface {
 	// the given index (e.g. "pf0hpf" on switchdev hardware).
 	GetPFRepresentor(pfId string) (string, error)
 
+	// GetPortRepresentorByPFMAC finds the DPU-side representor of the host
+	// function with index funcId on the host PF whose function MAC is pfMAC.
+	// Unlike GetPortRepresentor, the MAC anchors the lookup on one eswitch, so
+	// it stays unambiguous on hosts carrying several PFs with the same index -
+	// every quad-port ConnectX-9 card exposes pf0 through pf3, and all of them
+	// present the same phys_port_name on the DPU.
+	GetPortRepresentorByPFMAC(pfMAC net.HardwareAddr, funcId string) (string, error)
+
 	// GetHostPeerMACAddress returns the MAC of the host-side function peered
 	// with the given DPU representor. nodeName is the K8s node name of the
 	// host this DPU operates on behalf of; simulated platforms derive the
@@ -156,10 +164,11 @@ func IsSimulatedDPU() bool {
 // and only match c1/legacy phys_port_name patterns: multi-host DPUs
 // (controllers other than c1) and cards with more than two PFs cannot be
 // resolved this way, and (pfID, vfID) alone is ambiguous across DPUs and
-// controllers in any case. The way out is publishing an unambiguous anchor, the
-// MAC of the backing PF, and resolving through sriovnet's port params API
-// (GetPFRepresentorPortParamsFromMAC and the Get*RepresentorFromPortParams
-// lookups), which works on any controller and PF count.
+// controllers in any case. ResolveDPUConnectionRepresentor already resolves the
+// pod path through the MAC of the backing PF; doing the same here needs
+// UplinkState to publish that MAC, since hostMAC below is the MAC of the
+// function itself, which for a VF or SF is host owned and reads back as all
+// zeroes on the DPU.
 func FindHostRepresentorByFunction(pfID int32, vfID *int32, hostMAC net.HardwareAddr,
 	nodeName string) (string, error) {
 	function := HostFunctionName(pfID, vfID)
@@ -191,6 +200,34 @@ func FindHostRepresentorByFunction(pfID int32, vfID *int32, hostMAC net.Hardware
 			rep, function, peerMAC, hostMAC)
 	}
 	return rep, nil
+}
+
+// ResolveDPUConnectionRepresentor returns the DPU-side representor of the host
+// VF a pod's DPU connection details describe, resolved through PfMAC, the MAC
+// of the VF's parent host PF.
+//
+// PfId and VfId alone cannot identify a VF once a host carries several PFs with
+// the same index: PfId is the PCI function number of the parent PF, so every
+// quad-port ConnectX-9 card yields pf0 through pf3, and every PF has its own VF
+// index space starting at zero. PfMAC is the only identity the host and the DPU
+// share - even the PCI addresses differ between the two sides.
+//
+// The index pair is used on its own when PfMAC is absent, which covers
+// connection details written by an ovnkube-node-dpu-host that predates the
+// field, and simulated DPUs, where representor names are derived from the
+// indices and are unique per host. When PfMAC is present the lookup must
+// succeed or fail: falling back to the ambiguous index lookup could resolve a
+// representor belonging to another pod on a different card and attach it to
+// br-int. Callers retry on the next pod update, so failing closed is cheap.
+func ResolveDPUConnectionRepresentor(dpuCD *DPUConnectionDetails) (string, error) {
+	if dpuCD.PfMAC == "" || IsSimulatedDPU() {
+		return GetDPUOps().GetPortRepresentor(dpuCD.PfId, dpuCD.VfId)
+	}
+	pfMAC, err := net.ParseMAC(dpuCD.PfMAC)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse the published host PF MAC %q: %v", dpuCD.PfMAC, err)
+	}
+	return GetDPUOps().GetPortRepresentorByPFMAC(pfMAC, dpuCD.VfId)
 }
 
 // HostFunctionName renders a host function as pf<N> or pf<N>vf<M> for logs and
@@ -381,6 +418,23 @@ func (n *SwitchdevDPUOps) GetPortRepresentor(pfId, funcId string) (string, error
 
 func (n *SwitchdevDPUOps) GetPFRepresentor(pfId string) (string, error) {
 	return GetSriovnetOps().GetPfRepresentorDPU(pfId)
+}
+
+func (n *SwitchdevDPUOps) GetPortRepresentorByPFMAC(pfMAC net.HardwareAddr, funcId string) (string, error) {
+	portParams, err := GetSriovnetOps().GetPFRepresentorPortParamsFromMAC(pfMAC)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve the eswitch port of the host PF with MAC %s: %w", pfMAC, err)
+	}
+	vfIndex, err := strconv.ParseUint(funcId, 10, 32)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse VF index %q of the host PF with MAC %s: %v", funcId, pfMAC, err)
+	}
+	rep, err := GetSriovnetOps().GetVfRepresentorFromPortParams(portParams, uint32(vfIndex))
+	if err != nil {
+		return "", fmt.Errorf("failed to get the representor of VF %s on the host PF with MAC %s: %w",
+			funcId, pfMAC, err)
+	}
+	return rep, nil
 }
 
 func (n *SwitchdevDPUOps) GetHostPeerMACAddress(rep, _ string) (net.HardwareAddr, error) {
@@ -603,6 +657,12 @@ func (s *SimulatedDPUOps) GetPortRepresentor(pfId, funcId string) (string, error
 
 func (s *SimulatedDPUOps) GetPFRepresentor(string) (string, error) {
 	return "", fmt.Errorf("PF representor lookup is not supported in simulated DPU environments")
+}
+
+func (s *SimulatedDPUOps) GetPortRepresentorByPFMAC(net.HardwareAddr, string) (string, error) {
+	// Simulated deployments have no eswitch to query by MAC; their representor
+	// names are built from the index pair, which is unique per simulated host.
+	return "", fmt.Errorf("MAC anchored representor lookup is not supported in simulated DPU environments")
 }
 
 func (s *SimulatedDPUOps) GetHostPeerMACAddress(rep, nodeName string) (net.HardwareAddr, error) {
