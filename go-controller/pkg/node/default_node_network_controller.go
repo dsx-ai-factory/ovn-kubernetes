@@ -1379,7 +1379,7 @@ func (nc *DefaultNodeNetworkController) addOrUpdateNode(node *corev1.Node) error
 	// Process IPv4 addresses
 	for _, nodeIP := range ipsv4 {
 		addrs = append(addrs, nodeIP.String())
-		klog.Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
+		klog.V(6).Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
 		// Only add to nftables if this is remote node
 		if (config.IsModeDPUHost() || config.IsModeFull()) && node.Name != nc.name {
 			nftElems = append(nftElems, &knftables.Element{
@@ -1392,7 +1392,7 @@ func (nc *DefaultNodeNetworkController) addOrUpdateNode(node *corev1.Node) error
 	// Process IPv6 addresses
 	for _, nodeIP := range ipsv6 {
 		addrs = append(addrs, nodeIP.String())
-		klog.Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
+		klog.V(6).Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
 		// Only add to nftables if this is remote node
 		if (config.IsModeDPUHost() || config.IsModeFull()) && node.Name != nc.name {
 			nftElems = append(nftElems, &knftables.Element{

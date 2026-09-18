@@ -577,7 +577,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					klog.Errorf("%s: upon add event for %s: %v", r.name, r.ResourceHandler.ObjType, err)
 					return
 				}
-				klog.V(5).Infof("%s: add event received for %s %s", r.name, r.ResourceHandler.ObjType, key)
+				klog.V(6).Infof("%s: add event received for %s %s", r.name, r.ResourceHandler.ObjType, key)
 
 				r.DoWithLock(key, func(key string) {
 					// This only applies to pod watchers (pods + dynamic network policy handlers watching pods):
@@ -826,7 +826,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					// See: https://github.com/ovn-kubernetes/ovn-kubernetes/pull/3318#issuecomment-1349804450
 					if _, loaded := r.terminatedObjects.LoadAndDelete(key); loaded {
 						// object was already terminated
-						klog.V(5).Infof("%s: ignoring delete event for resource in terminal state %s %s",
+						klog.V(6).Infof("%s: ignoring delete event for resource in terminal state %s %s",
 							r.name, r.ResourceHandler.ObjType, key)
 						return
 					}
