@@ -461,6 +461,60 @@ if [[ ${ovnkube_node_mode} == "dpu" && -z ${ovn_k8s_node} ]]; then
   echo "Trying to run in DPU mode and couldn't get the required Host K8s Nodename. Exiting..."
   exit 1
 fi
+
+# dpu_refresh_host_k8s_nodename re-resolves, in DPU mode, the host node this DPU
+# serves and updates K8S_NODE accordingly.
+#
+# ovnkube-init.sh resolves the host node once, when the pod starts, and stores it in
+# OVS as external_ids:host-k8s-nodename (marking it with host-k8s-nodename-source).
+# Init containers do not re-run when a single container restarts, so if the host node
+# is deleted and re-added while the ovnkube-controller container is down (ovnkube exits
+# when its node is deleted), and possibly reprovisioned under a new name and address,
+# the stored name is stale and ovnkube would keep acting for a node that no longer
+# exists. Run the resolution again before starting ovnkube; it blocks until a host node
+# with this DPU's PF MAC label exists and fails otherwise, which keeps the container
+# crash-looping until the host node is back. Deployments that configure
+# host-k8s-nodename statically (no init container, e.g. dpu-simulator) carry no marker
+# and keep their name.
+dpu_refresh_host_k8s_nodename() {
+  local init_script=/root/ovnkube-init.sh
+  local source resolved
+  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
+    return 0
+  fi
+  source=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename-source | tr -d '\"')
+  if [[ ${source} != "ovnkube-init" ]]; then
+    echo "host-k8s-nodename was not resolved by ovnkube-init.sh, keeping K8S_NODE=${K8S_NODE}"
+    return 0
+  fi
+  if [[ ! -x ${init_script} || -z ${K8S_APISERVER:-} ]]; then
+    echo "WARNING: host-k8s-nodename was resolved by ovnkube-init.sh but it cannot be re-resolved here, keeping K8S_NODE=${K8S_NODE}"
+    return 0
+  fi
+  echo "=============== re-resolving the host k8s node of this DPU =========="
+  # Run in the background and wait, so that a TERM for this container is not
+  # deferred until the (possibly long) resolution completes.
+  OVNKUBE_INIT_RERUN=true ${init_script} &
+  if ! wait $!; then
+    echo "failed to re-resolve the host k8s node of this DPU. Exiting..."
+    exit 1
+  fi
+  resolved=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:host-k8s-nodename | tr -d '\"')
+  if [[ -z ${resolved} ]]; then
+    echo "host-k8s-nodename is not set after re-resolving the host k8s node. Exiting..."
+    exit 1
+  fi
+  if [[ ${resolved} != "${K8S_NODE}" ]]; then
+    echo "host k8s node of this DPU changed from ${K8S_NODE} to ${resolved}, overriding K8S_NODE"
+    K8S_NODE=${resolved}
+    ovn_pod_host=${K8S_NODE}
+  fi
+  # local-nb-ovsdb named the NB zone after the host node known at pod start;
+  # keep it in sync (idempotent).
+  if ! ovn-nbctl set NB_Global . name=${K8S_NODE} options:name=${K8S_NODE}; then
+    echo "WARNING: failed to set the NB zone name to ${K8S_NODE}"
+  fi
+}
 # OVNKUBE_ENABLE_KATA_DAN - enable Kata DAN config generation support
 ovnkube_enable_kata_dan=${OVNKUBE_ENABLE_KATA_DAN:-"false"}
 # Base directory of Kata Container's DAN(Directly Attachable Network) config
@@ -1524,6 +1578,9 @@ ovnkube-controller-with-node() {
 
   echo "=============== ovnkube-controller-with-node (wait for local NB/SB) =========="
   wait_for_event local_dbs_ready
+
+  # The host node this DPU serves may have changed while this container was down.
+  dpu_refresh_host_k8s_nodename
 
   # wait for northd to start
   wait_for_event process_ready ovn-northd
