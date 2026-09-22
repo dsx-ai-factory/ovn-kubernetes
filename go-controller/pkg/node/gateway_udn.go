@@ -23,7 +23,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	coreinformers "k8s.io/client-go/informers/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -78,7 +77,6 @@ type UserDefinedNetworkGateway struct {
 	util.NetInfo
 	// node that its programming things on
 	node          *corev1.Node
-	nodeInformer  coreinformers.NodeInformer
 	nodeLister    listers.NodeLister
 	kubeInterface kube.Interface
 	// vrf manager that creates and manages vrfs for all UDNs
@@ -152,13 +150,10 @@ type UserDefinedNetworkGateway struct {
 	isNetworkAdvertised             bool
 }
 
-func NewUserDefinedNetworkGateway(netInfo util.NetInfo, node *corev1.Node, nodeInformer coreinformers.NodeInformer,
+func NewUserDefinedNetworkGateway(netInfo util.NetInfo, node *corev1.Node, nodeLister listers.NodeLister,
 	kubeInterface kube.Interface, vrfManager *vrfmanager.Controller, ruleManager iprulemanager.Interface,
 	defaultNetworkGateway Gateway, ovsClient libovsdbclient.Client, uplinkStateInformer uplinkinformers.UplinkStateInformer,
 	uplinkStateGatewayStatusController *UplinkStateGatewayStatusController) (*UserDefinedNetworkGateway, error) {
-	if nodeInformer == nil {
-		return nil, fmt.Errorf("node informer has not been provided for network %s", netInfo.GetNetworkName())
-	}
 	if netInfo.Uplink() != "" {
 		if uplinkStateInformer == nil {
 			return nil, fmt.Errorf("UplinkState informer has not been provided for network %s", netInfo.GetNetworkName())
@@ -220,8 +215,7 @@ func NewUserDefinedNetworkGateway(netInfo util.NetInfo, node *corev1.Node, nodeI
 	udng := &UserDefinedNetworkGateway{
 		NetInfo:                            netInfo,
 		node:                               node,
-		nodeInformer:                       nodeInformer,
-		nodeLister:                         nodeInformer.Lister(),
+		nodeLister:                         nodeLister,
 		kubeInterface:                      kubeInterface,
 		vrfManager:                         vrfManager,
 		masqCTMark:                         masqCTMark,
@@ -659,7 +653,7 @@ func (udng *UserDefinedNetworkGateway) addNetworkWithResolvedUplink(
 	}
 
 	// TBD-merge udng.node.Name, needs lower case?
-	udng.mgmtPortController, err = managementport.NewUDNManagementPortController(udng.nodeInformer, udng.node.Name, nodeSubnets, udng.NetInfo)
+	udng.mgmtPortController, err = managementport.NewUDNManagementPortController(udng.nodeLister, udng.node.Name, nodeSubnets, udng.NetInfo)
 	if err != nil {
 		return fmt.Errorf("could not create management port for network %s, UDN management port controller init failure: %v",
 			udng.GetNetworkName(), err)

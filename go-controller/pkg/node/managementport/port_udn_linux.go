@@ -9,12 +9,10 @@ import (
 
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
-	coreinformers "k8s.io/client-go/informers/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/mgmtportdevice"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -24,19 +22,9 @@ type udnManagementPort interface {
 	delete() error
 }
 
-// UDNManagementPortController plumbs the management port of one network. Port
-// operations are serialized by lifecycle instead of by a lock: Create starts
-// the device watch only once the ports are plumbed, Delete drains it before
-// tearing them down, and the watch runs one reconcile at a time. This holds
-// because the network lifecycle never runs Create and Delete concurrently,
-// and because the controller is not reused after Delete.
 type UDNManagementPortController struct {
 	cfg   *udnManagementPortConfig
 	ports map[string]udnManagementPort
-	// deviceController follows the device published for this network. Only set
-	// where the device is not resolved locally, which today is a DPU.
-	deviceController *mgmtportdevice.Controller
-	nodeLister       listers.NodeLister
 }
 
 type udnManagementPortConfig struct {
@@ -59,9 +47,6 @@ func newUDNManagementPortConfig(nodeName string, networkLocalSubnets []*net.IPNe
 	}, nil
 }
 
-// Create plumbs the ports of this network's management port and then starts
-// following the device published for it, so that the first update reconciles
-// against plumbed state.
 func (c *UDNManagementPortController) Create() error {
 	for _, port := range c.ports {
 		err := port.create()
@@ -69,14 +54,10 @@ func (c *UDNManagementPortController) Create() error {
 			return err
 		}
 	}
-	return c.deviceController.Start()
+	return nil
 }
 
-// Delete stops following the device published for this network and then
-// removes the ports of its management port. Stopping waits for a device
-// update already in flight, so none can re-plumb behind the teardown.
 func (c *UDNManagementPortController) Delete() error {
-	c.deviceController.Stop()
 	for _, port := range c.ports {
 		err := port.delete()
 		if err != nil {
@@ -86,60 +67,9 @@ func (c *UDNManagementPortController) Delete() error {
 	return nil
 }
 
-// Reconcile re-plumbs the representor when the device published for this
-// network no longer matches the one in use. The representor is derived from
-// that device on DPUs, and it can change while the port is plumbed, which
-// otherwise leaves the DPU attached to a device the host has moved off.
-func (c *UDNManagementPortController) Reconcile() error {
-	rep, ok := c.ports[representorPort].(*udnManagementPortRep)
-	if !ok {
-		return nil
-	}
-
-	node, err := c.nodeLister.Get(c.cfg.nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get node %s: %v", c.cfg.nodeName, err)
-	}
-	mpdevs, err := util.ParseNodeManagementPortAnnotation(node)
-	if err != nil && !util.IsAnnotationNotSetError(err) {
-		return fmt.Errorf("failed to get management port details for network %s: %v", c.cfg.GetNetworkName(), err)
-	}
-	mpdev := mpdevs[c.cfg.GetNetworkName()]
-	if mpdev == nil {
-		// Nothing published to converge on. Tearing down here would disrupt a
-		// working port, and a deleted network is torn down through Delete.
-		return nil
-	}
-	repDevice, err := util.GetDPUOps().GetPortRepresentor(fmt.Sprintf("%d", mpdev.PfId), fmt.Sprintf("%d", mpdev.FuncId))
-	if err != nil {
-		return fmt.Errorf("failed to get management port representor for pfID %v vfID %v network %s: %v",
-			mpdev.PfId, mpdev.FuncId, c.cfg.GetNetworkName(), err)
-	}
-	if repDevice == rep.repDevice {
-		return nil
-	}
-
-	klog.Infof("Management port representor for network %s changed from %s to %s, re-plumbing",
-		c.cfg.GetNetworkName(), rep.repDevice, repDevice)
-	// The stale delete is idempotent, so a failure to create below is retried
-	// from here until the new representor is plumbed.
-	if err := rep.delete(); err != nil {
-		return fmt.Errorf("failed to delete stale management port representor %s for network %s: %v",
-			rep.repDevice, c.cfg.GetNetworkName(), err)
-	}
-	newRep := newUDNManagementPortRep(c.cfg, repDevice)
-	if err := newRep.create(); err != nil {
-		return fmt.Errorf("failed to create management port representor %s for network %s: %v",
-			repDevice, c.cfg.GetNetworkName(), err)
-	}
-	c.ports[representorPort] = newRep
-
-	return nil
-}
-
 // NewUDNManagementPortController creates a new management port controller for a primary UDN
 func NewUDNManagementPortController(
-	nodeInformer coreinformers.NodeInformer,
+	nodeLister listers.NodeLister,
 	nodeName string,
 	networkLocalSubnets []*net.IPNet,
 	netInfo util.NetInfo,
@@ -153,7 +83,6 @@ func NewUDNManagementPortController(
 		return nil, err
 	}
 
-	nodeLister := nodeInformer.Lister()
 	node, err := nodeLister.Get(nodeName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node %s: %v", nodeName, err)
@@ -180,9 +109,8 @@ func NewUDNManagementPortController(
 	}
 
 	c := &UDNManagementPortController{
-		cfg:        cfg,
-		nodeLister: nodeLister,
-		ports:      map[string]udnManagementPort{},
+		cfg:   cfg,
+		ports: map[string]udnManagementPort{},
 	}
 
 	if config.IsModeFull() && config.OvnKubeNode.MgmtPortDPResourceName == "" {
@@ -206,8 +134,6 @@ func NewUDNManagementPortController(
 				mpdev.PfId, mpdev.FuncId, netInfo.GetNetworkName(), err)
 		}
 		c.ports[representorPort] = newUDNManagementPortRep(cfg, repDeviceName)
-		// the host owns this device and can move it, so follow it
-		c.deviceController = mgmtportdevice.NewController(nodeName, netInfo.GetNetworkName(), nodeInformer, c)
 	case types.NodeModeDPUHost:
 		c.ports[netdevPort] = newUDNManagementPortNetdev(cfg, mgmtIfName, mpdev.DeviceId)
 	}
