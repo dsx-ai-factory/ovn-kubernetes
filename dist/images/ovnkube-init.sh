@@ -2,8 +2,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# This script is run by init container of static ovnkube-node Pod on VMAAS DPU,
+# This script is run by the init container of the ovnkube-node Pod on a VMAAS DPU,
 # it is used to populate the external_ids in OVS DB which is required by ovnkube-node.
+#
+# ovnkube.sh (ovnkube-controller-with-node, DPU mode) runs it again, with
+# OVNKUBE_INIT_RERUN=true, on every start of the ovnkube-controller container: the host
+# node this DPU serves may have been deleted and re-added, possibly reprovisioned under a
+# new name and address, while that container was down, and init containers do not re-run
+# on a container restart. The script must therefore stay idempotent; on a re-run the
+# settings that only the init container receives through the environment (VTEP and
+# gateway interface) fall back to the values already present in OVS.
 
 
 OVS_RUNDIR=/var/run/openvswitch
@@ -13,6 +21,10 @@ OVS_RUNDIR=/var/run/openvswitch
 # K8S_TOKEN alone. INSECURE: enable only when the API server endpoint and the network path to it
 # are trusted.
 ovnk8s_insecure_skip_tls_verify=${OVNK8S_INSECURE_SKIP_TLS_VERIFY:-"false"}
+
+# OVNKUBE_INIT_RERUN - set by ovnkube.sh when it re-runs this script from the
+# ovnkube-controller container (see the header).
+ovnkube_init_rerun=${OVNKUBE_INIT_RERUN:-"false"}
 
 # kubectl_opts is applied to every kubectl invocation through the wrapper below, so that the TLS
 # verification setting cannot be missed by a call site.
@@ -78,6 +90,9 @@ if [[ ${ovnk8s_insecure_skip_tls_verify} == "true" ]]; then
   echo "WARNING: Kubernetes API server certificate verification is disabled"
   kubectl_opts+=("--insecure-skip-tls-verify=true")
   cluster_tls="insecure-skip-tls-verify: true"
+elif [[ -n ${K8S_CACERT:-} && -s ${K8S_CACERT} ]]; then
+  # CA file, as ovnkube's --k8s-cacert accepts it.
+  cluster_tls="certificate-authority: $K8S_CACERT"
 else
   echo $K8S_CACERT_DATA | base64 -d > /tmp/k8s-cacert.crt
   cluster_tls="certificate-authority: /tmp/k8s-cacert.crt"
@@ -129,28 +144,61 @@ echo "find P0 MAC address: $mac"
 # Get k8s node by k8s.ovn.org/node-primary-mac-addr label
 mac="${mac//:/-}"
 
+# find_k8s_nodename sets k8s_nodename to the host cluster node this DPU serves:
+# the node labeled with the DPU's PF MAC address, preferring the most recently
+# registered one when several match. Returns 1 when no node matches yet.
+#
 # The label is applied by ovnkube-node running in dpu-host mode, which may not
 # have come up yet when the DPU boots, so this is retried by wait_for_event.
 find_k8s_nodename() {
-  local names
-  # Select with {.items[*]...} rather than {.items[0]...}: the latter makes
-  # kubectl fail with an "array index out of bounds" jsonpath error instead of
-  # returning an empty result when no node carries the label yet.
-  names=$(kubectl get node -l "k8s.ovn.org/node-primary-mac-addr=$mac" \
-    -o jsonpath='{.items[*].metadata.name}') || return 1
-  k8s_nodename=$(echo "$names" | awk '{print $1}')
-  [ -n "$k8s_nodename" ]
+  local nodes candidates
+  # One line per matching node: "<creationTimestamp> <name> <deletionTimestamp>",
+  # the last field being empty for a node that is not being deleted. Use
+  # {.items[*]...} rather than {.items[0]...}: the latter makes kubectl fail with
+  # an "array index out of bounds" jsonpath error instead of returning nothing
+  # when no node carries the label yet.
+  nodes=$(kubectl get node -l "k8s.ovn.org/node-primary-mac-addr=$mac" \
+    -o jsonpath='{range .items[*]}{.metadata.creationTimestamp} {.metadata.name} {.metadata.deletionTimestamp}{"\n"}{end}') || return 1
+  # A host reprovisioned under a new name can leave its old Node object behind
+  # for a while, still carrying the label: skip nodes being deleted (3 fields)
+  # and sort the rest newest first (RFC 3339 timestamps sort lexically).
+  candidates=$(echo "$nodes" | awk 'NF == 2 {print $1, $2}' | sort -r)
+  # First line = most recently registered node; empty when none matched yet.
+  k8s_nodename=$(echo "$candidates" | awk 'NR == 1 {print $2}')
+  [ -n "$k8s_nodename" ] || return 1
+  # More than one live candidate: report the ambiguity, the choice is made above.
+  if [ "$(echo "$candidates" | grep -c .)" -gt 1 ]; then
+    echo "WARNING: several nodes carry k8s.ovn.org/node-primary-mac-addr=$mac, using the newest: $k8s_nodename"
+    echo "$candidates"
+  fi
+  return 0
 }
 
 echo "Wait for k8s node with k8s.ovn.org/node-primary-mac-addr=$mac ..."
 wait_for_event attempts=60 find_k8s_nodename
 external_ids["host-k8s-nodename"]="$k8s_nodename"
 echo "set external_ids:host-k8s-nodename to ${external_ids["host-k8s-nodename"]}"
+# Marks the name as resolved by this script, so that ovnkube.sh knows it can
+# (and must) re-resolve it on a controller restart.
+external_ids["host-k8s-nodename-source"]="ovnkube-init"
+
+# current_external_id KEY prints the value of external_ids:KEY currently in OVS, if any.
+current_external_id() {
+  ovs-vsctl --if-exists get Open_vSwitch . "external_ids:$1" | tr -d '"'
+}
 
 # ovn-encap-ip
+# The VTEP interface is only known to the init container (environment); on a
+# re-run without it, keep the encap IP the init container derived at pod start.
+encap_ip=
+if [ "$ovnkube_init_rerun" = "true" ] && [ -z "${OVN_VTEP_IFACE:-}" ]; then
+  encap_ip=$(current_external_id ovn-encap-ip)
+fi
 OVN_VTEP_IFACE=${OVN_VTEP_IFACE:-br-dpu}
-encap_ip=$(ip -4 -o addr show dev $OVN_VTEP_IFACE scope global \
-  | awk '{print $4}' | grep -v '^169\.254\.' | head -n1)
+if [ -z "$encap_ip" ]; then
+  encap_ip=$(ip -4 -o addr show dev $OVN_VTEP_IFACE scope global \
+    | awk '{print $4}' | grep -v '^169\.254\.' | head -n1)
+fi
 if [ -z "$encap_ip" ]; then
   echo "failed to get ovn-encap-ip from interface $OVN_VTEP_IFACE"
   exit 1
@@ -159,27 +207,32 @@ external_ids["ovn-encap-ip"]=${encap_ip%/*}
 echo "set external_ids:ovn-encap-ip to ${external_ids["ovn-encap-ip"]}"
 
 # ovn-gw-interface
+if [ "$ovnkube_init_rerun" = "true" ] && [ -z "${OVN_GW_INTERFACE:-}" ]; then
+  OVN_GW_INTERFACE=$(current_external_id ovn-gw-interface)
+fi
 OVN_GW_INTERFACE=${OVN_GW_INTERFACE:-br-host}
 external_ids["ovn-gw-interface"]="$OVN_GW_INTERFACE"
 echo "set external_ids:ovn-gw-interface to ${external_ids["ovn-gw-interface"]}"
 
 # ovn-gw-router-subnet and ovn-gw-nexthop
-host_cidrs=$(kubectl get node $k8s_nodename -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/host-cidrs}')
-if [ -z "$host_cidrs" ]; then
-  echo "failed to get 'k8s.ovn.org/host-cidrs' annotation from node $k8s_nodename, exiting..."
-  exit 1
-fi
+# Both lookups are retried: the dpu-host ovnkube-node labels the node before it
+# writes host-cidrs, and a transient API error must not fail the container.
+get_host_cidrs() {
+  host_cidrs=$(kubectl get node $k8s_nodename -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/host-cidrs}') || return 1
+  [ -n "$host_cidrs" ]
+}
+get_node_ip() {
+  node_ip=$(kubectl get node $k8s_nodename -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}') || return 1
+  node_ip=$(echo $node_ip | awk '{print $1}')
+  [ -n "$node_ip" ]
+}
+wait_for_event attempts=24 get_host_cidrs
 host_cidrs=${host_cidrs//[\[\]\"]/}
 # The host may expose several CIDRs (e.g. 10.0.1.2/24, 172.17.0.1/16,
 # 7.243.100.81/31), so we cannot just pick the first entry. Use the node's K8s
 # InternalIP to select the matching host-cidr; that entry also carries the
 # correct prefix length used by the /31-vs-larger logic below.
-node_ip=$(kubectl get node $k8s_nodename -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
-node_ip=$(echo $node_ip | awk '{print $1}')
-if [ -z "$node_ip" ]; then
-  echo "failed to get InternalIP address from node $k8s_nodename, exiting..."
-  exit 1
-fi
+wait_for_event attempts=24 get_node_ip
 # Find the host-cidr whose address equals the node's InternalIP to recover its prefix.
 cidr=$(echo "$host_cidrs" | tr ',' '\n' | awk -F'/' -v ip="$node_ip" '$1==ip {print; exit}')
 if [ -z "$cidr" ]; then
