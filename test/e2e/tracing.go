@@ -57,23 +57,11 @@ var _ = ginkgo.Describe("Tracing", feature.Tracing, func() {
 		traceparent, linkedSpanID := newTraceparent()
 
 		netConfig := createLayer2NAD(ctx, f)
+		createPilotPod(ctx, f, netConfig)
+
 		podName := fmt.Sprintf("trace-e2e-%d", time.Now().UnixNano())
-		pod := e2epod.NewAgnhostPod(f.Namespace.Name, podName, nil, nil, nil)
-		if pod.Annotations == nil {
-			pod.Annotations = map[string]string{}
-		}
+		pod := newTestPod(f, podName, netConfig)
 		pod.Annotations[traceContextAnnotationKey] = traceparent
-		for key, value := range networkSelectionElements(nadapi.NetworkSelectionElement{
-			Name:      netConfig.name,
-			Namespace: netConfig.namespace,
-		}) {
-			pod.Annotations[key] = value
-		}
-		for i := range pod.Spec.Containers {
-			if pod.Spec.Containers[i].Name == "agnhost-container" {
-				pod.Spec.Containers[i].Command = []string{"sleep", "infinity"}
-			}
-		}
 
 		expectedSpans := [][]string{
 			{
@@ -159,6 +147,37 @@ func createLayer2NAD(ctx context.Context, f *framework.Framework) networkAttachm
 	framework.ExpectNoError(err)
 
 	return netConfig
+}
+
+// createPilotPod settles the layer2 network cluster controller, whose initial
+// sync allocates with spans suppressed. Waiting for the pilot to run proves the
+// sync is done, so the traced pod that follows emits allocation spans. The pilot
+// carries no traceparent, so it doesn't emit spans itself.
+func createPilotPod(ctx context.Context, f *framework.Framework, netConfig networkAttachmentConfig) {
+	podName := fmt.Sprintf("trace-e2e-pilot-%d", time.Now().UnixNano())
+
+	ginkgo.By("Creating a pilot pod to settle the layer2 network cluster controller")
+	e2epod.NewPodClient(f).CreateSync(ctx, newTestPod(f, podName, netConfig))
+}
+
+func newTestPod(f *framework.Framework, podName string, netConfig networkAttachmentConfig) *v1.Pod {
+	pod := e2epod.NewAgnhostPod(f.Namespace.Name, podName, nil, nil, nil)
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
+	for key, value := range networkSelectionElements(nadapi.NetworkSelectionElement{
+		Name:      netConfig.name,
+		Namespace: netConfig.namespace,
+	}) {
+		pod.Annotations[key] = value
+	}
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "agnhost-container" {
+			pod.Spec.Containers[i].Command = []string{"sleep", "infinity"}
+		}
+	}
+
+	return pod
 }
 
 func createTempoQueryPod(ctx context.Context, f *framework.Framework) *v1.Pod {
