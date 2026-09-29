@@ -787,7 +787,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 									r.name, r.ResourceHandler.ObjType, oldKey, newKey, err)
 								r.ResourceHandler.RecordErrorEvent(latest, "ErrorUpdatingResource", err)
 							} else {
-								klog.V(5).Infof("%s: failed to update %s, old=%s, new=%s, error: %v",
+								klog.V(6).Infof("%s: failed to update %s, old=%s, new=%s, error: %v",
 									r.name, r.ResourceHandler.ObjType, oldKey, newKey, err)
 							}
 							var retryEntry *retryObjEntry

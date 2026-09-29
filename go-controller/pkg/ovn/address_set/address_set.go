@@ -629,7 +629,7 @@ func (as *ovnAddressSet) addAddresses(addresses []string) ([]ovsdb.Operation, er
 		return nil, nil
 	}
 
-	klog.V(5).Infof("(%s) adding Addresses (%s) to address set", asDetail(as), uniqAddresses)
+	klog.V(6).Infof("(%s) adding Addresses (%s) to address set", asDetail(as), uniqAddresses)
 
 	addrset := nbdb.AddressSet{
 		UUID: as.uuid,
@@ -692,7 +692,7 @@ func (as *ovnAddressSet) deleteAddresses(addresses []string) ([]ovsdb.Operation,
 
 	uniqAddresses := getUniqueAddresses(addresses)
 
-	klog.V(5).Infof("(%s) deleting addresses %v from address set", asDetail(as), uniqAddresses)
+	klog.V(6).Infof("(%s) deleting addresses %v from address set", asDetail(as), uniqAddresses)
 
 	addrset := nbdb.AddressSet{
 		UUID: as.uuid,

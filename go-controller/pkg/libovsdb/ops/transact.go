@@ -43,7 +43,7 @@ func TransactAndCheck(c client.Client, ops []ovsdb.Operation) ([]ovsdb.Operation
 		return []ovsdb.OperationResult{{}}, nil
 	}
 
-	klog.V(5).Infof("Configuring OVN: %+v", ops)
+	klog.V(6).Infof("Configuring OVN: %+v", ops)
 
 	ctx, cancel := context.WithTimeout(context.TODO(), config.Default.OVSDBTxnTimeout)
 	defer cancel()

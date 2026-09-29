@@ -265,7 +265,7 @@ func (pol *internalAdminPBRPolicy) addPodToAddressSet(obj interface{}) {
 		return
 	}
 	if pod.Status.PodIP == "" || !pod.DeletionTimestamp.IsZero() || util.PodWantsHostNetwork(pod) {
-		klog.V(5).Infof("Skipping pod %s/%s for AdminPBR policy %s", pod.Namespace, pod.Name, pol.name)
+		klog.V(6).Infof("Skipping pod %s/%s for AdminPBR policy %s", pod.Namespace, pod.Name, pol.name)
 		return
 	}
 	pol.Lock()

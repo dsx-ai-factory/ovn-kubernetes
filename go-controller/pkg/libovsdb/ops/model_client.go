@@ -399,7 +399,7 @@ func (m *modelClient) mutate(lookUpModel interface{}, opModel *operationModel, m
 	if err != nil {
 		return nil, fmt.Errorf("unable to mutate model, err: %w", err)
 	}
-	klog.V(5).Infof("Mutate operations generated as: %+v", o)
+	klog.V(6).Infof("Mutate operations generated as: %+v", o)
 	return o, nil
 }
 
