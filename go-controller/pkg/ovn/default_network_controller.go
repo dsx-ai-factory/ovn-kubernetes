@@ -528,7 +528,9 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
 			nodeSync = nodeSync || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState)
 			_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-			clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) || oc.skipPinnedLSChanged(oldNode, newNode)
+			clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) ||
+				defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) ||
+				oc.skipPinnedLSChanged(oldNode, newNode) || nodeGatewayMTUSupportChanged(oldNode, newNode)
 			_, failed = oc.mgmtPortFailed.Load(newNode.Name)
 			mgmtSync := failed || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState)
 			_, failed = oc.gatewaysFailed.Load(newNode.Name)
