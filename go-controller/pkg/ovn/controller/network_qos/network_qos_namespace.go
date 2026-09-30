@@ -63,6 +63,19 @@ func (c *Controller) syncNetworkQoSNamespace(nsKey string) error {
 
 // getNetworkQosForNamespaceChange returns the set of NetworkQoS names that are affected by the namespace change
 func (c *Controller) getNetworkQosForNamespaceChange(nsKey string) (sets.Set[string], error) {
+	generation := c.historyGeneration.Load()
+	defer func() {
+		// Retry if policy membership changed while this snapshot was read.
+		if generation != c.historyGeneration.Load() {
+			c.nqosNamespaceQueue.Add(nsKey)
+		}
+	}()
+	nqoses, err := c.getAllNetworkQoSes()
+	if err != nil || len(nqoses) == 0 {
+		return nil, err
+	}
+	history, found := c.nsLabelsCache[nsKey]
+	historyKnown := found && history.generation == generation
 	ns, err := c.nqosNamespaceLister.Get(nsKey)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -72,32 +85,28 @@ func (c *Controller) getNetworkQosForNamespaceChange(nsKey string) (sets.Set[str
 		ns = &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              nsKey,
-				Labels:            c.nsLabelsCache[nsKey],
+				Labels:            history.labels,
 				DeletionTimestamp: &metav1.Time{Time: time.Now()},
 			},
 		}
 	}
-	if ns.ObjectMeta.DeletionTimestamp == nil && labels.Equals(c.nsLabelsCache[nsKey], ns.Labels) {
+	if historyKnown && ns.ObjectMeta.DeletionTimestamp == nil && labels.Equals(history.labels, ns.Labels) {
 		return nil, nil
 	}
 	networkQoSes := sets.Set[string]{}
-	nqoses, err := c.getAllNetworkQoSes()
-	if err != nil {
-		return nil, err
-	}
 	for _, nqos := range nqoses {
 		// check if any network selector or egress rule matches the namespace
-		if namespaceMatchesNetworkSelector(ns, nqos) || namespaceMatchesEgressRule(ns, nqos) {
+		if !historyKnown || namespaceMatchesNetworkSelector(ns, nqos) || namespaceMatchesEgressRule(ns, nqos) {
 			networkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 			continue
 		}
 		// check if namespace label change affects the network selection or egress selection
-		if ns.DeletionTimestamp == nil && (networkSelectionChanged(nqos, ns.Labels, c.nsLabelsCache[nsKey]) || egressSelectionChanged(nqos, ns.Labels, c.nsLabelsCache[nsKey])) {
+		if ns.DeletionTimestamp == nil && (networkSelectionChanged(nqos, ns.Labels, history.labels) || egressSelectionChanged(nqos, ns.Labels, history.labels)) {
 			networkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 		}
 	}
 	if ns.DeletionTimestamp == nil {
-		c.nsLabelsCache[nsKey] = ns.Labels
+		c.nsLabelsCache[nsKey] = labelHistory{labels: ns.Labels, generation: generation}
 	} else {
 		delete(c.nsLabelsCache, nsKey)
 	}

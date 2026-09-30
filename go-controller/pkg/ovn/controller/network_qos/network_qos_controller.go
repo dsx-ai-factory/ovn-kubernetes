@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	nadinformerv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
@@ -86,12 +87,21 @@ type Controller struct {
 	nadLister nadlisterv1.NetworkAttachmentDefinitionLister
 	nadSynced cache.InformerSynced
 
-	podLabelsCache map[string]map[string]string
-	podIPCache     map[string][]net.IP
-	nsLabelsCache  map[string]map[string]string
+	// Policy callbacks invalidate history without accessing the workers' maps.
+	historyGeneration atomic.Uint64
+	podLabelsCache    map[string]labelHistory
+	podIPCache        map[string][]net.IP
+	nsLabelsCache     map[string]labelHistory
 
 	handlerRegistrations []handlerRegistration
 	shutdownOnce         sync.Once
+}
+
+// labelHistory records the policy generation in which labels were observed.
+// Older generations may have missed events while no policies existed.
+type labelHistory struct {
+	labels     map[string]string
+	generation uint64
 }
 
 type handlerRegistration struct {
@@ -153,8 +163,8 @@ func NewController(
 		addressSetFactory: addressSetFactory,
 		nqosCache:         syncmap.NewSyncMap[*networkQoSState](),
 		nodeName:          nodeName,
-		podLabelsCache:    make(map[string]map[string]string),
-		nsLabelsCache:     make(map[string]map[string]string),
+		podLabelsCache:    make(map[string]labelHistory),
+		nsLabelsCache:     make(map[string]labelHistory),
 		podIPCache:        make(map[string][]net.IP),
 	}
 	initialized := false
@@ -325,6 +335,7 @@ func (c *Controller) onNQOSAdd(obj any) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
+	c.historyGeneration.Add(1)
 	c.nqosQueue.Add(key)
 }
 
@@ -364,6 +375,7 @@ func (c *Controller) onNQOSDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
+	c.historyGeneration.Add(1)
 	c.nqosQueue.Add(key)
 }
 
