@@ -5,11 +5,13 @@ package networkqos
 
 import (
 	"fmt"
+	"net"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
@@ -22,6 +24,10 @@ func newEventTestController(tb testing.TB) (*Controller, cache.Indexer) {
 	tb.Helper()
 	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 	c := &Controller{
+		podLabelsCache:     make(map[string]labelHistory),
+		podIPCache:         make(map[string][]net.IP),
+		nsLabelsCache:      make(map[string]labelHistory),
+		nqosPodLister:      corelisters.NewPodLister(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})),
 		NetInfo:            &util.DefaultNetInfo{},
 		nqosLister:         nqoslister.NewNetworkQoSLister(indexer),
 		nqosQueue:          workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[string]()),

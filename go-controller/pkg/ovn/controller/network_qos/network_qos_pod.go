@@ -127,6 +127,13 @@ func reconcilePodForDestinations(nqosState *networkQoSState, podNs *corev1.Names
 }
 
 func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string], error) {
+	generation := c.historyGeneration.Load()
+	defer func() {
+		// Retry if policy membership changed while this snapshot was read.
+		if generation != c.historyGeneration.Load() {
+			c.nqosPodQueue.Add(podKey)
+		}
+	}()
 	nqoses, err := c.getAllNetworkQoSes()
 	if err != nil || len(nqoses) == 0 {
 		return nil, err
@@ -135,6 +142,8 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 	if err != nil {
 		return nil, fmt.Errorf("failed to split pod key %s: %v", podKey, err)
 	}
+	history, found := c.podLabelsCache[podKey]
+	historyKnown := found && history.generation == generation
 	var podIPs []net.IP
 	pod, err := c.nqosPodLister.Pods(podNsStr).Get(podName)
 	if err != nil {
@@ -146,7 +155,7 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:         podNsStr,
 				Name:              podName,
-				Labels:            c.podLabelsCache[podKey],
+				Labels:            history.labels,
 				DeletionTimestamp: &metav1.Time{Time: time.Now()},
 			},
 		}
@@ -156,7 +165,7 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 		if podIPs, err = util.GetPodIPsOfNetwork(pod, c.NetInfo, resolver); err != nil {
 			klog.Errorf("Failed to get IPs from pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
-		if labels.Equals(c.podLabelsCache[podKey], pod.Labels) && util.IPsAreEqual(podIPs, c.podIPCache[podKey]) {
+		if historyKnown && labels.Equals(history.labels, pod.Labels) && util.IPsAreEqual(podIPs, c.podIPCache[podKey]) {
 			return nil, nil
 		}
 	}
@@ -165,6 +174,8 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 		// Namespace deletion can overtake queued Pod events. Its old labels
 		// are unavailable, so resync policies to remove stale source and
 		// destination addresses without guessing which selectors matched.
+		delete(c.podLabelsCache, podKey)
+		delete(c.podIPCache, podKey)
 		affected := sets.New[string]()
 		for _, nqos := range nqoses {
 			affected.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
@@ -176,7 +187,8 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 	}
 	affectedNetworkQoSes := sets.Set[string]{}
 	for _, nqos := range nqoses {
-		if podMatchesSourceSelector(pod, nqos) {
+		// Without history, the Pod may previously have matched any policy.
+		if !historyKnown || podMatchesSourceSelector(pod, nqos) {
 			affectedNetworkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 			continue
 		}
@@ -187,12 +199,12 @@ func (c *Controller) getNetworkQosForPodChange(podKey string) (sets.Set[string],
 				continue
 			}
 		}
-		if pod.DeletionTimestamp == nil && podSelectionChanged(nqos, pod.Labels, c.podLabelsCache[podKey]) {
+		if pod.DeletionTimestamp == nil && podSelectionChanged(nqos, pod.Labels, history.labels) {
 			affectedNetworkQoSes.Insert(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name))
 		}
 	}
 	if pod.DeletionTimestamp == nil {
-		c.podLabelsCache[podKey] = pod.Labels
+		c.podLabelsCache[podKey] = labelHistory{labels: pod.Labels, generation: generation}
 		c.podIPCache[podKey] = podIPs
 	} else {
 		delete(c.podLabelsCache, podKey)

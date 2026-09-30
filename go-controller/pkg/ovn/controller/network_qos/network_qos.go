@@ -190,7 +190,8 @@ func (c *Controller) ensureNetworkQos(nqos *networkqosapi.NetworkQoS) error {
 		// Handlers skipped pod/namespace events while no policy existed, so
 		// re-enqueue existing objects and let the pod and namespace workers
 		// rebuild their own label/IP caches (writing those maps here would race
-		// the single-writer workers). Re-reconciling a cached object is a no-op.
+		// the single-writer workers). Unchanged objects with history from the
+		// current generation are skipped.
 		pods, err := c.nqosPodLister.List(labels.Everything())
 		if err != nil {
 			klog.Errorf("%s: failed to list pods to seed caches on first NetworkQoS: %v", c.controllerName, err)
@@ -496,10 +497,11 @@ func (c *Controller) getLogicalSwitchName(nodeName string) string {
 }
 
 // hasNetworkQoS checks desired policy state, including policies that have not
-// reconciled yet. Events skipped while no policy exists are covered when the
-// first policy reconciles (resyncPods rebuilds address sets; ensureNetworkQos
-// re-enqueues existing objects). Do not use nqosCache here: a pod change during
-// the first reconciliation must still enqueue work.
+// reconciled yet. The first policy rebuilds address sets and queues existing
+// objects to seed history. Workers also resync policies when history is missing
+// or belongs to an older policy generation.
+// Do not use nqosCache here: a pod change during the first reconciliation must
+// still enqueue work.
 func (c *Controller) hasNetworkQoS() bool {
 	nqoses, err := c.getAllNetworkQoSes()
 	// Preserve event processing on lookup errors so workers can retry.
