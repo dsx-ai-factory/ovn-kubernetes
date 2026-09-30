@@ -108,6 +108,7 @@ func (c *Controller) syncNetworkQoS(key string) error {
 // matching pod or namespace changes.
 // This function need to be called with a lock held.
 func (c *Controller) ensureNetworkQos(nqos *networkqosapi.NetworkQoS) error {
+	firstPolicy := len(c.nqosCache.GetKeys()) == 0
 	desiredNQOSState := &networkQoSState{
 		name:      nqos.Name,
 		namespace: nqos.Namespace,
@@ -185,6 +186,36 @@ func (c *Controller) ensureNetworkQos(nqos *networkqosapi.NetworkQoS) error {
 		return fmt.Errorf("failed to delete stale QoSes: %w", err)
 	}
 	c.nqosCache.Store(joinMetaNamespaceAndName(nqos.Namespace, nqos.Name), desiredNQOSState)
+	if firstPolicy {
+		// Handlers skipped pod/namespace events while no policy existed, so
+		// re-enqueue existing objects and let the pod and namespace workers
+		// rebuild their own label/IP caches (writing those maps here would race
+		// the single-writer workers). Re-reconciling a cached object is a no-op.
+		pods, err := c.nqosPodLister.List(labels.Everything())
+		if err != nil {
+			klog.Errorf("%s: failed to list pods to seed caches on first NetworkQoS: %v", c.controllerName, err)
+		}
+		for _, pod := range pods {
+			key, err := cache.MetaNamespaceKeyFunc(pod)
+			if err != nil {
+				utilruntime.HandleError(fmt.Errorf("couldn't get key for pod %s/%s: %v", pod.Namespace, pod.Name, err))
+				continue
+			}
+			c.nqosPodQueue.Add(key)
+		}
+		namespaces, err := c.nqosNamespaceLister.List(labels.Everything())
+		if err != nil {
+			klog.Errorf("%s: failed to list namespaces to seed caches on first NetworkQoS: %v", c.controllerName, err)
+		}
+		for _, ns := range namespaces {
+			key, err := cache.MetaNamespaceKeyFunc(ns)
+			if err != nil {
+				utilruntime.HandleError(fmt.Errorf("couldn't get key for namespace %s: %v", ns.Name, err))
+				continue
+			}
+			c.nqosNamespaceQueue.Add(key)
+		}
+	}
 	if e := c.updateNQOSStatusToReady(nqos.Namespace, nqos.Name); e != nil {
 		return fmt.Errorf("successfully reconciled NetworkQoS %s/%s, but failed to patch status: %v", nqos.Namespace, nqos.Name, e)
 	}
@@ -465,9 +496,10 @@ func (c *Controller) getLogicalSwitchName(nodeName string) string {
 }
 
 // hasNetworkQoS checks desired policy state, including policies that have not
-// reconciled yet. Events skipped while the informer is empty are covered by
-// resyncPods when the first policy reconciles. Do not use nqosCache here: a pod
-// change during the first reconciliation must still enqueue work.
+// reconciled yet. Events skipped while no policy exists are covered when the
+// first policy reconciles (resyncPods rebuilds address sets; ensureNetworkQos
+// re-enqueues existing objects). Do not use nqosCache here: a pod change during
+// the first reconciliation must still enqueue work.
 func (c *Controller) hasNetworkQoS() bool {
 	nqoses, err := c.getAllNetworkQoSes()
 	// Preserve event processing on lookup errors so workers can retry.
