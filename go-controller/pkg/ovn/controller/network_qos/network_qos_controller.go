@@ -371,9 +371,11 @@ func (c *Controller) onNQOSNamespaceDelete(obj interface{}) {
 	if !c.hasNetworkQoS() {
 		return
 	}
-	key, err := cache.MetaNamespaceKeyFunc(obj)
+	// Derive the key first so key-only tombstones (DeletedFinalStateUnknown
+	// without a typed object) still enqueue the delete instead of being dropped.
+	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for namespace delete object %#v: %v", obj, err))
 		return
 	}
 	klog.V(5).Infof("Deleting Namespace in Network QoS %s", key)
@@ -448,9 +450,22 @@ func (c *Controller) onNQOSPodDelete(obj interface{}) {
 	if !c.hasNetworkQoS() {
 		return
 	}
-	key, err := cache.MetaNamespaceKeyFunc(obj)
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %#v", obj))
+			return
+		}
+		pod, ok = tombstone.Obj.(*corev1.Pod)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a Pod: %#v", tombstone.Obj))
+			return
+		}
+	}
+	key, err := cache.MetaNamespaceKeyFunc(pod)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for pod %+v: %v", pod, err))
 		return
 	}
 	klog.V(6).Infof("Deleting Pod Network QoS %s", key)
