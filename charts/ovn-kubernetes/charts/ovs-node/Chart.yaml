@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: ovs-node
+description: A Helm chart to deploy openvswitch as a daemonset
+type: application
+version: 1.5.0
+appVersion: "2026-05.963f58b0"

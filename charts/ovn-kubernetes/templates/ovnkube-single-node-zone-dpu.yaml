@@ -1,0 +1,29 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+DPF installs this umbrella chart as a DPUService and writes the values it derives from
+DPUService.spec.serviceDaemonSet at the chart root, as .Values.serviceDaemonSet. A Helm
+dependency only sees .Values.global and its own block, so those values never reach the
+ovnkube-single-node-zone-dpu DaemonSet on their own.
+
+Render the dependency's DaemonSet here instead, with the root serviceDaemonSet map applied
+over the subchart's own defaults. The subchart only defines the template, so the DaemonSet
+is still emitted exactly once, which DPF requires.
+*/ -}}
+{{- $subchart := index .Subcharts "ovnkube-single-node-zone-dpu" -}}
+{{- if and $subchart (index .Values.tags "ovnkube-single-node-zone-dpu") -}}
+{{- $values := deepCopy $subchart.Values -}}
+{{- $serviceDaemonSet := deepCopy ($values.serviceDaemonSet | default dict) -}}
+{{- /*
+Replace whole keys rather than merging into them: deep merging updateStrategy would, for
+example, leave the default rollingUpdate block in place under type: OnDelete, which the
+API server rejects.
+*/ -}}
+{{- range $key, $value := (.Values.serviceDaemonSet | default dict) -}}
+{{- $_ := set $serviceDaemonSet $key (deepCopy $value) -}}
+{{- end -}}
+{{- $_ := set $values "serviceDaemonSet" $serviceDaemonSet -}}
+{{- include "ovnkube-single-node-zone-dpu.daemonset" (dict "Values" $values "Release" .Release "Chart" $subchart.Chart "Capabilities" .Capabilities "Template" $subchart.Template "Files" $subchart.Files) -}}
+{{- end -}}

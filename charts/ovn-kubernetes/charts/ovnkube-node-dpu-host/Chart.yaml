@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: ovnkube-node-dpu-host
+description: A Helm chart to deploy host mode ovnkube-node to x86 nodes
+type: application
+version: 1.5.18
+appVersion: "2026-05.a8b97898"

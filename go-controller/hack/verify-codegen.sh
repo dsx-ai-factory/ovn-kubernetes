@@ -9,6 +9,7 @@ set -o pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 ROOT=$(cd "$HERE/.." && pwd -P)
 GITROOT=$(git -C "$ROOT" rev-parse --show-toplevel)
+CRDS_DIR=charts/ovn-kubernetes/charts/ovnkube-crds/crds
 
 cd "$ROOT"
 
@@ -16,14 +17,15 @@ echo "Regenerating generated code to verify it matches the committed tree"
 ./hack/update-codegen.sh
 
 # Generated Go lives under go-controller/pkg; CRD manifests are copied to
-# helm/ovn-kubernetes/crds. _output/ is gitignored so it does not affect this check.
-CHANGES=$(git -C "$GITROOT" status --porcelain -- go-controller/pkg helm/ovn-kubernetes/crds)
+# charts/ovn-kubernetes/charts/ovnkube-crds/crds.
+# _output/ is gitignored so it does not affect this check.
+CHANGES=$(git -C "$GITROOT" status --porcelain -- go-controller/pkg "$CRDS_DIR")
 if [ -n "$CHANGES" ]; then
     echo "ERROR: generated code is out of date."
     echo "Run 'make codegen' in go-controller/ and commit the result."
     echo "Offending files:"
     echo "$CHANGES"
-    git -C "$GITROOT" --no-pager diff -- go-controller/pkg helm/ovn-kubernetes/crds
+    git -C "$GITROOT" --no-pager diff -- go-controller/pkg "$CRDS_DIR"
     exit 1
 fi
 

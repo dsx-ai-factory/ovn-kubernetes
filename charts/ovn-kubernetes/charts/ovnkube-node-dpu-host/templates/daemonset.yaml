@@ -1,0 +1,389 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+# ovnkube-node-dpu-host
+# daemonset version 3
+# starts node daemons for ovs and ovn, each in a separate container
+# it is run on all nodes
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: ovnkube-node
+  namespace: {{ .Values.global.namespace }}
+  name: ovnkube-node-dpu-host-prometheus-discovery
+spec:
+  selector:
+    metrics: ovnkube-node
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: ovnkube-node-metrics
+    port: 9410
+    protocol: TCP
+    targetPort: 9410
+
+---
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  namespace: {{ .Values.global.namespace }}
+  name: ovnkube-node-dpu-host
+  annotations:
+    kubernetes.io/description: |
+      This DaemonSet launches the ovn-kubernetes networking components for worker nodes.
+spec:
+  selector:
+    matchLabels:
+      app: ovnkube-node-dpu-host
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app: ovnkube-node-dpu-host
+        name: ovnkube-node-dpu-host
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+        metrics: ovnkube-node
+      {{- with .Values.global.forceRestartNodeReason }}
+      annotations:
+        nais.nvidia.com/nodeRestartedFor: {{ . | quote }}
+      {{- end }}
+    spec:
+      serviceAccountName: ovn-node-dpu-host
+      automountServiceAccountToken: true
+      hostNetwork: true
+      dnsPolicy: Default
+      priorityClassName: "system-node-critical"
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: ovnkube-node
+          image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.image "Values" $.Values) }}
+          imagePullPolicy: "IfNotPresent"
+          command: ["/root/ovnkube.sh", "ovn-node"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 300Mi
+              {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
+              {{ .Values.mgmtPortVFResourceName }}: {{ .Values.mgmtPortVFsCount }}
+              {{- end }}
+            limits:
+              cpu: 500m
+              {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
+              {{ .Values.mgmtPortVFResourceName }}: {{ .Values.mgmtPortVFsCount }}
+              {{- end }}
+          securityContext:
+            runAsUser: 0
+            privileged: true
+          # ovnkube-node-liveness-check.sh checks
+          # - 10-ovn-kubernetes.conf is present
+          # - ovn-cni-server.sock is serving cni requests
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - /root/ovnkube-node-liveness-check.sh
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 5
+          # ovnkube-node-readiness-check.sh checks
+          # - whether the metrics server is running since it is one of the last things we do,
+          # - also checks if we can access KUBERNETES_SERVICE_HOST:KUBERNETES_SERVICE_PORT
+          # - also checks if we can access coredns service
+          readinessProbe:
+            exec:
+              command:
+              - /bin/bash
+              - /root/ovnkube-node-readiness-check.sh
+            initialDelaySeconds: 30
+            timeoutSeconds: 5
+            periodSeconds: 30
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+            # firewall-cmd needs /run/dbus
+            - mountPath: /host/run/dbus
+              name: host-var-run-dbus
+              readOnly: true
+            - mountPath: /var/run/dbus/
+              name: host-var-run-dbus
+              readOnly: true
+            - mountPath: /var/log/ovn-kubernetes/
+              name: host-var-log-ovnkube
+            # We mount our socket here
+            - mountPath: /var/run/ovn-kubernetes
+              name: host-var-run-ovn-kubernetes
+            {{- if and .Values.global.kata (eq .Values.global.kata.enableDAN true) }}
+            # mount kata container DAN config dir
+            - mountPath: /var/run/ovn-kubernetes/dans
+              name: host-kata-dan-config-dir
+            {{- end }}
+            # CNI related mounts which we take over
+            - mountPath: /opt/cni/bin
+              name: host-opt-cni-bin
+            - mountPath: /etc/cni/net.d
+              name: host-etc-cni-netd
+            # DHCP IPAM delegates to the dhcp CNI plugin, which talks to its
+            # daemon over /run/cni/dhcp.sock
+            - mountPath: /run/cni
+              name: host-run-cni
+            {{- if not .Values.global.noSystemd }}
+            # Mount systemd/private to the ovnkube containers.
+            # It allows listening for systemd events to track kubelet restart
+            - mountPath: /run/systemd/private
+              name: run-systemd
+              subPath: private
+              readOnly: true
+            {{- end }}
+            # ovnkube-node dpu-host mounts
+            - mountPath: /var/run/ovn
+              name: var-run-ovn
+            - mountPath: /var/run/netns
+              name: host-netns
+              mountPropagation: Bidirectional
+            {{- if .Values.global.enableOvnKubeIdentity }}
+            - mountPath: /host/etc/kubernetes
+              name: host-etc-kubernetes
+              readOnly: true
+            {{- end }}
+            {{- if or .Values.global.enableOvnKubeIdentity .Values.global.enableNetworkSegmentation }}
+            - mountPath: /var/lib/kubelet
+              name: host-var-lib-kubelet
+              readOnly: true
+            {{- end }}
+            {{- if .Values.global.enableNetworkSegmentation }}
+            - mountPath: /var/run/k8s.cni.cncf.io/devinfo/dp
+              name: host-devinfo-dp
+              readOnly: true
+            {{- end }}
+            - mountPath: /run/ovnkube-config
+              name: ovnkube-config
+              readOnly: true
+
+          env:
+            {{- if .Values.global.enableCoredumps }}
+            - name: GOTRACEBACK
+              value: "crash"
+            {{- end }}
+            - name: OVN_DAEMONSET_VERSION
+              value: "1.4.0"
+            - name: OVNKUBE_LOGLEVEL
+              value: "5"
+            - name: OVNKUBE_LOGFILE_MAXSIZE
+              value: "100"
+            - name: OVNKUBE_LOGFILE_MAXBACKUPS
+              value: "20"
+            - name: OVNKUBE_LOGFILE_MAXAGE
+              value: "20"
+            {{- if and .Values.global.metricsNodePprofPort (ne (toString .Values.global.metricsNodePprofPort) "0") }}
+            - name: OVN_METRICS_NODE_PPROF_PORT
+              value: {{ .Values.global.metricsNodePprofPort | quote }}
+            {{- end }}
+            - name: OVN_NET_CIDR
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: net_cidr
+            - name: OVN_SVC_CIDR
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: svc_cidr
+            - name: K8S_APISERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: k8s_apiserver
+            - name: OVN_MTU
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: mtu
+            - name: OVN_ROUTABLE_MTU
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: routable_mtu
+                  optional: true
+            - name: K8S_NODE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: K8S_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: OVN_GATEWAY_MODE
+              value: "shared"
+            - name: OVN_SIMULATE_DPU
+              value: {{ default "false" .Values.global.simulateDpu | quote }}
+            - name: OVN_DPU_HOST_GATEWAY_REPRESENTOR_INTERFACE
+              value: {{ default "" .Values.global.dpuHostGatewayRepresentorInterface | quote }}
+            - name: OVN_HYBRID_OVERLAY_ENABLE
+              value: {{ hasKey .Values.global "enableHybridOverlay" | ternary .Values.global.enableHybridOverlay false | quote }}
+            - name: OVN_HYBRID_OVERLAY_NET_CIDR
+              value: ""
+            - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+              value: {{ hasKey .Values.global "enableAdminNetworkPolicy" | ternary .Values.global.enableAdminNetworkPolicy false | quote }}
+            - name: OVN_EGRESSIP_ENABLE
+              value: {{ hasKey .Values.global "enableEgressIp" | ternary .Values.global.enableEgressIp false | quote }}
+            - name: OVN_EGRESSIP_HEALTHCHECK_PORT
+              value: {{ default "0" .Values.global.egressIpHealthCheckPort | quote }}
+            - name: OVN_EGRESSSERVICE_ENABLE
+              value: {{ hasKey .Values.global "enableEgressService" | ternary .Values.global.enableEgressService false | quote }}
+            - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+              value: {{ default "" .Values.global.enableMultiExternalGateway | quote }}
+            - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
+              value: ""
+            - name: OVN_DISABLE_PKT_MTU_CHECK
+              value: "true"
+            - name: OVN_DISABLE_FORWARDING
+              value: "false"
+            - name: OVN_NETFLOW_TARGETS
+              value: ""
+            - name: OVN_SFLOW_TARGETS
+              value: ""
+            - name: OVN_IPFIX_TARGETS
+              value: ""
+            - name: OVN_V4_JOIN_SUBNET
+              value: ""
+            - name: OVN_V6_JOIN_SUBNET
+              value: ""
+            - name: OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME
+              value: {{ .Values.mgmtPortVFResourceName | quote }}
+            - name: OVN_V4_MASQUERADE_SUBNET
+              value: {{ default "" .Values.global.v4MasqueradeSubnet | quote }}
+            - name: OVN_V6_MASQUERADE_SUBNET
+              value: {{ default "" .Values.global.v6MasqueradeSubnet | quote }}
+            - name: OVN_MULTICAST_ENABLE
+              value: {{ hasKey .Values.global "enableMulticast" | ternary .Values.global.enableMulticast false | quote }}
+            - name: OVN_EX_GW_NETWORK_INTERFACE
+              value: ""
+            - name: OVNKUBE_NODE_MODE
+              value: "dpu-host"
+            - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
+              value: {{ default "forOVN0" .Values.nodeMgmtPortNetdev | quote }}
+            - name: OVN_NETWORK_SEGMENTATION_ENABLE
+              value: {{ hasKey .Values.global "enableNetworkSegmentation" | ternary .Values.global.enableNetworkSegmentation false | quote }}
+            - name: OVN_NETWORK_CONNECT_ENABLE
+              value: {{ default "false" .Values.global.enableNetworkConnect | quote }}
+            - name: OVN_DYNAMIC_UDN_ALLOCATION
+              value: {{ default "false" .Values.global.enableDynamicUDNAllocation | quote }}
+            - name: OVN_DYNAMIC_UDN_GRACE_PERIOD
+              value: {{ default "" .Values.global.dynamicUDNGracePeriod | quote }}
+            - name: OVN_ROUTE_ADVERTISEMENTS_ENABLE
+              value: {{ default "false" .Values.global.enableRouteAdvertisements | quote }}
+            - name: OVN_UPLINK_ENABLE
+              value: {{ default "false" .Values.global.enableUplink | quote }}
+            - name: OVN_NO_OVERLAY_ENABLE
+              value: {{ default "false" .Values.global.enableNoOverlay | quote }}
+            - name: OVN_EVPN_ENABLE
+              value: {{ default "false" .Values.global.enableEVPN | quote }}
+            - name: OVN_ADVERTISED_UDN_ISOLATION_MODE
+              value: {{ default "strict" .Values.global.advertisedUDNIsolationMode | quote }}
+            - name: OVNKUBE_CLUSTER_DEFAULT_NAD
+              value: {{ include "ovn-kubernetes.getClusterDefaultNad" . | quote }}
+            - name: OVN_NETWORK_QOS_ENABLE
+              value: {{ default "false" .Values.global.enableNetworkQos | quote }}
+            - name: OVN_ENABLE_OVNKUBE_IDENTITY
+              value: {{ hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity false | quote }}
+            - name: OVN_MULTI_NETWORK_ENABLE
+              value: "true"
+            - name: OVN_HOST_NETWORK_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: ovn-config
+                  key: host_network_namespace
+            {{- if and .Values.global.kata (eq .Values.global.kata.enableDAN true) }}
+            - name: OVNKUBE_ENABLE_KATA_DAN
+              value: "true"
+            {{- end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: COREDNS_CLUSTER_IP
+              value: {{ include "ovn-kubernetes.corednsClusterIP" (dict "Values" $.Values) }}
+            {{- $disableFirewalld := hasKey .Values "disableFirewalld" | ternary .Values.disableFirewalld false }}
+            - name: OVNKUBE_DISABLE_FIREWALLD
+              value: {{ $disableFirewalld | quote }}
+            {{- if eq $disableFirewalld false }}
+            - name: OVNKUBE_ADMIN_FIREWALLD_ZONE
+              value: {{ default "admin" .Values.adminFirewalldZone | quote }}
+            {{- end }}
+        # end of container
+      volumes:
+        # Common volumes
+        - name: host-var-run-dbus
+          hostPath:
+            path: /var/run/dbus
+        - name: host-var-log-ovnkube
+          hostPath:
+            path: /var/log/ovn-kubernetes
+        - name: host-var-run-ovn-kubernetes
+          hostPath:
+            path: /var/run/ovn-kubernetes
+        {{- if and .Values.global.kata (eq .Values.global.kata.enableDAN true) }}
+        - name: host-kata-dan-config-dir
+          hostPath:
+            path: {{ .Values.global.kata.danConfigDir | default "/run/kata-containers/dans" }}
+            type: DirectoryOrCreate
+        {{- end }}
+        - name: host-opt-cni-bin
+          hostPath:
+            path: /opt/cni/bin
+        {{- if not .Values.global.noSystemd }}
+        # Mount systemd/private to the ovnkube containers.
+        # It allows listening for systemd events to track kubelet restart
+        - name: run-systemd
+          hostPath:
+            path: /run/systemd
+        {{- end }}
+        - name: host-etc-cni-netd
+          hostPath:
+            path: /etc/cni/net.d
+        - name: host-run-cni
+          hostPath:
+            path: /run/cni
+            type: DirectoryOrCreate
+        - name: var-run-ovn
+          emptyDir: {}
+        - name: ovnkube-config
+          configMap:
+            name: ovnkube-config
+        - name: host-netns
+          hostPath:
+            path: /var/run/netns
+        {{- if .Values.global.enableOvnKubeIdentity }}
+        - name: host-etc-kubernetes
+          hostPath:
+            path: /etc/kubernetes
+        {{- end }}
+        {{- if or .Values.global.enableOvnKubeIdentity .Values.global.enableNetworkSegmentation }}
+        - name: host-var-lib-kubelet
+          hostPath:
+            path: /var/lib/kubelet
+        {{- end }}
+        {{- if .Values.global.enableNetworkSegmentation }}
+        - name: host-devinfo-dp
+          hostPath:
+            path: /var/run/k8s.cni.cncf.io/devinfo/dp
+        {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

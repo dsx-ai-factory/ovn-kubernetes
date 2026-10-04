@@ -1,0 +1,322 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+# The network cidr and service cidr are set in the ovn-config configmap
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  namespace: {{ .Values.global.namespace }}
+  name: ovn-config
+data:
+  k8s_apiserver: {{ required "k8sAPIServer is required" .Values.k8sAPIServer }}
+  mtu: "{{ .Values.mtu | default 1500 }}"
+{{- if .Values.podNetwork }}
+  net_cidr: {{ .Values.podNetwork }}
+{{- else }}
+  {{ fail "podNetwork is required" }}
+{{- end }}
+  svc_cidr: {{ .Values.serviceNetwork }}
+  host_network_namespace: ovn-host-network
+  {{- with .Values.k8sToken }}
+  k8s_token: {{ . }}
+  {{- end }}
+  {{- with .Values.k8sCACertData }}
+  k8s_cacert_data: {{ . }}
+  {{- end }}
+
+---
+# ovnkube-config ConfigMap
+#
+# Configuration for ovnkube binaries
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ovnkube-config
+  namespace: {{ .Values.global.namespace }}
+data:
+  ovnkube.conf: |
+{{- if .Values.global.enableNoOverlay }}
+    [default]
+    transport = no-overlay
+
+    [no-overlay]
+{{- if .Values.global.enableNoOverlaySnat }}
+    outbound-snat = enabled
+{{- else }}
+    outbound-snat = disabled
+{{- end }}
+    routing = {{ if .Values.global.enableNoOverlayManagedRouting }}managed{{ else }}unmanaged{{ end }}
+{{- if .Values.global.enableNoOverlayManagedRouting }}
+
+    [bgp-managed]
+    as-number = {{ .Values.global.managedBGPASNumber | default 64512 }}
+    topology = {{ .Values.global.managedBGPTopology | default "full-mesh" }}
+    frr-namespace = {{ .Values.global.managedBGPFRRNamespace | default "frr-k8s-system" }}
+{{- end }}
+{{- end }}
+{{- /* Gate on a non-empty value rather than key presence, so both settings can
+       carry a documented empty default in values.yaml without emitting the
+       section for every deployment. */}}
+{{- $routingTableIDStart := .Values.global.routingTableIDStart | default "" }}
+{{- $kubeletCgroupPath := .Values.global.kubeletCgroupPath | default "" }}
+{{- if or $routingTableIDStart $kubeletCgroupPath }}
+
+    [ovnkubenode]
+{{- if $routingTableIDStart }}
+    routing-table-id-start = {{ $routingTableIDStart }}
+{{- end }}
+{{- if $kubeletCgroupPath }}
+    kubelet-cgroup-path = {{ $kubeletCgroupPath }}
+{{- end }}
+{{- end }}
+{{- if .Values.global.enableTracing }}
+    [ovnkubernetesfeature]
+    enable-tracing=true
+
+    [tracing]
+    endpoint={{ .Values.global.tracing.endpoint }}
+    use-tls={{ .Values.global.tracing.useTLS }}
+    {{- if .Values.global.tracing.useTLS }}
+    tls-insecure-skip-verify={{ .Values.global.tracing.tlsInsecureSkipVerify }}
+    tls-cacert={{ .Values.global.tracing.tlsCACert }}
+    {{- end }}
+    service-name={{ .Values.global.tracing.serviceName }}
+    sampling-rate={{ .Values.global.tracing.samplingRate }}
+    propagated-context-annotation-key={{ .Values.global.tracing.propagatedContextAnnotationKey }}
+    propagated-context-mode={{ .Values.global.tracing.propagatedContextMode }}
+    export-timeout={{ .Values.global.tracing.exportTimeout }}
+    batch-timeout={{ .Values.global.tracing.batchTimeout }}
+    max-export-batch-size={{ .Values.global.tracing.maxExportBatchSize }}
+    max-queue-size={{ .Values.global.tracing.maxQueueSize }}
+{{- end }}
+
+{{- if (and .Values.global.dockerConfigSecret .Values.global.dockerConfigSecret.create) }}
+---
+apiVersion: v1
+type: kubernetes.io/dockerconfigjson
+kind: Secret
+metadata:
+  namespace: {{ .Values.global.namespace }}
+  name: {{ .Values.global.imagePullSecretName }}
+data:
+  .dockerconfigjson: {{ include "ovn-kubernetes.dockerconfigjson" .Values.global.dockerConfigSecret | b64enc }}
+{{- end }}
+
+{{- if or .Values.global.skipCallToK8s (eq (include "ovn-kubernetes.needNamespace" .Values.global.namespace) "true") }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.global.namespace }}
+  labels:
+    admission.gatekeeper.sh/ignore: skip-opa-policy-check
+    securesystemsengineering.connaisseur/webhook: ignore
+{{- end }}
+
+{{- if or .Values.global.skipCallToK8s (eq (include "ovn-kubernetes.needNamespace" "ovn-host-network") "true") }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: "ovn-host-network"
+  labels:
+    admission.gatekeeper.sh/ignore: skip-opa-policy-check
+{{- end }}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ovn-misc
+  namespace: {{ .Values.global.namespace }}
+automountServiceAccountToken: false
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: {{ .Values.global.namespace }}
+  name: ovn-k8s-configmaps
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups:
+    - coordination.k8s.io
+    resources:
+    - leases
+    verbs:
+    - create
+    - get
+    - list
+    - update
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: {{ .Values.global.namespace }}
+  name: ovn-k8s-endpoints
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - endpoints
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: {{ .Values.global.namespace }}
+  name: only-ovnk8s-configmaps
+roleRef:
+  name: ovn-k8s-configmaps
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    namespace: {{ .Values.global.namespace }}
+    name: ovn-misc
+  {{- if default false (index .Values.tags "ovs-node") }}
+  - kind: ServiceAccount
+    namespace: {{ .Values.global.namespace }}
+    name: ovn-ovs
+  {{- end }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: {{ .Values.global.namespace }}
+  name: only-ovnk8s-endpoints
+roleRef:
+  name: ovn-k8s-endpoints
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    namespace: {{ .Values.global.namespace }}
+    name: ovn-misc
+  {{- if default false (index .Values.tags "ovs-node") }}
+  - kind: ServiceAccount
+    namespace: {{ .Values.global.namespace }}
+    name: ovn-ovs
+  {{- end }}
+
+{{- if default false (index .Values.tags "ovs-node") }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ovn-ovs
+  namespace: {{ .Values.global.namespace }}
+{{- if .Values.global.imagePullSecretName }}
+imagePullSecrets:
+  - name: {{ .Values.global.imagePullSecretName }}
+{{- end }}
+automountServiceAccountToken: false
+
+---
+# RBAC policies for ovn-ovs SA
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ovn-k8s-namespace
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    resourceNames:
+      - {{ .Values.global.namespace }}
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: only-ovnk8s-namespace
+roleRef:
+  name: ovn-k8s-namespace
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    namespace: {{ .Values.global.namespace }}
+    name: ovn-ovs
+{{- end }}
+
+{{- if .Values.global.advertiseDefaultNetwork }}
+---
+apiVersion: k8s.ovn.org/v1
+kind: RouteAdvertisements
+metadata:
+  name: advertise-default-network
+spec:
+  networkSelectors:
+    - networkSelectionType: DefaultNetwork
+  nodeSelector: {}
+  frrConfigurationSelector:
+    matchLabels:
+{{ toYaml (.Values.global.frrConfigDefaultNetworkLabels | default (dict "name" "receive-all")) | nindent 6 }}
+  advertisements:
+    - PodNetwork
+{{- end }}
+
+{{- if .Values.global.advertiseAllTenantCUDNs }}
+---
+apiVersion: k8s.ovn.org/v1alpha1
+kind: Uplink
+metadata:
+  name: vm-uplink
+spec:
+  nodeConfigs:
+    - type: OVSBridge
+      hostInterfaceName: {{ .Values.global.vmUplinkInterfaceName | quote }}
+      nodeSelector: {}
+
+---
+apiVersion: k8s.ovn.org/v1
+kind: RouteAdvertisements
+metadata:
+  name: advertise-tenant-cudns
+spec:
+  networkSelectors:
+    - clusterUserDefinedNetworkSelector:
+        networkSelector:
+          matchLabels:
+            created_by: launchlayer-vpc
+          matchExpressions:
+            - key: uses_uplink
+              operator: DoesNotExist
+      networkSelectionType: ClusterUserDefinedNetworks
+  nodeSelector: {}
+  frrConfigurationSelector:
+    matchLabels:
+{{ toYaml (.Values.global.frrConfigDefaultNetworkLabels | default (dict "name" "receive-all")) | nindent 6 }}
+  advertisements:
+    - PodNetwork
+
+---
+apiVersion: k8s.ovn.org/v1
+kind: RouteAdvertisements
+metadata:
+  name: advertise-tenant-cudns-over-vrf
+spec:
+  networkSelectors:
+    - clusterUserDefinedNetworkSelector:
+        networkSelector:
+          matchLabels:
+            created_by: launchlayer-vpc
+            uses_uplink: "true"
+      networkSelectionType: ClusterUserDefinedNetworks
+  nodeSelector: {}
+  frrConfigurationSelector:
+    matchLabels:
+{{ toYaml (.Values.global.frrConfigTenantCUDNLabels | default (dict "name" "receive-all")) | nindent 6 }}
+  advertisements:
+    - PodNetwork
+  targetVRF: auto
+{{- end }}

@@ -1,0 +1,95 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Default values for ovnkube-single-node-zone-dpu.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- run the ovnkube containers inside this VRF, e.g. mgmt. Empty runs them in the default VRF.
+execInVrf: ""
+# -- OVS datapath type used on the DPU, e.g. netdev
+ovnDatapathType: ""
+
+spiffeDerivedK8sToken:
+  # -- read the K8s token from a file injected by DSX instead of the
+  # ServiceAccount token. Requires OVN images that support it and DSX
+  # injection running before ovnkube-init, with a startup probe that waits
+  # for the initial token to be written. Disabled preserves the existing
+  # K8S_TOKEN configuration.
+  enabled: false
+  # -- token file available to both ovnkube-init and ovnkube-controller
+  k8sTokenFile: ""
+  # -- additional mounts for ovnkube-init. When enabled, the chart declares
+  # the dsx-token volume and DSX admission mounts it into the regular
+  # containers, so ovnkube-init has to mount it explicitly. Referenced volumes
+  # must exist in the Pod.
+  initContainerExtraVolumeMounts: []
+
+ovnkubeSingleNodeZone:
+  logging:
+    level: "5"
+
+ovnkubeSingleNodeZoneNbdb:
+  logging:
+    level: "-vconsole:info -vfile:info"
+
+ovnkubeSingleNodeZoneSbdb:
+  logging:
+    level: "-vconsole:info -vfile:info"
+
+ovnkubeSingleNodeZoneNorthd:
+  logging:
+    level: "-vconsole:info -vfile:info"
+
+ovnkubeSingleNodeZoneOvnHost:
+  logging:
+    level: "-vconsole:info"
+
+# DPU-side networking parameters consumed by the ovnkube-init script
+# These are passed to the ovnkube-init initContainer.
+ovnVtepIface: ""
+ovnGwInterface: ""
+ovnGwVlanId: ""
+
+# Skip verification of the DPU host cluster's Kubernetes API server certificate, so that
+# k8s_cacert_data is not needed and the DPU authenticates with k8s_token (for example a
+# SPIFFE/SPIRE issued token) alone. INSECURE: this disables API server certificate validation,
+# so enable it only when the API server endpoint and the network path to it are trusted.
+dpuHostClusterK8sSkipTLSVerify: false
+
+# Metrics bind address/ports for ovnkube-node-dpu (scraped locally by otel on DPU)
+ovnMetricsEndpointIp: "127.0.0.1"
+ovnMetricsWorkerPort: "9410"
+ovnMetricsBindPort: "9410"
+
+# Additional node pinning for the DaemonSet, on top of serviceDaemonSet.nodeSelector below.
+nodeSelector: {}
+
+tolerations:
+- operator: "Exists"
+
+# DPUService interface.
+# DPF populates this map from DPUService.spec.serviceDaemonSet at the umbrella-chart
+# root, and the parent chart overrides the keys below with whatever DPF supplied, so any
+# key it omits keeps the default here.
+serviceDaemonSet:
+  # Rendered as nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution; defaults to
+  # arm64 (DPU) nodes only.
+  nodeSelector:
+    nodeSelectorTerms:
+    - matchExpressions:
+      - key: kubernetes.io/arch
+        operator: In
+        values:
+        - arm64
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+  # Flat resource map merged over the ovnkube-controller container's requests and limits,
+  # e.g. {cpu: 200m, memory: 1Gi} or {nvidia.com/bf_sf: 1}.
+  resources: {}
+  # Pod labels and annotations. DPF adds svc.dpu.nvidia.com/service, which the DPUService
+  # controller matches on for privileged pod enforcement, so it must not be stripped.
+  labels: {}
+  annotations: {}

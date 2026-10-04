@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: ovnkube-crds
+description: Helm chart to install CRDs for ovn-kubernetes
+type: application
+version: 1.5.17
+appVersion: "2026-05.5f30cf40"

@@ -61,6 +61,7 @@ deepcopy-gen \
   github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types
 
 mkdir -p _output/crds
+rm -f _output/crds/k8s.ovn.org_*.yaml
 
 for crd in ${crds}; do
 
@@ -169,30 +170,7 @@ echo "Editing EgressQoS CRD"
 sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
 	_output/crds/k8s.ovn.org_egressqoses.yaml
 
-echo "Copying the CRDs to helm/ovn-kubernetes/crds... Add them to your commit..."
-echo "Copying egressFirewall CRD"
-cp _output/crds/k8s.ovn.org_egressfirewalls.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_egressfirewalls.yaml
-echo "Copying egressIP CRD"
-cp _output/crds/k8s.ovn.org_egressips.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_egressips.yaml
-echo "Copying egressQoS CRD"
-cp _output/crds/k8s.ovn.org_egressqoses.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_egressqoses.yaml
-echo "Copying adminpolicybasedexternalroutes CRD"
-cp _output/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_adminpolicybasedexternalroutes.yaml
-echo "Copying egressService CRD"
-cp _output/crds/k8s.ovn.org_egressservices.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_egressservices.yaml
-echo "Copying networkQoS CRD"
-cp _output/crds/k8s.ovn.org_networkqoses.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_networkqoses.yaml
-echo "Copying userdefinednetworks CRD"
-cp _output/crds/k8s.ovn.org_userdefinednetworks.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_userdefinednetworks.yaml
-echo "Copying clusteruserdefinednetworks CRD"
-cp _output/crds/k8s.ovn.org_clusteruserdefinednetworks.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_clusteruserdefinednetworks.yaml
-echo "Copying routeAdvertisements CRD"
-cp _output/crds/k8s.ovn.org_routeadvertisements.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_routeadvertisements.yaml
-echo "Copying clusterNetworkConnect CRD"
-cp _output/crds/k8s.ovn.org_clusternetworkconnects.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_clusternetworkconnects.yaml
-echo "Copying vtep CRD"
-cp _output/crds/k8s.ovn.org_vteps.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_vteps.yaml
-echo "Copying uplink CRD"
-cp _output/crds/k8s.ovn.org_uplinks.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_uplinks.yaml
-echo "Copying uplinkstate CRD"
-cp _output/crds/k8s.ovn.org_uplinkstates.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_uplinkstates.yaml
+CRDS_DIR=../charts/ovn-kubernetes/charts/ovnkube-crds/crds
+echo "Copying the CRDs to ${CRDS_DIR}... Add them to your commit..."
+rm -f "${CRDS_DIR}"/k8s.ovn.org_*.yaml
+cp _output/crds/k8s.ovn.org_*.yaml "${CRDS_DIR}/"

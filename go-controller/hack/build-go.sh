@@ -28,7 +28,7 @@ build_binaries() {
     set -x
     for bin in "$@"; do
         binbase=$(basename ${bin})
-        env CGO_ENABLED=0 GOPRIVATE=gitlab-master.nvidia.com "$GO" build -v \
+        env CGO_ENABLED=0 "$GO" build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID} \

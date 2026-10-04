@@ -12,6 +12,9 @@ make clean
 make
 ```
 
+`hack/build-go.sh` inherits `GOPRIVATE` from the environment; export it before
+running `make` if private modules are needed.
+
 Then find the executables here : go-controller/_output/go/bin/
 
 'ovnkube' is the single all-in-one executable useful for deploying the ovn cni plugin for a kubernetes deployment

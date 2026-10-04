@@ -1,0 +1,34 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $clusterDefaultNad := include "ovn-kubernetes.getClusterDefaultNad" . }}
+{{- if not (contains "/" $clusterDefaultNad) }}
+  {{- fail "clusterDefaultNad must be in the format of namespace/name" }}
+{{- end }}
+{{- $nameDict := split "/" $clusterDefaultNad }}
+{{- $nadNs := $nameDict._0 }}
+{{- $nadName := $nameDict._1 }}
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: {{ $nadName }}
+  namespace: {{ $nadNs }}
+  {{- with .Values.ovnPrimaryNADAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    kubernetes.io/metadata.name: {{ $nadName }}
+spec:
+  config: '{
+    "cniVersion" : "0.4.0",
+    "name" : "{{ $nadName }}",
+    "netAttachDefName": "{{ $nadNs }}/{{ $nadName }}",
+    "type" : "ovn-k8s-cni-overlay",
+    "logFile": "/var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log",
+    "logLevel": "5",
+    "logfile-maxsize": 100,
+    "logfile-maxbackups": 5,
+    "logfile-maxage": 5
+    }'

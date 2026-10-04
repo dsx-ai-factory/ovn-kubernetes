@@ -1,0 +1,1065 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "ovn-kubernetes values",
+  "type": "object",
+  "properties": {
+    "tags": {
+      "type": "object",
+      "properties": {
+        "ovs-node": {
+          "type": "boolean"
+        },
+        "ovnkube-identity": {
+          "type": "boolean"
+        },
+        "ovnkube-node-dpu-host": {
+          "type": "boolean"
+        },
+        "ovnkube-single-node-zone-dpu": {
+          "type": "boolean"
+        },
+        "ovnkube-crds": {
+          "type": "boolean"
+        },
+        "ovnkube-control-plane": {
+          "type": "boolean"
+        },
+        "ovnkube-single-node-zone": {
+          "type": "boolean"
+        }
+      },
+      "description": "Subchart toggles."
+    },
+    "k8sAPIServer": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "K8s API Server address"
+    },
+    "podNetwork": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "OVN Pod Network CIDR. The primary interface of the Pod is assigned IP from this range. These IPs are overlay IPs. Every K8s node will get a /26 subnet (from the /16) and Pods landing on that node will get IP from the /26 subnet. Based on the cluster size, /16 can be adjusted. Similarly, based on the pod-density on the node, /26 can be adjusted."
+    },
+    "serviceNetwork": {
+      "type": "string",
+      "description": "K8s Service IP range"
+    },
+    "mtu": {
+      "type": "integer",
+      "description": "MTU of the primary network of the Pod"
+    },
+    "k8sCACertData": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "host k8s cluster's CA certificate"
+    },
+    "k8sToken": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "JWT token for the host k8s cluster"
+    },
+    "global": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "namespace where all the OVN K8s components' resources must be deployed"
+        },
+        "imagePullSecretName": {
+          "type": "string",
+          "description": "name of the secret used to pull container images used by various OVN K8s components"
+        },
+        "coreDNSServiceName": {
+          "type": "string",
+          "description": "name of coredns service, used by ovnkube-node for readiness check"
+        },
+        "corednsClusterIP": {
+          "type": "string",
+          "description": "fallback coredns cluster IP, required when the coredns service can't be looked up (e.g. lookup is disabled in argocd)"
+        },
+        "skipCallToK8s": {
+          "type": "boolean",
+          "description": "whether to skip lookup function or not"
+        },
+        "imageRepositoryPrefix": {
+          "type": "string",
+          "description": "registry and path prepended to every image.repository that is not already fully qualified, e.g. myregistry.example.com/sdn. Required unless every image.repository is overridden with a value that includes a registry host."
+        },
+        "clusterDefaultNad": {
+          "type": "string",
+          "description": "name of the cluster wide default net-attach-def, as namespace/name."
+        },
+        "gatewayOptions": {
+          "type": "string",
+          "description": "extra options appended to the ovnkube gateway configuration, e.g. --ephemeral-port-range=40000-60999"
+        },
+        "skipCTMarkHostPorts": {
+          "type": "string",
+          "description": "host ports excluded from conntrack marking, e.g. \"6081/udp\""
+        },
+        "dockerConfigSecret": {
+          "type": "object",
+          "properties": {
+            "registry": {
+              "type": "string",
+              "description": "name of the container registry hosting the images"
+            },
+            "auth": {
+              "type": "string",
+              "description": "base64 encoded username:password credentials to pull all the OVN K8s component's container images"
+            },
+            "create": {
+              "type": "boolean",
+              "description": "creates a k8s dockerconfigjson secret using the registry and auth information"
+            }
+          }
+        },
+        "kata": {
+          "type": "object",
+          "properties": {
+            "enableDAN": {
+              "type": "boolean",
+              "description": "enable Kata Containers DAN (Directly Attachable Network) integration"
+            },
+            "danConfigDir": {
+              "type": "string",
+              "description": "host path for Kata DAN config directory; mounted into the container at /var/run/ovn-kubernetes/dans"
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "enable": {
+              "type": "boolean"
+            }
+          }
+        },
+        "enableOvnKubeIdentity": {
+          "type": "boolean",
+          "description": "Whether or not enable ovnkube identity webhook"
+        },
+        "enableNetworkSegmentation": {
+          "type": "boolean",
+          "description": "Whether or not enable network segmentation, aka UDN"
+        },
+        "enableNetworkQos": {
+          "type": "boolean",
+          "description": "Enables network QoS support from/to pods"
+        },
+        "enableAdminNetworkPolicy": {
+          "type": "boolean",
+          "description": "Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes"
+        },
+        "enableAdminPbr": {
+          "type": "boolean",
+          "description": "Configure to use AdminPolicyBasedRoute CRD feature with ovn-kubernetes"
+        },
+        "enableEgressFirewall": {
+          "type": "boolean",
+          "description": "Configure to use EgressFirewall CRD feature with ovn-kubernetes"
+        },
+        "enableEgressIp": {
+          "type": "boolean",
+          "description": "Configure to use EgressIP CRD feature with ovn-kubernetes"
+        },
+        "egressIpHealthCheckPort": {
+          "type": "integer",
+          "description": "Configure EgressIP node reachability using gRPC on this TCP port"
+        },
+        "enableEgressQos": {
+          "type": "boolean",
+          "description": "Configure to use EgressQoS CRD feature with ovn-kubernetes"
+        },
+        "enableEgressService": {
+          "type": "boolean",
+          "description": "Configure to use EgressService CRD feature with ovn-kubernetes"
+        },
+        "enableMulticast": {
+          "type": "boolean",
+          "description": "Enables multicast support between the pods within the same namespace"
+        },
+        "enableLFlowCache": {
+          "type": "boolean",
+          "description": "Enables the OVN logical flow cache"
+        },
+        "emptyLbEvents": {
+          "type": "boolean",
+          "description": "If set, then load balancers do not get deleted when all backends are removed"
+        },
+        "enablePersistentIPs": {
+          "type": "boolean",
+          "description": "If set, enable persistent IPs"
+        },
+        "enablePreconfiguredUDNAddresses": {
+          "type": "boolean",
+          "description": "Configure to enable workloads with preconfigured network connect to UDNs"
+        },
+        "advertiseDefaultNetwork": {
+          "type": "boolean",
+          "description": "Whether to deploy a RouteAdvertisements that advertises the cluster-wide default network"
+        },
+        "advertisedUDNIsolationMode": {
+          "type": "string",
+          "description": "Pod network isolation between advertised UDN networks. (strict or loose)"
+        },
+        "advertiseAllTenantCUDNs": {
+          "type": "boolean",
+          "description": "Advertise every tenant ClusterUserDefinedNetwork, and render the vm-uplink Uplink alongside it"
+        },
+        "vmUplinkInterfaceName": {
+          "type": "string",
+          "description": "uplink host interface for the vm-uplink Uplink. Only read when advertiseAllTenantCUDNs is enabled."
+        },
+        "frrConfigDefaultNetworkLabels": {
+          "type": "object",
+          "properties": {},
+          "description": "labels selecting the FRRConfiguration for the default network. Empty selects {name: receive-all}."
+        },
+        "frrConfigTenantCUDNLabels": {
+          "type": "object",
+          "properties": {},
+          "description": "labels selecting the FRRConfiguration for tenant CUDNs. Empty selects {name: receive-all}."
+        },
+        "enableNetworkConnect": {
+          "type": "boolean",
+          "description": "Enables UDN interconnect"
+        },
+        "enableEVPN": {
+          "type": "boolean"
+        },
+        "enableDynamicUDNAllocation": {
+          "type": "boolean",
+          "description": "Enables dynamic UDN allocation"
+        },
+        "dynamicUDNGracePeriod": {
+          "type": "string"
+        },
+        "enableUplink": {
+          "type": "boolean",
+          "description": "Configure to enable the uplink feature with ovn-kubernetes"
+        },
+        "enableNoOverlay": {
+          "type": "boolean",
+          "description": "Configure to enable no-overlay mode for the default network"
+        },
+        "enableNoOverlaySnat": {
+          "type": "boolean",
+          "description": "Configure to enable SNAT for outbound traffic in no-overlay mode"
+        },
+        "enableNoOverlayManagedRouting": {
+          "type": "boolean",
+          "description": "Configure to enable managed routing mode for no-overlay"
+        },
+        "allowICMPNetworkPolicy": {
+          "type": "boolean",
+          "description": "Configure to allow ICMP and ICMPv6 traffic to bypass NetworkPolicy deny rules"
+        },
+        "enableRouteAdvertisements": {
+          "type": "boolean",
+          "description": "Configure to use route advertisements feature with ovn-kubernetes"
+        },
+        "enableDNSNameResolver": {
+          "type": "boolean",
+          "description": "Configure to use OpenShift DNSNameResolver CRD to resolve DNS records for EgressFirewall."
+        },
+        "udnAllowedDefaultServices": {
+          "type": "string",
+          "description": "comma separated list of default network services allowed to be accessed from UDN pods, e.g. \"namespace1/service1,namespace2/service2\""
+        },
+        "useImageDigest": {
+          "type": "boolean",
+          "description": "embed image digest in container image reference"
+        },
+        "enableTracing": {
+          "type": "boolean",
+          "description": "Enables OpenTelemetry tracing for OVN-Kubernetes"
+        },
+        "tracing": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "description": "OTLP gRPC endpoint for the trace exporter"
+            },
+            "useTLS": {
+              "type": "boolean",
+              "description": "Enable TLS for OTLP transport"
+            },
+            "tlsInsecureSkipVerify": {
+              "type": "boolean",
+              "description": "Skip server certificate verification (insecure)"
+            },
+            "tlsCACert": {
+              "type": "string",
+              "description": "CA certificate path for TLS client"
+            },
+            "serviceName": {
+              "type": "string",
+              "description": "OpenTelemetry service.name resource attribute"
+            },
+            "samplingRate": {
+              "type": "number",
+              "description": "Root trace sampling ratio in range [0.0, 1.0]"
+            },
+            "propagatedContextAnnotationKey": {
+              "type": "string",
+              "description": "Pod annotation key for propagated tracing context"
+            },
+            "propagatedContextMode": {
+              "type": "string",
+              "description": "Propagated context mode. Supported values: linked, parent."
+            },
+            "exportTimeout": {
+              "type": "integer",
+              "description": "Exporter timeout in seconds"
+            },
+            "batchTimeout": {
+              "type": "integer",
+              "description": "Batch span processor timeout in seconds"
+            },
+            "maxExportBatchSize": {
+              "type": "integer",
+              "description": "Maximum spans per export batch"
+            },
+            "maxQueueSize": {
+              "type": "integer",
+              "description": "Maximum queued spans before dropping"
+            }
+          }
+        },
+        "v4JoinSubnet": {
+          "type": "string",
+          "description": "The v4 join subnet used for assigning join switch IPv4 addresses"
+        },
+        "v4MasqueradeSubnet": {
+          "type": "string",
+          "description": "The v4 masquerade subnet used for assigning masquerade IPv4 addresses"
+        },
+        "v4TransitSubnet": {
+          "type": "string",
+          "description": "The v4 transit subnet"
+        },
+        "managedBGPASNumber": {
+          "type": "integer",
+          "description": "BGP AS number for managed routing mode"
+        },
+        "managedBGPTopology": {
+          "type": "string",
+          "description": "BGP topology for managed routing mode (currently only full-mesh)"
+        },
+        "managedBGPFRRNamespace": {
+          "type": "string",
+          "description": "FRR namespace for managed routing mode"
+        },
+        "routingTableIDStart": {
+          "type": "integer",
+          "description": "first routing table ID ovnkube-node may allocate, e.g. 1002"
+        },
+        "kubeletCgroupPath": {
+          "type": "string",
+          "description": "kubelet cgroup path ovnkube-node should use"
+        }
+      }
+    },
+    "ovs-node": {
+      "type": "object",
+      "properties": {
+        "affinity": {
+          "type": "object",
+          "properties": {
+            "nodeAffinity": {
+              "type": "object",
+              "properties": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                  "type": "object",
+                  "properties": {
+                    "nodeSelectorTerms": {
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "ovsDaemonsContainer": {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ovnkube-node-dpu-host": {
+      "type": "object",
+      "properties": {
+        "gatewayOpts": {
+          "type": "string"
+        },
+        "nodeSelector": {
+          "type": "object",
+          "properties": {
+            "k8s.ovn.org/dpu-host": {
+              "type": "string"
+            }
+          }
+        },
+        "disableFirewalld": {
+          "type": "boolean"
+        },
+        "nodeMgmtPortNetdev": {
+          "type": "string"
+        },
+        "mgmtPortVFResourceName": {
+          "type": "string"
+        },
+        "mgmtPortVFsCount": {
+          "type": "integer"
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "tolerations for the ovnkube-node-dpu-host pods."
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string"
+            },
+            "tag": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "ovnkube-identity": {
+      "type": "object",
+      "properties": {
+        "logLevel": {
+          "type": "integer"
+        },
+        "affinity": {
+          "type": "object",
+          "properties": {
+            "nodeAffinity": {
+              "type": "object",
+              "properties": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                  "type": "object",
+                  "properties": {
+                    "nodeSelectorTerms": {
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "tolerations for the ovnkube-identity pods."
+        },
+        "ovnkubeIdentity": {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ovnkube-control-plane": {
+      "type": "object",
+      "properties": {
+        "replicas": {
+          "type": "integer"
+        },
+        "ovnkubeControlPlane": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "affinity": {
+          "type": "object",
+          "properties": {
+            "nodeAffinity": {
+              "type": "object",
+              "properties": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                  "type": "object",
+                  "properties": {
+                    "nodeSelectorTerms": {
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "podAntiAffinity": {
+              "type": "object",
+              "properties": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "tolerations for the ovnkube-control-plane pods."
+        },
+        "monitoring": {
+          "type": "object",
+          "properties": {
+            "serviceMonitorSelectorLabels": {
+              "type": "object",
+              "properties": {
+                "k8s-app": {
+                  "type": "string"
+                },
+                "release": {
+                  "type": "string"
+                }
+              },
+              "description": "specify the labels for serviceMonitors to be selected for target discovery. Prometheus operator defines what namespaces and what servicemonitors within these namespaces must be selected for target discovery. The fields defined below helps in defining that."
+            }
+          },
+          "description": "prometheus monitoring related fields"
+        }
+      }
+    },
+    "ovnkube-single-node-zone": {
+      "type": "object",
+      "properties": {
+        "ovnkubeSingleNodeZone": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnkubeSingleNodeZoneNbdb": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnkubeSingleNodeZoneSbdb": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnkubeSingleNodeZoneNorthd": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnkubeSingleNodeZoneOvnHost": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "affinity": {
+          "type": "object",
+          "properties": {
+            "nodeAffinity": {
+              "type": "object",
+              "properties": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                  "type": "object",
+                  "properties": {
+                    "nodeSelectorTerms": {
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "podAnnotations": {
+          "type": "object",
+          "properties": {},
+          "description": "extra annotations for the ovnkube-node pod template."
+        },
+        "disableFirewalld": {
+          "type": "boolean"
+        },
+        "adminFirewalldZone": {
+          "type": "string"
+        },
+        "nodeMgmtPortNetdev": {
+          "type": "string"
+        },
+        "mgmtPortVFResourceName": {
+          "type": "string"
+        },
+        "mgmtPortVFsCount": {
+          "type": "integer",
+          "description": "set the count of VFs required to handle management ports for UDN"
+        },
+        "monitoring": {
+          "type": "object",
+          "properties": {
+            "serviceMonitorSelectorLabels": {
+              "type": "object",
+              "properties": {
+                "k8s-app": {
+                  "type": "string"
+                },
+                "release": {
+                  "type": "string"
+                }
+              },
+              "description": "specify the labels for serviceMonitors to be selected for target discovery. Prometheus operator defines what namespaces and what servicemonitors within these namespaces must be selected for target discovery. The fields defined below helps in defining that."
+            }
+          },
+          "description": "prometheus monitoring related fields"
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "tolerations for the ovnkube-node pods."
+        }
+      }
+    },
+    "ovnkube-single-node-zone-dpu": {
+      "type": "object",
+      "properties": {
+        "execInVrf": {
+          "type": "string",
+          "description": "run the ovnkube containers inside this VRF, e.g. mgmt. Empty runs them in the default VRF."
+        },
+        "ovnDatapathType": {
+          "type": "string",
+          "description": "OVS datapath type used on the DPU, e.g. netdev"
+        },
+        "spiffeDerivedK8sToken": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "read the K8s token from a file injected by DSX instead of the ServiceAccount token. Requires OVN images that support it and DSX injection running before ovnkube-init, with a startup probe that waits for the initial token to be written. Disabled preserves the existing K8S_TOKEN configuration."
+            },
+            "k8sTokenFile": {
+              "type": "string",
+              "description": "token file available to both ovnkube-init and ovnkube-controller"
+            },
+            "initContainerExtraVolumeMounts": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "description": "additional mounts for ovnkube-init. When enabled, the chart declares the dsx-token volume and DSX admission mounts it into the regular containers, so ovnkube-init has to mount it explicitly. Referenced volumes must exist in the Pod."
+            }
+          }
+        },
+        "ovnkubeSingleNodeZone": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnkubeSingleNodeZoneNbdb": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnkubeSingleNodeZoneSbdb": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnkubeSingleNodeZoneNorthd": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnkubeSingleNodeZoneOvnHost": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "level": {
+                  "type": "string"
+                }
+              }
+            },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ovnVtepIface": {
+          "type": "string"
+        },
+        "ovnGwInterface": {
+          "type": "string"
+        },
+        "ovnGwVlanId": {
+          "type": "string"
+        },
+        "dpuHostClusterK8sSkipTLSVerify": {
+          "type": "boolean"
+        },
+        "ovnMetricsEndpointIp": {
+          "type": "string"
+        },
+        "ovnMetricsWorkerPort": {
+          "type": "string"
+        },
+        "ovnMetricsBindPort": {
+          "type": "string"
+        },
+        "nodeSelector": {
+          "type": "object",
+          "properties": {}
+        },
+        "tolerations": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "serviceDaemonSet": {
+          "type": "object",
+          "properties": {
+            "nodeSelector": {
+              "type": "object",
+              "properties": {
+                "nodeSelectorTerms": {
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "updateStrategy": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "rollingUpdate": {
+                  "type": "object",
+                  "properties": {
+                    "maxUnavailable": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "resources": {
+              "type": "object",
+              "properties": {}
+            },
+            "labels": {
+              "type": "object",
+              "properties": {}
+            },
+            "annotations": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}

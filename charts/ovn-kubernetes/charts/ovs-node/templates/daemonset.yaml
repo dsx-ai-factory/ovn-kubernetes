@@ -1,0 +1,167 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+# this condition is not required, but adding here as a safeguard.
+---
+# ovs-node
+# daemonset version 3
+# starts node daemons for ovs
+# it is run on all nodes
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: ovs-node
+  # namespace set up by install
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    kubernetes.io/description: |
+      This DaemonSet launches the ovs networking components for all nodes.
+spec:
+  selector:
+    matchLabels:
+      app: ovs-node
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: ovs-node
+        name: ovs-node
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+    spec:
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Requires minimal permissions - ability to get configmaps and endpoints
+      serviceAccountName: ovn-ovs
+      hostNetwork: true
+      priorityClassName: "system-node-critical"
+      initContainers:
+        - name: ovsdb-server-init
+          image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovsDaemonsContainer.image "Values" $.Values) }}
+          imagePullPolicy: IfNotPresent
+          command: ["/scripts/init-ovsdb-server.sh"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+          - name: host-etc-openvswitch
+            mountPath: /etc/openvswitch
+          - name: host-var-run-ovs
+            mountPath: /var/run/openvswitch
+      containers:
+        - name: ovs-vswitchd
+          image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovsDaemonsContainer.image "Values" $.Values) }}
+          imagePullPolicy: IfNotPresent
+          command: ["/scripts/start-vswitchd.sh"]
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/scripts/stop-vswitchd.sh"]
+          livenessProbe:
+            exec:
+              command:
+                - /scripts/vswitchd_liveness.sh
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /scripts/vswitchd_readiness.sh
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            successThreshold: 1
+            timeoutSeconds: 5
+          securityContext:
+            runAsUser: 0
+            # Permission could be reduced by selecting an appropriate SELinux policy
+            privileged: true
+          terminationMessagePolicy: FallbackToLogsOnError
+          resources:
+            # TODO(ihar): define optimal memory, hugepages and cpu requests/limits
+            limits:
+              hugepages-2Mi: 800Mi
+              hugepages-1Gi: 1Gi
+              memory: 1200Mi
+            requests:
+              memory: 1200Mi
+          volumeMounts:
+          - name: host-etc-openvswitch
+            mountPath: /etc/openvswitch
+          - name: host-var-run-ovs
+            mountPath: /var/run/openvswitch
+          - mountPath: /hugepages-2Mi
+            name: hugepage-2mi
+          - mountPath: /hugepages-1Gi
+            name: hugepage-1gi
+        - name: ovsdb-server
+          image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovsDaemonsContainer.image "Values" $.Values) }}
+          imagePullPolicy: IfNotPresent
+          command: ["/scripts/start-ovsdb-server.sh"]
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/scripts/stop-ovsdb-server.sh"]
+          livenessProbe:
+            exec:
+              command:
+                - /scripts/ovsdb_server_liveness.sh
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - /scripts/ovsdb_server_readiness.sh
+            failureThreshold: 3
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            successThreshold: 1
+            timeoutSeconds: 5
+          volumeMounts:
+          - name: host-etc-openvswitch
+            mountPath: /etc/openvswitch
+          - name: host-var-run-ovs
+            mountPath: /var/run/openvswitch
+      nodeSelector:
+        kubernetes.io/os: "linux"
+      volumes:
+        - name: host-modules
+          hostPath:
+            path: /lib/modules
+        - name: host-var-run-dbus
+          hostPath:
+            path: /var/run/dbus
+        - name: host-var-log-ovs
+          hostPath:
+            path: /var/log/openvswitch
+        - name: host-var-run-ovs
+          hostPath:
+            path: /var/run/openvswitch
+        - name: host-sys
+          hostPath:
+            path: /sys
+        - name: host-etc-openvswitch
+          hostPath:
+            path: /etc/openvswitch
+        - name: host-var-lib-ovs
+          hostPath:
+            path: /var/lib/openvswitch
+        - name: hugepage-2mi
+          emptyDir:
+            medium: HugePages-2Mi
+        - name: hugepage-1gi
+          emptyDir:
+            medium: HugePages-1Gi
+
+      tolerations:
+        - operator: "Exists"

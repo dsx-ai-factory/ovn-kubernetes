@@ -1,0 +1,165 @@
+{{ template "chart.header" . }}
+-----------------------
+
+{{ template "chart.badgesSection" . }}
+
+{{ template "chart.homepageLine" . }}
+
+{{ template "chart.maintainersSection" . }}
+
+{{ template "chart.sourcesSection" . }}
+
+Open Virtual Networking (OVN) Kubernetes CNI is an open source networking and
+network security solution for Kubernetes workloads. It leverages distributed
+OVN SDN control plane and per-node Open vSwitch (OVS) to provide network
+virtualization and network connectivity to K8s Pods. It does so by creating a logical
+network topology using logical constructs such as logical switches (Layer 2) and
+logical routers (Layer 3). The Pod interfaces are represented by logical ports on
+the logical switches. On these logical switch ports, one can specify IP network
+information (IP address and MAC address), anti-spoofing rules (MAC and IP),
+Security Groups, QoS configuration, and so on.
+
+A physical port (SR-IOV VF or VETH) assigned to a Pod will be associated with
+a corresponding logical port, this will result in applying all the logical port
+configuration on to the physical port. The logical port becomes the API for
+configuring the physical port.
+
+In addition to providing overlay network connectivity for Pods in the K8s cluster,
+OVN K8s CNI supports plethora of advanced networking features, such as
+
+```
+- Optimized and Accelerated K8s Network Policy on Pod's traffic
+- Optimized and Accelerated K8s Service Implementation (aka LoadBalancers and NAT)
+- Optimized and Accelerated Policy Based Routing
+- Multi-Home Pods with an option for Secondary networks to be on a Layer-2
+  Overlay (flat network), Layer-2 Underlay (VLAN-based) on private or public
+  subnets.
+- Optimized and Accelerated K8s Network Policy on Pod's secondary networks
+```
+
+Most of these services are distributed and implemented via a pipeline (series
+of OpenFlow tables with OpenFlow flows) on local OVS switches. These OVS
+pipelines are very amenable to offloading to NIC hardware which should result
+in the best possible networking performance and CPU savings on the host.
+
+The NVIDIA CX NICs and DPUs offload OVS pipelines and provides accelerated
+networking services to tenant applications at wire speed.
+
+This helm chart supports deploying OVN K8s CNI in myriad of K8s cluster
+deployment modes. Some of which are enumerated below:
+
+```
+- single node K8s cluster either on a VM or BM or DPU
+- multiple nodes K8s cluster (on KIND or BM or VM)
+- single K8s Cluster with both hosts and their DPUs as nodes
+- multiple K8s Clusters - DPU cluster and per-tenant K8s clusters - with shared OVN
+  (managed K8s case)
+```
+
+OVN K8s CNI architecture is a layered architecture with OVS at the bottom,
+followed by OVN, and finally OVN K8s CNI at the top. Each layer has several
+K8s components - deployments, daemonsets, and statefulsets. Each component at
+every layer is a subchart by itself. 
+
+Install/upgrade the helm chart. `k8sAPIServer` and `podNetwork` have no
+defaults and the install fails without them, so replace the placeholders
+below with the API server endpoint and the pod CIDR of your cluster:
+
+```bash
+helm upgrade --install ovn-kubernetes . \
+  -n ovn-kubernetes --create-namespace \
+  --set k8sAPIServer=https://10.0.0.1:6443 \
+  --set podNetwork=10.192.0.0/16/26
+```
+
+`podNetwork` carries two masks: the first is the cluster-wide pod CIDR, the
+second is the per-node subnet carved out of it.
+
+See [README-deployment.md](README-deployment.md) for the full list of
+configurable values, including subcharts.
+
+# Maintenance Scripts
+
+## CRD Synchronization
+
+The `scripts/sync-crds.sh` script synchronizes external CRDs from upstream
+sources to the `charts/ovnkube-crds/crds/` directory.
+
+**CRD Sources:**
+
+| Source | CRDs | Upstream Repository |
+|--------|------|---------------------|
+| `multi-net-policy` | `k8s.cni.cncf.io_multinetworkpolicy.yaml` | `k8snetworkplumbingwg/multi-networkpolicy` |
+| `net-attach-def` | `k8s.cni.cncf.io_netattachdef.yaml` | `k8snetworkplumbingwg/network-attachment-definition-client` |
+| `policy` | `policy.networking.k8s.io_adminnetworkpolicies.yaml`, `policy.networking.k8s.io_baselineadminnetworkpolicies.yaml` | `kubernetes-sigs/network-policy-api` |
+
+`OVN_K_PATH` selects the repository whose `go-controller/go.mod` supplies
+the external CRD versions. It defaults to this repository's root.
+
+To update OVN-Kubernetes CRDs, run `make codegen` from `go-controller/`.
+
+**Usage:**
+```bash
+# Run from charts/ovn-kubernetes
+./scripts/sync-crds.sh
+
+# Or sync a specific external source
+./scripts/sync-crds.sh policy
+```
+
+The default sync includes Network Attachment Definition and Admin Network
+Policy CRDs. Use `multi-net-policy` explicitly to sync Multi-NetworkPolicy.
+
+The external sources are pinned to the versions in `go-controller/go.mod`.
+The script cleans up temporary files after completion. Review changes with
+`git diff` before committing.
+
+# Ubuntu/Containerd with AppArmor enabled and without `privileged: true`
+
+Currently `firewall-cmd` is executed from winthin the ovnkube container to set up network
+access to the node. If the node runs Ubuntu system with AppArmor enabled, and if the
+ovnkube-node pod does not have `privilaged: true` flag, `firewall-cmd` calls to the host
+through dbus will be blocked by AppArmor.
+Following steps are required if the issue need to be resolved without `privileged: true` flag.
+
+#### 1. Copy following AppArmor profile to the folder `/etc/apparmor.d` of Ubuntu system
+
+```
+# vim:syntax=apparmor
+#include <tunables/global>
+
+profile ovnkube flags=(attach_disconnected) {
+  #include <abstractions/base>  network,
+  capability,
+  file,
+  umount,
+  dbus,
+  # Host (privileged) processes may send signals to container processes.
+  signal (send,receive) peer=unconfined,
+  # Container processes may send signals amongst themselves.
+  signal (send,receive) peer=cri-containerd.apparmor.d,  deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
+  # deny write to files not in /proc/<number>/** or /proc/sys/**
+  deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9]*}/** w,
+  deny @{PROC}/sys/[^k]** w,  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel)
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,  # deny everything except shm* in /proc/sys/kernel/
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/mem rwklx,
+  deny @{PROC}/kmem rwklx,
+  deny @{PROC}/kcore rwklx,  deny mount,  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,  # allow processes within the container to trace each other,
+  # provided all other LSM and yama setting allow it.
+  ptrace (trace,tracedby,read,readby) peer=cri-containerd.apparmor.d,
+}
+```
+
+#### 2. Add following annotation to pod spec
+```
+container.apparmor.security.beta.kubernetes.io/ovnkube-node: localhost/ovnkube
+```
+Where `ovnkube-node` is the container name in the spec, `ovnkube` is the profile name.

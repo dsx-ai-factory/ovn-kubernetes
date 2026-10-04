@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: ovn-kubernetes
+description: A Helm chart for deploying ovn-kubernetes CNI
+type: application
+version: 1.5.18
+keywords:
+- SDN
+- SDNaaS
+- OVN
+- OVS
+- CNI
+- Accelerated Networking
+- DPU
+- BlueField
+home: https://github.com/dsx-ai-factory/ovn-kubernetes
+icon: https://www.ovn.org/images/ovn-logo.png
+maintainers:
+- name: SDN Developers
+sources:
+- https://github.com/dsx-ai-factory/ovn-kubernetes
+- https://github.com/ovn-kubernetes/ovn-kubernetes
+- https://github.com/ovn-org/ovn
+- https://github.com/openvswitch/ovs
+- https://github.com/ovn-org/libovsdb
+appVersion: "2026-05.18"
+dependencies:
+- name: ovs-node
+  version: 1.5.0
+  tags:
+  - ovs-node
+- name: ovnkube-identity
+  version: 1.5.18
+  tags:
+    - ovnkube-identity
+- name: ovnkube-node-dpu-host
+  version: 1.5.18
+  tags:
+  - ovnkube-node-dpu-host
+- name: ovnkube-control-plane
+  version: 1.5.18
+  tags:
+  - ovnkube-control-plane
+- name: ovnkube-single-node-zone
+  version: 1.5.18
+  tags:
+  - ovnkube-single-node-zone
+- name: ovnkube-single-node-zone-dpu
+  version: 1.5.18
+  tags:
+  - ovnkube-single-node-zone-dpu
+- name: ovnkube-crds
+  version: 1.5.17
+  tags:
+  - ovnkube-crds

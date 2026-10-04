@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Default values for ovnkube-identity.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+# Container image details in the parent chart's values.yaml.
+
+logLevel: 4
+# required to be scheduled on a linux node and only one instance of ovnkube-identity pod per node
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+
+# -- tolerations for the ovnkube-identity pods.
+tolerations:
+- operator: "Exists"

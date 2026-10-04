@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Default values for ovnkube-control-plane.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+# Container image details in the parent chart's values.yaml.
+
+replicas: 1
+
+ovnkubeControlPlane:
+  logging:
+    level: "5"
+
+## Required to be scheduled on a linux node and only one instance of ovnkube-control-plane pod per node
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: name
+          operator: In
+          values:
+          - ovnkube-control-plane
+      topologyKey: kubernetes.io/hostname
+
+# -- tolerations for the ovnkube-control-plane pods.
+tolerations:
+- operator: "Exists"
+
+# -- prometheus monitoring related fields
+monitoring:
+  # -- specify the labels for serviceMonitors to be selected for target discovery.
+  # Prometheus operator defines what namespaces and what servicemonitors within these
+  # namespaces must be selected for target discovery. The fields defined below helps
+  # in defining that.
+  serviceMonitorSelectorLabels:
+    k8s-app: ovnkube-control-plane
+    release: prometheus

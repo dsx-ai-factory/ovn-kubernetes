@@ -1,0 +1,264 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Default values for the ovn-kubernetes chart.
+
+# -- Subchart toggles.
+tags:
+  ovs-node: false
+  ovnkube-identity: false
+  ovnkube-node-dpu-host: false
+  ovnkube-single-node-zone-dpu: false
+  ovnkube-crds: true
+  ovnkube-control-plane: true
+  ovnkube-single-node-zone: true
+
+# -- K8s API Server address
+k8sAPIServer:
+# -- OVN Pod Network CIDR. The primary interface of the Pod is assigned IP
+# from this range. These IPs are overlay IPs. Every K8s node will get a /26
+# subnet (from the /16) and Pods landing on that node will get IP from the
+# /26 subnet. Based on the cluster size, /16 can be adjusted. Similarly,
+# based on the pod-density on the node, /26 can be adjusted.
+podNetwork:
+# -- K8s Service IP range
+serviceNetwork: 10.96.0.0/12
+# -- MTU of the primary network of the Pod
+mtu: 1440
+# -- host k8s cluster's CA certificate
+k8sCACertData:
+# -- JWT token for the host k8s cluster
+k8sToken:
+# annotations added to the cluster wide default net-attach-def,
+# e.g. k8s.v1.cni.cncf.io/resourceName: nvidia.com/asap2_vf
+# ovnPrimaryNADAnnotations:
+#  k8s.v1.cni.cncf.io/resourceName: nvidia.com/asap2_vf
+
+global:
+  # -- namespace where all the OVN K8s components' resources must be deployed
+  namespace: ovn-kubernetes
+  # -- name of the secret used to pull container images used by various OVN K8s components
+  imagePullSecretName: ovncni-nvcr-ips
+  # -- name of coredns service, used by ovnkube-node for readiness check
+  coreDNSServiceName: kube-dns
+  # -- fallback coredns cluster IP, required when the coredns service can't be looked up (e.g. lookup is disabled in argocd)
+  corednsClusterIP: ""
+  # -- whether to skip lookup function or not
+  skipCallToK8s: false
+  # -- registry and path prepended to every image.repository that is not already
+  # fully qualified, e.g. myregistry.example.com/sdn. Required unless every
+  # image.repository is overridden with a value that includes a registry host.
+  imageRepositoryPrefix: ""
+  # -- name of the cluster wide default net-attach-def, as namespace/name.
+  clusterDefaultNad: default/cluster-network
+  # -- extra options appended to the ovnkube gateway configuration, e.g. --ephemeral-port-range=40000-60999
+  gatewayOptions: ""
+  # -- host ports excluded from conntrack marking, e.g. "6081/udp"
+  skipCTMarkHostPorts: ""
+  dockerConfigSecret:
+    # -- name of the container registry hosting the images
+    registry: nvcr.io
+    # -- base64 encoded username:password credentials to pull all the OVN K8s component's container images
+    auth: ""
+    # -- creates a k8s dockerconfigjson secret using the registry and auth information
+    create: false
+  kata:
+    # -- enable Kata Containers DAN (Directly Attachable Network) integration
+    enableDAN: false
+    # -- host path for Kata DAN config directory; mounted into the container at /var/run/ovn-kubernetes/dans
+    danConfigDir: /run/kata-containers/dans
+  tls:
+    enable: false
+
+  # -- Whether or not enable ovnkube identity webhook
+  enableOvnKubeIdentity: false
+  # -- Whether or not enable network segmentation, aka UDN
+  enableNetworkSegmentation: true
+  # -- Enables network QoS support from/to pods
+  enableNetworkQos: false
+  # -- Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes
+  enableAdminNetworkPolicy: false
+  # -- Configure to use AdminPolicyBasedRoute CRD feature with ovn-kubernetes
+  enableAdminPbr: true
+  # -- Configure to use EgressFirewall CRD feature with ovn-kubernetes
+  enableEgressFirewall: true
+  # -- Configure to use EgressIP CRD feature with ovn-kubernetes
+  enableEgressIp: false
+  # -- Configure EgressIP node reachability using gRPC on this TCP port
+  egressIpHealthCheckPort: 9107
+  # -- Configure to use EgressQoS CRD feature with ovn-kubernetes
+  enableEgressQos: false
+  # -- Configure to use EgressService CRD feature with ovn-kubernetes
+  enableEgressService: false
+  # -- Enables multicast support between the pods within the same namespace
+  enableMulticast: false
+  # -- Enables the OVN logical flow cache
+  enableLFlowCache: false
+  # -- If set, then load balancers do not get deleted when all backends are removed
+  emptyLbEvents: false
+  # -- If set, enable persistent IPs
+  enablePersistentIPs: false
+  # -- Configure to enable workloads with preconfigured network connect to UDNs
+  enablePreconfiguredUDNAddresses: false
+  # -- Whether to deploy a RouteAdvertisements that advertises the cluster-wide default network
+  advertiseDefaultNetwork: false
+  # -- Pod network isolation between advertised UDN networks. (strict or loose)
+  advertisedUDNIsolationMode: "strict"
+  # -- Advertise every tenant ClusterUserDefinedNetwork, and render the
+  # vm-uplink Uplink alongside it
+  advertiseAllTenantCUDNs: false
+  # -- uplink host interface for the vm-uplink Uplink. Only read when
+  # advertiseAllTenantCUDNs is enabled.
+  vmUplinkInterfaceName: ""
+  # -- labels selecting the FRRConfiguration for the default network.
+  # Empty selects {name: receive-all}.
+  frrConfigDefaultNetworkLabels: {}
+  # -- labels selecting the FRRConfiguration for tenant CUDNs.
+  # Empty selects {name: receive-all}.
+  frrConfigTenantCUDNLabels: {}
+  # -- Enables UDN interconnect
+  enableNetworkConnect: false
+  enableEVPN: false
+  # -- Enables dynamic UDN allocation
+  enableDynamicUDNAllocation: false
+  dynamicUDNGracePeriod: ""
+  # -- Configure to enable the uplink feature with ovn-kubernetes
+  enableUplink: false
+  # -- Configure to enable no-overlay mode for the default network
+  enableNoOverlay: false
+  # -- Configure to enable SNAT for outbound traffic in no-overlay mode
+  enableNoOverlaySnat: false
+  # -- Configure to enable managed routing mode for no-overlay
+  enableNoOverlayManagedRouting: false
+  # -- Configure to allow ICMP and ICMPv6 traffic to bypass NetworkPolicy deny rules
+  allowICMPNetworkPolicy: false
+  # -- Configure to use route advertisements feature with ovn-kubernetes
+  enableRouteAdvertisements: false
+  # -- Configure to use OpenShift DNSNameResolver CRD to resolve DNS records for EgressFirewall.
+  enableDNSNameResolver: false
+  # -- comma separated list of default network services allowed to be
+  # accessed from UDN pods, e.g. "namespace1/service1,namespace2/service2"
+  udnAllowedDefaultServices: ""
+  # -- embed image digest in container image reference
+  useImageDigest: false
+  # -- Enables OpenTelemetry tracing for OVN-Kubernetes
+  enableTracing: false
+  tracing:
+    # -- OTLP gRPC endpoint for the trace exporter
+    endpoint: 127.0.0.1:4317
+    # -- Enable TLS for OTLP transport
+    useTLS: false
+    # -- Skip server certificate verification (insecure)
+    tlsInsecureSkipVerify: false
+    # -- CA certificate path for TLS client
+    tlsCACert: ""
+    # -- OpenTelemetry service.name resource attribute
+    serviceName: ovn-kubernetes
+    # -- Root trace sampling ratio in range [0.0, 1.0]
+    samplingRate: 1.0
+    # -- Pod annotation key for propagated tracing context
+    propagatedContextAnnotationKey: tracing.k8s.io/traceparent
+    # -- Propagated context mode. Supported values: linked, parent.
+    propagatedContextMode: linked
+    # -- Exporter timeout in seconds
+    exportTimeout: 10
+    # -- Batch span processor timeout in seconds
+    batchTimeout: 5
+    # -- Maximum spans per export batch
+    maxExportBatchSize: 512
+    # -- Maximum queued spans before dropping
+    maxQueueSize: 2048
+  # -- The v4 join subnet used for assigning join switch IPv4 addresses
+  v4JoinSubnet: "100.64.0.0/16"
+  # -- The v4 masquerade subnet used for assigning masquerade IPv4 addresses
+  v4MasqueradeSubnet: "169.254.0.0/17"
+  # -- The v4 transit subnet
+  v4TransitSubnet: "100.88.0.0/16"
+  # -- BGP AS number for managed routing mode
+  managedBGPASNumber: 64512
+  # -- BGP topology for managed routing mode (currently only full-mesh)
+  managedBGPTopology: "full-mesh"
+  # -- FRR namespace for managed routing mode
+  managedBGPFRRNamespace: "frr-k8s-system"
+  # The two settings below render the [ovnkubenode] section of the ovnkube
+  # config. Leave them unset (0 / empty) to omit the section entirely.
+  # -- first routing table ID ovnkube-node may allocate, e.g. 1002
+  routingTableIDStart: 0
+  # -- kubelet cgroup path ovnkube-node should use
+  kubeletCgroupPath: ""
+
+ovs-node:
+  ovsDaemonsContainer:
+    image:
+      repository: ovs
+      tag: 963f58b0-35519317-af693ae
+      sha256: 655a15134866f70f6410dff0578adc8c183eecfa436619e4c179f6f8f267716c
+ovnkube-node-dpu-host:
+  image:
+    repository: ovnkube
+    tag: cbcda82f-71385617-7852734
+    sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+ovnkube-identity:
+  ovnkubeIdentity:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+ovnkube-control-plane:
+  ovnkubeControlPlane:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+ovnkube-single-node-zone:
+  ovnkubeSingleNodeZone:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+  ovnkubeSingleNodeZoneNbdb:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+  ovnkubeSingleNodeZoneSbdb:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+  ovnkubeSingleNodeZoneNorthd:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+  ovnkubeSingleNodeZoneOvnHost:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+ovnkube-single-node-zone-dpu:
+  ovnkubeSingleNodeZone:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+  ovnkubeSingleNodeZoneNbdb:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+  ovnkubeSingleNodeZoneSbdb:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+  ovnkubeSingleNodeZoneNorthd:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+  ovnkubeSingleNodeZoneOvnHost:
+    image:
+      repository: ovnkube
+      tag: cbcda82f-71385617-7852734
+      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3

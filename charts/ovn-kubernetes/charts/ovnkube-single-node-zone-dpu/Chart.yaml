@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: ovnkube-single-node-zone-dpu
+description: Helm chart to deploy single node zone ovnkube-node stack on a DPU
+type: application
+version: 1.5.18
+appVersion: "2026-05.a8b97898"

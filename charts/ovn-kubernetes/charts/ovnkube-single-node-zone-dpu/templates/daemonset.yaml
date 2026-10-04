@@ -1,0 +1,673 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /*
+DPF sets serviceDaemonSet values at the root of the chart it installs, which for this
+umbrella chart is the parent. A dependency cannot read parent values, so this DaemonSet
+is only defined here and is rendered by templates/ovnkube-single-node-zone-dpu.yaml in
+the parent chart, which overrides serviceDaemonSet with the values DPF supplied.
+*/ -}}
+{{- define "ovnkube-single-node-zone-dpu.daemonset" -}}
+{{- $serviceDaemonSet := .Values.serviceDaemonSet | default dict -}}
+---
+# ovnkube-node-dpu
+# starts node daemons for single node zone ovn stack, each in a separate container, on the DPU.
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: ovnkube-node-dpu
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    kubernetes.io/description: |
+      This DaemonSet launches the ovn-kubernetes networking components on dpu in IC mode.
+spec:
+  selector:
+    matchLabels:
+      app: ovnkube-node-dpu
+  {{- with $serviceDaemonSet.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        app: ovnkube-node-dpu
+        name: ovnkube-node-dpu
+        component: network
+        type: infra
+        kubernetes.io/os: "linux"
+        ovn-db-pod: "true"
+        metrics: ovnkube-node
+        {{- with $serviceDaemonSet.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if or .Values.global.forceRestartNodeReason $serviceDaemonSet.annotations }}
+      annotations:
+        {{- with .Values.global.forceRestartNodeReason }}
+        nais.nvidia.com/nodeRestartedFor: {{ . | quote }}
+        {{- end }}
+        {{- with $serviceDaemonSet.annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $serviceDaemonSet.nodeSelector }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            {{- toYaml . | nindent 12 }}
+      {{- end }}
+      serviceAccountName: ovn-node-dpu-host
+      automountServiceAccountToken: true
+      hostNetwork: true
+      dnsPolicy: Default
+      priorityClassName: "system-node-critical"
+
+      initContainers:
+        # ovnkube-init: DPU-side initialization (sets up VTEP/gateway interfaces).
+        - name: ovnkube-init
+          image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovnkubeSingleNodeZone.image "Values" $.Values) }}
+          imagePullPolicy: "IfNotPresent"
+{{- if .Values.execInVrf }}
+          command: ["ip", "vrf", "exec", {{ .Values.execInVrf | quote }}, "/root/ovnkube-init.sh"]
+{{- else }}
+          command: ["/root/ovnkube-init.sh"]
+{{- end }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 20Mi
+          securityContext:
+            runAsUser: 0
+            privileged: true
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+          {{- if .Values.spiffeDerivedK8sToken.enabled }}
+          {{- with .Values.spiffeDerivedK8sToken.initContainerExtraVolumeMounts }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- end }}
+          - mountPath: /var/run/openvswitch/
+            name: host-var-run-ovs
+          - mountPath: /var/run/ovn/
+            name: host-var-run-ovs
+          - mountPath: /etc/openvswitch/
+            name: host-etc-openvswitch
+            readOnly: true
+          - mountPath: /var/lib/openvswitch
+            name: host-var-lib-ovs
+            readOnly: true
+          env:
+          - name: OVNKUBE_NODE_MODE
+            value: "dpu"
+          - name: K8S_APISERVER
+            valueFrom:
+              configMapKeyRef:
+                name: ovn-config
+                key: k8s_apiserver
+          {{- if and .Values.spiffeDerivedK8sToken.enabled .Values.spiffeDerivedK8sToken.k8sTokenFile }}
+          - name: K8S_TOKEN_FILE
+            value: {{ .Values.spiffeDerivedK8sToken.k8sTokenFile | quote }}
+          {{- else }}
+          - name: K8S_TOKEN
+            valueFrom:
+              configMapKeyRef:
+                name: ovn-config
+                key: k8s_token
+          {{- end }}
+          - name: K8S_CACERT_DATA
+            valueFrom:
+              configMapKeyRef:
+                name: ovn-config
+                key: k8s_cacert_data
+                {{- if .Values.dpuHostClusterK8sSkipTLSVerify }}
+                optional: true
+                {{- end }}
+          - name: OVNK8S_INSECURE_SKIP_TLS_VERIFY
+            value: {{ .Values.dpuHostClusterK8sSkipTLSVerify | default false | quote }}
+          - name: OVN_VTEP_IFACE
+            value: {{ .Values.ovnVtepIface | quote }}
+          - name: OVN_GW_INTERFACE
+            value: {{ .Values.ovnGwInterface | quote }}
+          - name: OVN_GW_VLANID
+            value: {{ .Values.ovnGwVlanId | quote }}
+          - name: OVN_DATAPATH_TYPE
+            value: {{ .Values.ovnDatapathType | quote }}
+          - name: K8S_NODE_DPU
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+      containers:
+      # nb-ovsdb
+      - name: nb-ovsdb
+        image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovnkubeSingleNodeZoneNbdb.image "Values" $.Values) }}
+        imagePullPolicy: "IfNotPresent"
+        command: ["/root/ovnkube.sh", "local-nb-ovsdb"]
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "1.4.0"
+        - name: OVNKUBE_NODE_MODE
+          value: "dpu"
+        - name: OVN_LOGLEVEL_NB
+          value: {{ .Values.ovnkubeSingleNodeZoneNbdb.logging.level | quote }}
+        - name: OVN_NORTHD_PROBE_INTERVAL
+          value: "50000"
+        - name: OVN_NORTHD_BACKOFF_INTERVAL
+          value: "0"
+        - name: ENABLE_IPSEC
+          value: "false"
+        - name: K8S_NODE_DPU
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: OVN_SSL_ENABLE
+          value: "no"
+      # end of nb-ovsdb container
+
+      # sb-ovsdb
+      - name: sb-ovsdb
+        image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovnkubeSingleNodeZoneSbdb.image "Values" $.Values) }}
+        imagePullPolicy: "IfNotPresent"
+        command: ["/root/ovnkube.sh", "local-sb-ovsdb"]
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "1.4.0"
+        - name: OVNKUBE_NODE_MODE
+          value: "dpu"
+        - name: OVN_LOGLEVEL_SB
+          value: {{ .Values.ovnkubeSingleNodeZoneSbdb.logging.level | quote }}
+        - name: K8S_NODE_DPU
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: OVN_SSL_ENABLE
+          value: "no"
+      # end of sb-ovsdb container
+
+      # ovn-northd
+      - name: ovn-northd
+        image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovnkubeSingleNodeZoneNorthd.image "Values" $.Values) }}
+        imagePullPolicy: "IfNotPresent"
+        command: ["/root/ovnkube.sh", "run-ovn-northd"]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["SYS_NICE"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "1.4.0"
+        - name: OVNKUBE_NODE_MODE
+          value: "dpu"
+        - name: OVN_LOGLEVEL_NORTHD
+          value: {{ .Values.ovnkubeSingleNodeZoneNorthd.logging.level | quote }}
+        - name: OVN_SSL_ENABLE
+          value: "no"
+        - name: OVN_NORTH
+          value: "local"
+        - name: OVN_SOUTH
+          value: "local"
+      # end of ovn-northd container
+
+      # ovnkube-controller
+      - name: ovnkube-controller
+        image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovnkubeSingleNodeZone.image "Values" $.Values) }}
+        imagePullPolicy: "IfNotPresent"
+{{- if .Values.execInVrf }}
+        command: ["ip", "vrf", "exec", {{ .Values.execInVrf | quote }}, "/root/ovnkube.sh", "ovnkube-controller-with-node"]
+{{- else }}
+        command: ["/root/ovnkube.sh", "ovnkube-controller-with-node"]
+{{- end }}
+        {{- /*
+        DPF's serviceDaemonSet.resources is a flat resource map. Merge it over both
+        defaults below: Kubernetes rejects a request for an extended resource, such as
+        nvidia.com/bf_sf, unless an equal limit is set.
+        */}}
+        resources:
+          limits:
+            {{- toYaml (mergeOverwrite (dict "cpu" "700m") (deepCopy ($serviceDaemonSet.resources | default dict))) | nindent 12 }}
+          requests:
+            {{- toYaml (mergeOverwrite (dict "cpu" "100m" "memory" "300Mi") (deepCopy ($serviceDaemonSet.resources | default dict))) | nindent 12 }}
+        securityContext:
+          runAsUser: 0
+          privileged: true
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /var/log/ovn-kubernetes/
+          name: host-var-log-ovnkube
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        # Mounts for DPU host cluster access
+        - mountPath: /var/lib/kubelet
+          name: host-var-lib-kubelet
+          readOnly: true
+        # firewall-cmd dependencies
+        - mountPath: /host/var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /sys
+          name: sysfs
+        # We mount our socket here
+        - mountPath: /var/run/ovn-kubernetes
+          name: host-var-run-ovn-kubernetes
+        {{- if not .Values.global.noSystemd }}
+        # Mount systemd/private to the ovnkube containers.
+        # It allows listening for systemd events to track kubelet restart
+        - mountPath: /run/systemd/private
+          name: run-systemd
+          subPath: private
+          readOnly: true
+        {{- end }}
+        # for ovs-db metrics
+        - mountPath: /etc/openvswitch/
+          name: host-etc-openvswitch
+          readOnly: true
+        # /etc/openvswitch/conf.db may symlink to /var/lib/openvswitch/conf.db
+        - mountPath: /var/lib/openvswitch
+          name: host-var-lib-ovs
+          readOnly: true
+        - mountPath: /var/run/netns
+          name: host-netns
+          mountPropagation: Bidirectional
+        # for ovn-db metrics
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+          readOnly: true
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
+
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "1.4.0"
+        - name: OVNKUBE_NODE_MODE
+          value: "dpu"
+        - name: REPRESENTOR_METERING_NODES
+          value: {{ default "" .Values.representorMeteringNodes | quote }}
+        - name: OVN_EGRESSSERVICE_ENABLE
+          value: {{ hasKey .Values.global "enableEgressService" | ternary .Values.global.enableEgressService false | quote }}
+        - name: OVNKUBE_LOGLEVEL
+          value: {{ .Values.ovnkubeSingleNodeZone.logging.level | quote }}
+        - name: OVNKUBE_LOGFILE_MAXSIZE
+          value: "100"
+        - name: OVNKUBE_LOGFILE_MAXBACKUPS
+          value: "20"
+        - name: OVNKUBE_LOGFILE_MAXAGE
+          value: "20"
+        - name: OVNKUBE_LIBOVSDB_CLIENT_LOGFILE
+          value: {{ default "" .Values.global.libovsdbClientLogFile | quote }}
+        - name: OVNKUBE_CONFIG_DURATION_ENABLE
+          value: {{ default "" .Values.global.enableConfigDuration | quote }}
+        - name: OVNKUBE_METRICS_SCALE_ENABLE
+          value: {{ default "" .Values.global.enableMetricsScale | quote }}
+        {{- if and .Values.global.metricsNodePprofPort (ne (toString .Values.global.metricsNodePprofPort) "0") }}
+        - name: OVN_METRICS_NODE_PPROF_PORT
+          value: {{ .Values.global.metricsNodePprofPort | quote }}
+        {{- end }}
+        - name: OVN_METRICS_ENDPOINT_IP
+          value: {{ default "127.0.0.1" .Values.ovnMetricsEndpointIp | quote }}
+        - name: OVN_METRICS_WORKER_PORT
+          value: {{ default "9410" .Values.ovnMetricsWorkerPort | quote }}
+        - name: OVN_METRICS_BIND_PORT
+          value: {{ default "9410" .Values.ovnMetricsBindPort | quote }}
+        - name: OVS_ENABLE_NATIVE_METRICS
+          value: "true"
+        - name: OVN_NET_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: net_cidr
+        - name: OVN_SVC_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        {{- if and .Values.spiffeDerivedK8sToken.enabled .Values.spiffeDerivedK8sToken.k8sTokenFile }}
+        - name: K8S_TOKEN_FILE
+          value: {{ .Values.spiffeDerivedK8sToken.k8sTokenFile | quote }}
+        {{- else }}
+        - name: K8S_TOKEN
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_token
+        {{- end }}
+        - name: K8S_CACERT_DATA
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_cacert_data
+              {{- if .Values.dpuHostClusterK8sSkipTLSVerify }}
+              optional: true
+              {{- end }}
+        - name: OVNK8S_INSECURE_SKIP_TLS_VERIFY
+          value: {{ .Values.dpuHostClusterK8sSkipTLSVerify | default false | quote }}
+        - name: OVN_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: mtu
+        - name: OVN_ROUTABLE_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: routable_mtu
+              optional: true
+        - name: K8S_NODE_DPU
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: OVN_GATEWAY_MODE
+          value: "shared"
+        {{- $gwOptions := include "ovn-kubernetes.getGatewayOptions" (dict "Values" $.Values "gatewayOptionsVal" .Values.global.gatewayOptions) }}
+        {{- with $gwOptions }}
+        - name: OVN_GATEWAY_OPTS
+          value: {{ . | quote }}
+        {{- end }}
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: {{ hasKey .Values.global "enableHybridOverlay" | ternary .Values.global.enableHybridOverlay false | quote }}
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: ""
+        - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
+          value: {{ hasKey .Values.global "enableAdminNetworkPolicy" | ternary .Values.global.enableAdminNetworkPolicy false | quote }}
+        - name: OVN_EGRESSIP_ENABLE
+          value: {{ hasKey .Values.global "enableEgressIp" | ternary .Values.global.enableEgressIp false | quote }}
+        - name: OVN_EGRESSIP_HEALTHCHECK_PORT
+          value: {{ default "0" .Values.global.egressIpHealthCheckPort | quote }}
+        - name: OVN_CTINV_FLOWS_DISABLE
+          value: "true"
+        - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
+          value: ""
+        - name: OVN_DISABLE_FORWARDING
+          value: "false"
+        - name: OVN_DISABLE_PKT_MTU_CHECK
+          value: "true"
+        - name: OVN_STATELESS_NETPOL_ENABLE
+          value: "true"
+        - name: OVN_EGRESSFIREWALL_ENABLE
+          value: {{ hasKey .Values.global "enableEgressFirewall" | ternary .Values.global.enableEgressFirewall true | quote }}
+        - name: OVN_EGRESSQOS_ENABLE
+          value: {{ hasKey .Values.global "enableEgressQos" | ternary .Values.global.enableEgressQos false | quote }}
+        - name: OVN_ENCAP_PORT
+          value: {{ default 6081 .Values.global.encapPort | quote }}
+        - name: OVN_ENCAP_TOS
+          value: "inherit"
+        - name: OVS_MAX_REVALIDATOR
+          value: "5000"
+        - name: OVS_MIN_REVALIDATE_PPS
+          value: "0"
+        - name: OVS_MAX_IDLE
+          value: "20000"
+        - name: OVN_NETFLOW_TARGETS
+          value: ""
+        - name: OVN_SFLOW_TARGETS
+          value: ""
+        - name: OVN_IPFIX_TARGETS
+          value: ""
+        - name: OVN_IPFIX_SAMPLING
+          value: {{ default "" .Values.global.ipfixSampling | quote }}
+        - name: OVN_IPFIX_CACHE_MAX_FLOWS
+          value: {{ default "" .Values.global.ipfixCacheMaxFlows | quote }}
+        - name: OVN_IPFIX_CACHE_ACTIVE_TIMEOUT
+          value: {{ default "" .Values.global.ipfixCacheActiveTimeout | quote }}
+        - name: OVN_V4_JOIN_SUBNET
+          value: {{ default "100.64.0.0/16" .Values.global.v4JoinSubnet | quote }}
+        - name: OVN_V6_JOIN_SUBNET
+          value: {{ default "" .Values.global.v6JoinSubnet | quote }}
+        - name: OVN_V4_MASQUERADE_SUBNET
+          value: {{ default "169.254.0.0/17" .Values.global.v4MasqueradeSubnet | quote }}
+        - name: OVN_V6_MASQUERADE_SUBNET
+          value: {{ default "" .Values.global.v6MasqueradeSubnet | quote }}
+        - name: OVN_MULTICAST_ENABLE
+          value: {{ hasKey .Values.global "enableMulticast" | ternary .Values.global.enableMulticast false | quote }}
+        - name: OVN_EX_GW_NETWORK_INTERFACE
+          value: ""
+        - name: OVN_SSL_ENABLE
+          value: "no"
+        - name: OVN_REMOTE_PROBE_INTERVAL
+          value: "100000"
+        - name: OVN_MONITOR_ALL
+          value: "true"
+        - name: OVN_OFCTRL_WAIT_BEFORE_CLEAR
+          value: "10000"
+        - name: OVN_ENABLE_LFLOW_CACHE
+          value: {{ hasKey .Values.global "enableLFlowCache" | ternary .Values.global.enableLFlowCache false | quote }}
+        - name: OVN_LFLOW_CACHE_LIMIT
+          value: {{ default "" .Values.global.lFlowCacheLimit | quote }}
+        - name: OVN_LFLOW_CACHE_LIMIT_KB
+          value: {{ default "" .Values.global.lFlowCacheLimitKb | quote }}
+        - name: OVN_MULTI_NETWORK_ENABLE
+          value: "true"
+        - name: OVN_NETWORK_QOS_ENABLE
+          value: {{ default "true" .Values.global.enableNetworkQos | quote }}
+        - name: OVN_EMPTY_LB_EVENTS
+          value: {{ default "" .Values.global.emptyLbEvents | quote }}
+        - name: OVN_ACL_LOGGING_RATE_LIMIT
+          value: {{ default 20 .Values.global.aclLoggingRateLimit | quote }}
+        - name: OVN_ADMIN_PBR_ENABLE
+          value: {{ hasKey .Values.global "enableAdminPbr" | ternary .Values.global.enableAdminPbr true | quote }}
+        - name: OVN_IPRESERVATION_ENABLE
+          value: "true"
+        - name: OVN_OBSERV_ENABLE
+          value: {{ default "false" .Values.global.enableObserv | quote }}
+        - name: OVN_HOST_NETWORK_NAMESPACE
+          value: "ovn-host-network"
+        - name: OVN_NORTH
+          value: "local"
+        - name: OVN_SOUTH
+          value: "local"
+        - name: OVN_NETWORK_SEGMENTATION_ENABLE
+          value: "true"
+        - name: OVN_NETWORK_CONNECT_ENABLE
+          value: {{ default "false" .Values.global.enableNetworkConnect | quote }}
+        - name: OVN_ROUTE_ADVERTISEMENTS_ENABLE
+          value: {{ default "false" .Values.global.enableRouteAdvertisements | quote }}
+        - name: OVN_UPLINK_ENABLE
+          value: {{ default "false" .Values.global.enableUplink | quote }}
+        - name: OVN_EVPN_ENABLE
+          value: {{ default "false" .Values.global.enableEVPN | quote }}
+        - name: OVN_ADVERTISED_UDN_ISOLATION_MODE
+          value: {{ default "strict" .Values.global.advertisedUDNIsolationMode | quote }}
+        - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+          value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
+        - name: OVN_ENABLE_OVNKUBE_IDENTITY
+          value: {{ hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity false | quote }}
+        - name: OVN_ENABLE_SVC_TEMPLATE_SUPPORT
+          value: {{ hasKey .Values.global "enableSvcTemplate" | ternary .Values.global.enableSvcTemplate false | quote }}
+        - name: OVN_ENABLE_DNSNAMERESOLVER
+          value: {{ hasKey .Values.global "enableDNSNameResolver" | ternary .Values.global.enableDNSNameResolver false | quote }}
+        - name: OVN_ALLOW_ICMP_NETPOL
+          value: {{ hasKey .Values.global "allowICMPNetworkPolicy" | ternary .Values.global.allowICMPNetworkPolicy false | quote }}
+        - name: OVN_DYNAMIC_UDN_ALLOCATION
+          value: {{ default "false" .Values.global.enableDynamicUDNAllocation | quote }}
+        - name: OVN_DYNAMIC_UDN_GRACE_PERIOD
+          value: {{ default "" .Values.global.dynamicUDNGracePeriod | quote }}
+        - name: OVN_NO_OVERLAY_ENABLE
+          value: {{ default "false" .Values.global.enableNoOverlay | quote }}
+        # required by Layer-2 Networks and cannot be disabled
+        - name: OVN_DISABLE_REQUESTEDCHASSIS
+          value: "false"
+        - name: OVN_UDN_ALLOWED_DEFAULT_SERVICES
+          value: {{ hasKey .Values.global "udnAllowedDefaultServices" | ternary .Values.global.udnAllowedDefaultServices "" | quote }}
+        - name: OVN_PRE_CONF_UDN_ADDR_ENABLE
+          value: {{ default "false" .Values.global.enablePreconfiguredUDNAddresses | quote }}
+        - name: OVS_DB_TRANSACTION_TIMEOUT
+          value: {{ hasKey .Values.global "ovsdbTxnTimeout" | ternary .Values.global.ovsdbTxnTimeout "10" | quote }}
+        - name: OVNKUBE_ISTIO_AMBIENT_ENABLE
+          value: "true"
+        - name: OVNKUBE_CLUSTER_DEFAULT_NAD
+          value: {{ include "ovn-kubernetes.getClusterDefaultNad" . | quote }}
+      # end of ovnkube-controller container
+
+      # ovn-controller
+      - name: ovn-controller
+        image: {{ include "ovn-kubernetes.generateContainerImageString" (dict "image" .Values.ovnkubeSingleNodeZoneOvnHost.image "Values" $.Values) }}
+        imagePullPolicy: "IfNotPresent"
+        command: ["/root/ovnkube.sh", "ovn-controller"]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["SYS_NICE"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /run/ovnkube-config
+          name: ovnkube-config
+          readOnly: true
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "1.4.0"
+        - name: OVNKUBE_NODE_MODE
+          value: "dpu"
+        - name: OVN_LOGLEVEL_CONTROLLER
+          value: {{ .Values.ovnkubeSingleNodeZoneOvnHost.logging.level | quote }}
+        - name: OVN_SSL_ENABLE
+          value: "no"
+      # end of ovn-controller container
+
+      volumes:
+      {{- if .Values.spiffeDerivedK8sToken.enabled }}
+      # DaemonSet validation precedes Pod admission; the injector merges this volume by name.
+      - name: dsx-token
+        emptyDir: {}
+      {{- end }}
+      - name: host-var-lib-kubelet
+        hostPath:
+          path: /var/lib/kubelet
+      - name: sysfs
+        hostPath:
+          path: /sys
+      - name: host-var-run-dbus
+        hostPath:
+          path: /var/run/dbus
+      - name: host-var-log-ovs
+        hostPath:
+          path: /var/log/openvswitch
+      - name: host-var-log-ovnkube
+        hostPath:
+          path: /var/log/ovn-kubernetes
+      - name: host-var-run-ovs
+        hostPath:
+          path: /var/run/openvswitch
+      - name: host-etc-openvswitch
+        hostPath:
+          path: /etc/openvswitch
+      - name: host-var-run-ovn-kubernetes
+        hostPath:
+          path: /var/run/ovn-kubernetes
+      {{- if not .Values.global.noSystemd }}
+      # Mount systemd/private to the ovnkube containers.
+      # It allows listening for systemd events to track kubelet restart
+      - name: run-systemd
+        hostPath:
+          path: /run/systemd
+      {{- end }}
+      # ovn-dbs
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
+      - name: host-netns
+        hostPath:
+          path: /var/run/netns
+      # ovnkube-config: rendered by the parent chart as a ConfigMap.
+      - name: ovnkube-config
+        configMap:
+          name: ovnkube-config
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end -}}
