@@ -1,0 +1,60 @@
+name: Bug Report
+description: Report a bug found in this snapshot of ovn-kubernetes
+labels: ["kind/bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repository is a point-in-time source snapshot. Fixes are made in the
+        development tree and reach this repository in a later snapshot, so there is
+        no pull request to follow.
+
+        **Do not report security vulnerabilities here.** Follow
+        [SECURITY.md](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/SECURITY.md)
+        instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How can we reproduce it (as minimally and precisely as possible)?
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Environment
+      description: ovn-kubernetes commit or release, Kubernetes version, OVN/OVS versions, OS and kernel.
+      value: |
+        <details>
+
+        ```console
+        $ ovnkube --version
+        # paste output here
+
+        $ kubectl version
+        # paste output here
+        ```
+
+        </details>
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Anything else we need to know?

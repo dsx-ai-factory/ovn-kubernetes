@@ -1,0 +1,76 @@
+name: build
+
+# This repository is a read-only source snapshot: the only automation it carries
+# is proof that the published tree compiles and passes its unit tests in a public
+# environment. Image builds, e2e lanes and release automation live elsewhere.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release-*'
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'mkdocs.yml'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'mkdocs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go-controller/go.mod'
+          cache: false
+
+      - name: Build binaries
+        working-directory: go-controller
+        run: make build
+
+  unit-test:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: 'go-controller/go.mod'
+          cache: false
+
+      - name: Install VRF kernel module
+        run: |
+          set -x
+          sudo apt-get update
+          sudo apt-get install -y linux-modules-extra-$(uname -r)
+          sudo modprobe vrf
+
+      - name: Run unit tests
+        working-directory: go-controller
+        # CONTAINER_RUNNABLE=1 means "no usable container runtime", which selects
+        # the native test path. The containerised path runs `docker run -it` and
+        # fails on a runner without a TTY.
+        env:
+          CONTAINER_RUNNABLE: 1
+        run: make check

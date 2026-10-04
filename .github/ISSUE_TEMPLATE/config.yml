@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://www.nvidia.com/en-us/security/
+    about: Security issues go to NVIDIA PSIRT, never to a public issue or pull request.
+  - name: Upstream OVN-Kubernetes project
+    url: https://github.com/ovn-kubernetes/ovn-kubernetes
+    about: Questions about upstream OVN-Kubernetes, or changes you want merged upstream.
+  - name: OVN-Kubernetes documentation
+    url: https://ovn-kubernetes.io/
+    about: Architecture, installation and feature guides.

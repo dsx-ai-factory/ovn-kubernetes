@@ -1,54 +1,15 @@
-<!--
-Please make sure you've read and understood our contributing guidelines;
-https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/CONTRIBUTING.md
+# This repository does not accept pull requests
 
-** Make sure all your commits include a signature generated with `git commit -s` **
+The code here is published as a point-in-time snapshot. Development happens in
+the upstream project and in an internal tree, so a pull request opened here
+cannot be merged and will be closed.
 
-All changes must adhere to this template to make it easy for reviewers
-and preserve rationale/history behind every change
--->
+If you have found a problem or want to propose a change:
 
-## 📑 Description
-<!-- Add a brief description of the pr -->
-
-<!--
-*Automatically closes linked issue when PR is merged.
-Usage: `Fixes #<issue number>`, or `Fixes (paste link of issue)`.
-_If PR is about `failing-tests or flakes`, please post the related issues/tests in a comment and do not use `Fixes`_*
--->
-Fixes #
-
-## Release Notes
-<!--
-REQUIRED. Add a short, user-facing release note in the block below describing any
-user-visible change (new/changed/removed flags or APIs, behavior changes,
-deprecations, etc.).
-Write `NONE` if this PR has no user-facing impact (tests, refactors, CI,
-internal-only changes) — `NONE` is a valid entry.
--->
-```release-note
-NONE
-```
-
-## Additional Information for reviewers
-<!--
-What exactly did you change - you may also defer to information
-contained in commit messages. At a bare minimum it's worth highlighting
-which areas of the code were changed as it's easier to assign reviewers
--->
-
-## ✅ Checks
-<!-- Make sure your pr passes the CI checks and do check the following fields as needed - -->
-- [ ] My code requires changes to the documentation
-- [ ] if so, I have updated the documentation as required
-- [ ] My code does not require changes to the documentation
-- [ ] My code requires tests
-- [ ] if so, I have added and/or updated the tests as required
-- [ ] My code does not require tests
-- [ ] All the tests have passed in the CI <!-- If not leave a comment as to why the CI is red and if you need help understanding what's wrong -->
-
-## How to verify it
-<!--
-Did you include unit tests? or end-to-end tests?
-How can I manually verify that this patch achieves its objective
--->
+- Open an [issue](https://github.com/dsx-ai-factory/ovn-kubernetes/issues/new/choose).
+  Issues are read and triaged, and fixes appear in a later snapshot.
+- Send changes that belong upstream to
+  [ovn-kubernetes/ovn-kubernetes](https://github.com/ovn-kubernetes/ovn-kubernetes).
+- For security issues, follow
+  [SECURITY.md](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/SECURITY.md)
+  rather than opening an issue or pull request.
