@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# grafana settings
+
+# the namespace to deploy the dashboards
+namespace: monitoring
+
+# grafana settings for Grafana Operator
+grafana:
+  # Mapping `DS_PROMETHEUS` to a datasource name in case of Grafana Operator, 
+  datasourceName: prometheus
+  # allow importing dashboards into Grafana instances in other namespaces
+  allowCrossNamespaceImport: false
+  # the Grafana instance selector for provisioning dashboards
+  instanceSelector:
+    matchLabels:
+      grafana.com/selector: grafana

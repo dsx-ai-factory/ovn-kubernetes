@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: dashboard
+description: Dashboards for ovn-k8s IC mode
+type: application
+version: 1.0.0
+appVersion: "2025-08.latest"

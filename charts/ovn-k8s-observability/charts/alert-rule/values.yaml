@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+  
+# the namespace to install the alert rules
+namespace: ovn-kubernetes
+
+# optional base URL used to build per-alert dashboard label
+dashboardBaseURL: ""
+
+enableShardingRules: false
+
+# optional labels injected to every alert rule
+labels: {}

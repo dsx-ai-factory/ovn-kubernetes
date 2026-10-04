@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Test values for rendering interconnect alert rules for promtool.
+# Consumed by tests/scripts/test-rules.sh.
+
+global:
+  ovnkubeNamespace: ovn-kubernetes
+
+monitoring:
+  namespace: ovn-kubernetes
+  serviceMonitorSelectorLabels:
+    release: kube-prometheus-stack
+
+alert-rule:
+  namespace: ovn-kubernetes
+  # Chart defaults inject labels.team; leave empty so rule tests assert alert
+  # labels without environment-specific extras.
+  labels: null
+  rules:
+    ovnKubePodHealthRequiredNodes:
+      enable: true
+      filter: 'node=~".*k8s-supervisor-.*|.*nid-core-.*|.*-cs-.*|.*-ss-.*"'
+    ovnKubePodHealthFilteredNodes:
+      enable: true
+      filter: 'node!~".*liqo-.*|.*-k8s-ovn-.*"'
+    ovsNoOffloadBytes:
+      enable: true
+      filter: 'interface=~"^enp.*_[0-9]+$", port!~"^intra-node$"'
+    ovsNoOffloadIntraNodeBytes:
+      enable: true
+      filter: 'interface=~"^enp.*_[0-9]+$", port=~"^intra-node$"'
+    ovsBridgeFlowsTooHighGPUNodes:
+      enable: true
+      filter: 'bridge=~".*-br[1-9]-.*"'
+      threshold: 300000
+    ovsBridgeFlowsTooHighCPUNodes:
+      enable: true
+      filter: 'bridge!~".*-br[1-9]-.*"'
+      threshold: 500000
+    ovsBridgeFlowsTotalTooHigh:
+      enable: true
+      threshold: 200000
+    ovsNoIngressFilter:
+      enable: true
+      uplinkFilter: 'interface=~"^enp.*s0f[01]$|^ens[0-9]+(f[0-9]+)?np[01]$|^p[01]$|^pf[01]hpf$|^bond[01]$"'
+      podInterfaceFilter: 'interface=~"^enp.*_[0-9]+$|^pf[01]vf[0-9]+$"'
+    ovsMegaFlows:
+      enable: true
+      filter: 'instance=~".*-cs-.*"'
+      threshold: 40000

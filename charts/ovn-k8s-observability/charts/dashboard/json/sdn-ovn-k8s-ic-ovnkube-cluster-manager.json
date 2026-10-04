@@ -1,0 +1,541 @@
+{
+  "__inputs": [
+    {
+      "description": "",
+      "label": "prometheus",
+      "name": "DS_PROMETHEUS",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus",
+      "type": "datasource"
+    }
+  ],
+  "uid": "7ae56dbe010ad8befe6861dcfd23e42b",
+  "title": "OVN K8S IC / Ovnkube Cluster Manager",
+  "tags": [
+    "SDN"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "fiscalYearStartMonth": 0,
+  "schemaVersion": 41,
+  "panels": [
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Cluster Manager",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "ovnkube_clustermanager_build_info{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Info",
+      "description": "ovnkube-cluster-manager build info.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "version",
+                "branch",
+                "revision",
+                "goversion",
+                "pod"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "branch": 1,
+              "goversion": 3,
+              "pod": 4,
+              "revision": 2,
+              "version": 0
+            },
+            "renameByName": {
+              "branch": "Branch",
+              "goversion": "Go",
+              "revision": "Revision",
+              "version": "Version"
+            }
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Branch": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Go": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Revision": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Version": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "pod": {
+                "aggregations": [
+                  "count"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "pod (count)": "Pods"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "state-timeline",
+      "targets": [
+        {
+          "expr": "ovnkube_clustermanager_leader{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Leader Status",
+      "description": "Identifies whether the instance of ovnkube-cluster-manager is a leader(1) or not(0).",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "options": {
+        "alignValue": "center",
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "mergeValues": true,
+        "perPage": 0,
+        "rowHeight": 0.9,
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single",
+          "sort": ""
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "FOLLOWER",
+                  "color": "orange",
+                  "index": 1
+                },
+                "1": {
+                  "text": "LEADER",
+                  "color": "green",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 70,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"ovnkube-cluster-manager\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Usage",
+      "description": "CPU usage of container ovnkube-cluster-manager.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "custom": {
+            "axisBorderShow": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (container_memory_working_set_bytes{container=\"ovnkube-cluster-manager\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}) / 1024 ^ 3",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory Usage",
+      "description": "Working set memory usage of container ovnkube-cluster-manager.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes",
+          "custom": {
+            "axisBorderShow": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v4_host_subnets{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "expr": "max by (network_name) (ovnkube_clustermanager_num_v4_host_subnets{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "B"
+        },
+        {
+          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v6_host_subnets{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "C"
+        },
+        {
+          "expr": "max by (network_name) (ovnkube_clustermanager_num_v6_host_subnets{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "D"
+        }
+      ],
+      "title": "Host Subnets",
+      "description": "The number of host subnets allocated and total number of host subnets.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "network_name",
+                "Value #A",
+                "Value #B",
+                "Value #C",
+                "Value #D"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "network_name": 0
+            },
+            "renameByName": {
+              "Value #A": "IPv4 Allocated",
+              "Value #B": "IPv4 Available",
+              "Value #C": "IPv6 Allocated",
+              "Value #D": "IPv6 Available",
+              "network_name": "Network"
+            }
+          }
+        }
+      ],
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "reducer": null,
+          "show": false
+        },
+        "frameIndex": 0,
+        "showHeader": true,
+        "showTypeIcons": false
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(ovnkube_resource_retry_failures_total{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"ovnkube-control-plane-.*\"}[5m]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Resource Retry Failures Rate",
+      "description": "The rate oftimes processing a Kubernetes resource reached the maximum retry limit and was no longer processed.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "axisBorderShow": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "max(ovnkube_clustermanager_num_egress_ips{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "legendFormat": "Total",
+          "refId": "A"
+        }
+      ],
+      "title": "Egress IPs",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "interval": "120s"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "cluster",
+        "label": "Cluster",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "refresh": 1,
+        "includeAll": false,
+        "regex": ""
+      },
+      {
+        "type": "query",
+        "name": "pod",
+        "label": "Pod",
+        "skipUrlSync": false,
+        "description": "A list of ovnkube-control-plane Pods.",
+        "query": "label_values(kube_pod_info{created_by_name=~\"ovnkube-control-plane-.*\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}, pod)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      }
+    ]
+  },
+  "annotations": {}
+}

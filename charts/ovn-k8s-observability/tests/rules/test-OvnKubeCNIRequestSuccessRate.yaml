@@ -1,0 +1,94 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+---
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  - name: OvnKubeCNIRequestSuccessRateLow - should fire when success rate is 85%
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '85+85x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '15+15x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: np-ash4-br2-002-a
+              pod: ovnkube-node-abc
+              command: ADD
+            exp_annotations:
+              message: |
+                CNI request success rate is 85% for command ADD on pod ovnkube-node-abc
+                running on node np-ash4-br2-002-a over the last 20 minutes. Requires at least 10 CNI requests in that window;
+                a low success rate with fewer than 10 requests does not alert, to avoid false positives from small samples.
+  - name: OvnKubeCNIRequestSuccessRateCriticalLow - should fire when success rate is 45%
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '45+45x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '55+55x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateCriticalLow
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: np-ash4-br2-002-a
+              pod: ovnkube-node-abc
+              command: ADD
+            exp_annotations:
+              message: |
+                CNI request success rate is 45% for command ADD on pod ovnkube-node-abc
+                running on node np-ash4-br2-002-a over the last 20 minutes. Requires at least 10 CNI requests in that window;
+                a low success rate with fewer than 10 requests does not alert, to avoid false positives from small samples.
+  - name: OvnKubeCNIRequestSuccessRateLow - should not fire when success rate is 95%
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '95+95x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '5+5x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateLow
+        exp_alerts: []
+  - name: OvnKubeCNIRequestSuccessRateLow - should not fire at exactly 90% boundary
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '90+90x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '10+10x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateLow
+        exp_alerts: []
+  - name: OvnKubeCNIRequestSuccessRateCriticalLow - should not fire at exactly 50% boundary
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '50+50x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '50+50x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateCriticalLow
+        exp_alerts: []
+  - name: OvnKubeCNIRequestSuccessRateLow - should not fire when success rate is 45% (critical band)
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '45+45x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="np-ash4-br2-002-a",pod="ovnkube-node-abc",command="ADD"}'
+        values: '55+55x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateLow
+        exp_alerts: []

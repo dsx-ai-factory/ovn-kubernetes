@@ -1,0 +1,210 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+---
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  - name: Native OVS metrics should be summed
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_datapath_n_flows{datapath="system@ovs-system",instance="np-ash4-cs-native",pod="ovnkube-node-native",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '25000+0x10'
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="np-ash4-cs-native",pod="ovnkube-node-native",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: np-ash4-cs-native
+              pod: ovnkube-node-native
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45000 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-native instance np-ash4-cs-native for longer than 5m
+
+  - name: Legacy OVS metrics with hardware offload should be summed
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="np-ash4-cs-legacy",pod="ovnkube-node-legacy",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '25000+0x10'
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="np-ash4-cs-legacy",pod="ovnkube-node-legacy",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: np-ash4-cs-legacy
+              pod: ovnkube-node-legacy
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45000 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-legacy instance np-ash4-cs-legacy for longer than 5m
+
+  - name: Legacy OVS metrics in PV mode should fire without offload metric
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="dsx-cs-pv",pod="ovnkube-node-pv",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: dsx-cs-pv
+              pod: ovnkube-node-pv
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-pv instance dsx-cs-pv for longer than 5m
+
+  - name: Native datapath flow metric should fire by itself
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_datapath_n_flows{datapath="system@ovs-system",instance="np-ash4-cs-native-only",pod="ovnkube-node-native-only",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: np-ash4-cs-native-only
+              pod: ovnkube-node-native-only
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-native-only instance np-ash4-cs-native-only for longer than 5m
+
+  - name: Offloaded flow metric should fire by itself
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="np-ash4-cs-offload-only",pod="ovnkube-node-offload-only",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: np-ash4-cs-offload-only
+              pod: ovnkube-node-offload-only
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-offload-only instance np-ash4-cs-offload-only for longer than 5m
+
+  - name: Combined flow count below threshold should not fire
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="np-ash4-cs-below",pod="ovnkube-node-below",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="np-ash4-cs-below",pod="ovnkube-node-below",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '19999+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts: []
+
+  - name: Combined flow count exactly at threshold should not fire
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="np-ash4-cs-boundary",pod="ovnkube-node-boundary",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="np-ash4-cs-boundary",pod="ovnkube-node-boundary",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts: []
+
+  - name: Matching instance filter should allow alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="np-ash4-cs-filtered",pod="ovnkube-node-filtered",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: np-ash4-cs-filtered
+              pod: ovnkube-node-filtered
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-filtered instance np-ash4-cs-filtered for longer than 5m
+
+  - name: Nonmatching instance filter should suppress alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="np-ash4-br2-203-b",pod="ovnkube-node-excluded",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts: []
+
+  - name: Alert should respect five minute pending period
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="np-ash4-cs-pending",pod="ovnkube-node-pending",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: np-ash4-cs-pending
+              pod: ovnkube-node-pending
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-pending instance np-ash4-cs-pending for longer than 5m
+
+  - name: Flow counts should remain isolated per node
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="np-ash4-cs-a",pod="ovnkube-node-a",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '25000+0x10'
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="np-ash4-cs-b",pod="ovnkube-node-b",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45000+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: np-ash4-cs-b
+              pod: ovnkube-node-b
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45000 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-b instance np-ash4-cs-b for longer than 5m

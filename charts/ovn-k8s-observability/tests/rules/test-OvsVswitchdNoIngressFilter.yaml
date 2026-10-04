@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+---
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  # ovs_vswitchd_interface_of_port carries a type label that
+  # ovs_vswitchd_interface_ingress_qdisc_total does not, so the alert expressions
+  # must join with ignoring(type).
+  - name: Uplink interface naming variants should alert after six minutes
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="enp197s0f0",instance="pci-node",pod="ovnkube-node-pci"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="enp197s0f0",instance="pci-node",pod="ovnkube-node-pci",type="system"}'
+        values: '5+0x10'
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="ens1np0",instance="slot-node",pod="ovnkube-node-slot"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="ens1np0",instance="slot-node",pod="ovnkube-node-slot",type="system"}'
+        values: '5+0x10'
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="bond0",instance="bond-node",pod="ovnkube-node-bond"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="bond0",instance="bond-node",pod="ovnkube-node-bond"}'
+        values: '5+0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: OvsVswitchdNoIngressFilterOnUplinkInterface
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnUplinkInterface
+        exp_alerts:
+          - exp_labels:
+              severity: major
+              interface: enp197s0f0
+              instance: pci-node
+              pod: ovnkube-node-pci
+            exp_annotations:
+              message: |
+                The uplink interface enp197s0f0 in instance pci-node reports
+                the ingress filters count as 0
+          - exp_labels:
+              severity: major
+              interface: ens1np0
+              instance: slot-node
+              pod: ovnkube-node-slot
+            exp_annotations:
+              message: |
+                The uplink interface ens1np0 in instance slot-node reports
+                the ingress filters count as 0
+          - exp_labels:
+              severity: major
+              interface: bond0
+              instance: bond-node
+              pod: ovnkube-node-bond
+            exp_annotations:
+              message: |
+                The uplink interface bond0 in instance bond-node reports
+                the ingress filters count as 0
+
+  - name: Pod interface naming variants should alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="enp197s0f0_7",instance="pci-node",pod="ovnkube-node-pci"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="enp197s0f0_7",instance="pci-node",pod="ovnkube-node-pci",type="system"}'
+        values: '7+0x10'
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="pf0vf7",instance="pf-node",pod="ovnkube-node-pf"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="pf0vf7",instance="pf-node",pod="ovnkube-node-pf"}'
+        values: '7+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnPodInterface
+        exp_alerts:
+          - exp_labels:
+              severity: major
+              interface: enp197s0f0_7
+              instance: pci-node
+              pod: ovnkube-node-pci
+            exp_annotations:
+              message: |
+                The interface enp197s0f0_7 in instance pci-node reports
+                the ingress filters count as 0
+          - exp_labels:
+              severity: major
+              interface: pf0vf7
+              instance: pf-node
+              pod: ovnkube-node-pf
+            exp_annotations:
+              message: |
+                The interface pf0vf7 in instance pf-node reports
+                the ingress filters count as 0
+
+  - name: Configured qdisc or invalid OVS port should not alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="enp197s0f0",instance="configured-node",pod="ovnkube-node-configured"}'
+        values: '1+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="enp197s0f0",instance="configured-node",pod="ovnkube-node-configured",type="system"}'
+        values: '5+0x10'
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="enp197s0f1",instance="invalid-port-node",pod="ovnkube-node-invalid"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="enp197s0f1",instance="invalid-port-node",pod="ovnkube-node-invalid",type="system"}'
+        values: '-1+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnUplinkInterface
+        exp_alerts: []
+
+  - name: Interfaces excluded by configured filters should not alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="eth0",instance="excluded-node",pod="ovnkube-node-excluded"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="eth0",instance="excluded-node",pod="ovnkube-node-excluded"}'
+        values: '5+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnUplinkInterface
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnPodInterface
+        exp_alerts: []

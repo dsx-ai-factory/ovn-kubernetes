@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Packaged subchart archives from `helm dependency build`.
+**/*.tgz
+
+# Local obs-as-code build output
+bin/
+output/
+
+# helm dependency build may write this; unpacked charts/alert-rule and
+# charts/dashboard are the source of truth.
+Chart.lock

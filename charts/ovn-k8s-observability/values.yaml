@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Default values for ovn-k8s-observability.
+
+global:
+  # -- Namespace where the OVN Kubernetes workloads run
+  ovnkubeNamespace: ovn-kubernetes
+
+dashboard:
+  # -- Namespace for GrafanaDashboard resources
+  namespace: ovn-kubernetes
+  grafana:
+    # -- Grafana datasource mapped to `DS_PROMETHEUS`
+    datasourceName: prom-victoriametrics
+    # -- Allow importing dashboards from other namespaces
+    allowCrossNamespaceImport: true
+    instanceSelector:
+      matchLabels:
+        # -- Grafana instance selector for dashboard provisioning
+        grafana.com/selector: grafana
+
+alert-rule:
+  # -- Namespace for PrometheusRule resources
+  namespace: ovn-kubernetes
+  # -- Optional base URL used to build per-alert dashboard labels
+  dashboardBaseURL: ""
+  # -- Add shardable labels and extra sharding rules
+  enableShardingRules: false
+  labels:
+    # -- Labels injected into every alert rule
+    team: sdn
+  rules:
+    ovnKubePodHealthRequiredNodes:
+      # -- Alert when ovnkube pods are missing on required nodes
+      enable: false
+    ovnKubePodHealthFilteredNodes:
+      # -- Alert when ovnkube pods are missing on the filtered node set
+      enable: true
+    ovsNoOffloadBytes:
+      # -- Alert on non-offloaded traffic
+      enable: false
+      # -- PromQL matcher for non-offloaded traffic alerts
+      filter: 'interface=~"^pf[0|1]vf[0-9]+$"'
+    ovsNoOffloadIntraNodeBytes:
+      # -- Alert on non-offloaded traffic through intra-node ports
+      enable: false
+    ovsBridgeFlowsTooHighGPUNodes:
+      # -- Alert on high OVS bridge flow counts on GPU nodes
+      enable: false
+    ovsBridgeFlowsTooHighCPUNodes:
+      # -- Alert on high OVS bridge flow counts on CPU nodes
+      enable: false
+    ovsBridgeFlowsTotalTooHigh:
+      # -- Alert on high OVS bridge flow counts across all nodes
+      enable: true
+      # -- Flow-count threshold for `ovsBridgeFlowsTotalTooHigh`
+      threshold: 200000
+    ovsNoIngressFilter:
+      # CSC and DH clusters run in PV mode; their uplinks (for example, ens1np0) and
+      # pod veth interfaces do not use hardware offload, so these alerts are not applicable
+      # to these clusters.
+      # For the DPF cluster, interface name is used to filter the interfaces that support
+      # hardware offloading.
+      # -- Alert when ingress policing is missing on offload-capable interfaces
+      enable: false
+      # -- PromQL matcher for uplink interfaces
+      uplinkFilter: 'interface=~"^p[01]$|^pf[01]hpf$"'
+      # -- PromQL matcher for pod interfaces
+      podInterfaceFilter: 'interface=~"^pf[01]vf[0-9]+$"'
+    ovsMegaFlows:
+      # -- Alert on unusually high OVS megaflow counts
+      enable: true
+      # -- Optional PromQL matcher for megaflow alerts
+      filter: ""
+      # -- Megaflow-count threshold
+      threshold: 100000
+
+monitoring:
+  # -- Namespace for ServiceMonitor resources
+  namespace: ovn-kubernetes
+  serviceMonitorSelectorLabels:
+    # -- Labels Prometheus uses to select ServiceMonitors
+    release: prometheus

@@ -1,0 +1,111 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
+{{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
+{{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
+{{- $dashboardPath := index $dashboardPaths "ovn-controller" }}
+{{- if $dashboardBaseURL }}
+  {{- $_ := set $ruleLabels "dashboard" (printf "%s%s" $dashboardBaseURL $dashboardPath) }}
+{{- end }}
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+    {{- if .Values.enableShardingRules }}
+    shardable: "true"
+    {{- end }}
+  namespace: {{ .Values.namespace }}
+  name: ovn-k8s-ovn-controller
+spec:
+  groups:
+  - name: ovn-k8s.ovn-controller
+    rules:
+
+    - alert: OvnControllerContainerRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="ovn-controller"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+        severity: minor
+        priority: p0
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container
+          is restarting {{ printf "%.2f" $value }} times / 5 minutes`}}
+
+    - alert: OvnControllerTxnErrorRateTooHigh
+      expr: |
+        rate(ovn_controller_txn_error{namespace="ovn-kubernetes",job="ovnkube-node"}[10m]) > 0
+      for: 10m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container
+          transaction error rate is {{ printf "%.2f" $value }} per second.`}}
+
+    - alert: OvnControllerTxnIncompleteRateTooHigh
+      expr: |
+        rate(ovn_controller_txn_incomplete{namespace="ovn-kubernetes",job="ovnkube-node"}[10m]) > 1
+      for: 30m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container
+          transaction incomplete rate is {{ printf "%.2f" $value }} per second`}}
+
+    - alert: OvnControllerLflowRunTooFrequent
+      expr: |
+        rate(ovn_controller_lflow_run{namespace="ovn-kubernetes",job="ovnkube-node"}[10m]) > 1
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-controller container
+          logical flow table translation rate is {{ printf "%.2f" $value }} per second.`}}
+
+{{- if .Values.enableShardingRules }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    shardable: "false"
+    role: alert-rules
+  namespace: {{ .Values.namespace }}
+  name: ovn-k8s-ovn-controller-nonshardable
+spec:
+  groups:
+  - name: ovn-k8s.ovn-controller
+    rules:
+{{- end }}
+
+    - alert: OvnControllerGeneveTunnelCountIsLow
+      expr: |
+        kube_node_info and on (node) (
+          label_replace(ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes"},
+            "node", "$1", "instance", "(.*)") < scalar(count(kube_node_info)) - 1
+        )
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`The list of nodes that have a lower number of Geneve Ports
+          and counts they have
+          {{ range query "ovn_controller_integration_bridge_geneve_ports{job='ovnkube-node', namespace='ovn-kubernetes'} < scalar(count(kube_node_info)) - 1" }}
+          {{ .Labels.instance }}: {{ .Value }}
+          {{ end }}.`}}

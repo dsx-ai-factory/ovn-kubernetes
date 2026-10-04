@@ -1,0 +1,86 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
+{{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
+{{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
+{{- $dashboardPath := index $dashboardPaths "ovn-northd" }}
+{{- if $dashboardBaseURL }}
+  {{- $_ := set $ruleLabels "dashboard" (printf "%s%s" $dashboardBaseURL $dashboardPath) }}
+{{- end }}
+
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+    {{- if .Values.enableShardingRules }}
+    shardable: "true"
+    {{- end }}
+  namespace: {{ .Values.namespace }}
+  name: ovn-k8s-ovn-northd
+spec:
+  groups:
+  - name: ovn-k8s.ovn-northd
+    rules:
+
+    - alert: OvnNorthdContainerRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="ovn-northd"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovn-northd container is
+         restarting {{ printf "%.2f" $value }} times / 5 minutes`}}
+
+    - alert: OvnNorthdIsNotActive
+      expr: |
+        ovn_northd_status == 0 and on(pod)
+        kube_pod_container_status_ready{namespace="ovn-kubernetes", container="ovn-northd"}  == 1
+      for: 10m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`The ovn-northd container in pod {{ $labels.pod }} is not in ACTIVE status.`}}
+
+
+    - alert: OvnNorthdIsStale
+      expr: ovnkube_controller_nb_e2e_timestamp - ovnkube_controller_sb_e2e_timestamp > 120
+      for: 6m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`The ovn-northd container in pod {{ $labels.pod }} has not successfully synced changes from northbound DB
+          to the southbound DB for too long`}}
+
+    - alert: OvnNorthdTxnErrorRateTooHigh
+      expr: |
+        rate(ovn_northd_txn_error{namespace="ovn-kubernetes",job="ovnkube-node"}[10m]) > 0
+      for: 10m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Transaction error rate for ovn-northd container in pod {{ $labels.pod }} is {{ printf "%.2f" $value }} per second.`}}
+
+    - alert: OvnNorthdTxnIncompleteRateTooHigh
+      expr: |
+        rate(ovn_northd_txn_incomplete{namespace="ovn-kubernetes",job="ovnkube-node"}[10m]) > 100
+      for: 30m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Transaction incomplete rate for ovn-northd container in pod {{ $labels.pod }} is {{ printf "%.2f" $value }} per second.`}}

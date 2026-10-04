@@ -1,0 +1,147 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  - name: K8sNodeWithoutOvnKubeRunning - should fire when node has no ovnkube-node pod
+    interval: 1m
+    input_series:
+      - series: 'kube_node_info{node="node-a"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: K8sNodeWithoutOvnKubeRunning
+        exp_alerts:
+          - exp_labels:
+              severity: minor
+              node: node-a
+            exp_annotations:
+              message: |
+                All K8s nodes should be running OVN K8s Controller pods,
+                but OVN K8s Controller pod is not running on node-a node.
+
+  - name: K8sNodeWithoutOvnKubeRunning - should not fire when ovnkube-node pod exists
+    interval: 1m
+    input_series:
+      - series: 'kube_node_info{node="node-a"}'
+        values: '1+0x15'
+      - series: 'kube_pod_info{namespace="ovn-kubernetes", pod="ovnkube-node-abc", node="node-a"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: K8sNodeWithoutOvnKubeRunning
+        exp_alerts: []
+
+  - name: K8sNodeWithoutOvnKubeReady - should fire when pod not Ready on Ready schedulable node
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+      - series: 'kube_pod_info{namespace="ovn-kubernetes", pod="ovnkube-node-abc", node="node-a"}'
+        values: '1+0x25'
+      - series: 'kube_node_status_condition{condition="Ready", status="true", node="node-a"}'
+        values: '1+0x25'
+      - series: 'kube_node_spec_unschedulable{node="node-a"}'
+        values: '0+0x25'
+      - series: 'kube_pod_container_status_ready{namespace="ovn-kubernetes", container="nb-ovsdb", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+      - series: 'kube_pod_container_status_ready{namespace="ovn-kubernetes", container="ovn-controller", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+      - series: 'kube_pod_container_status_ready{namespace="ovn-kubernetes", container="ovn-northd", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+      - series: 'kube_pod_container_status_ready{namespace="ovn-kubernetes", container="ovnkube-controller", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+      - series: 'kube_pod_container_status_ready{namespace="ovn-kubernetes", container="sb-ovsdb", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: K8sNodeWithoutOvnKubeReady
+        exp_alerts:
+          - exp_labels:
+              severity: minor
+              namespace: ovn-kubernetes
+              condition: "true"
+              pod: ovnkube-node-abc
+              node: node-a
+            exp_annotations:
+              message: |
+                ovnkube-node pod ovnkube-node-abc is in not Ready state on node node-a for longer than 20min.
+                Not ready containers: nb-ovsdb, ovn-controller, ovn-northd, ovnkube-controller, sb-ovsdb
+
+  - name: K8sNodeWithoutOvnKubeReady - should not fire when node is NotReady
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+      - series: 'kube_pod_info{namespace="ovn-kubernetes", pod="ovnkube-node-abc", node="node-a"}'
+        values: '1+0x25'
+      - series: 'kube_node_status_condition{condition="Ready", status="true", node="node-a"}'
+        values: '0+0x25'
+      - series: 'kube_node_spec_unschedulable{node="node-a"}'
+        values: '0+0x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: K8sNodeWithoutOvnKubeReady
+        exp_alerts: []
+
+  - name: K8sNodeWithoutOvnKubeReady - should not fire when node is SchedulingDisabled
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+      - series: 'kube_pod_info{namespace="ovn-kubernetes", pod="ovnkube-node-abc", node="node-a"}'
+        values: '1+0x25'
+      - series: 'kube_node_status_condition{condition="Ready", status="true", node="node-a"}'
+        values: '1+0x25'
+      - series: 'kube_node_spec_unschedulable{node="node-a"}'
+        values: '1+0x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: K8sNodeWithoutOvnKubeReady
+        exp_alerts: []
+
+  - name: K8sNodeWithoutOvnKubeReady - should not fire when pod is Ready
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod="ovnkube-node-abc"}'
+        values: '1+0x25'
+      - series: 'kube_pod_info{namespace="ovn-kubernetes", pod="ovnkube-node-abc", node="node-a"}'
+        values: '1+0x25'
+      - series: 'kube_node_status_condition{condition="Ready", status="true", node="node-a"}'
+        values: '1+0x25'
+      - series: 'kube_node_spec_unschedulable{node="node-a"}'
+        values: '0+0x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: K8sNodeWithoutOvnKubeReady
+        exp_alerts: []
+
+  - name: K8sCriticalNodeWithoutOvnKubeReady - should fire on critical Ready schedulable node
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+      - series: 'kube_pod_info{namespace="ovn-kubernetes", pod="ovnkube-node-abc", node="node-cs-001"}'
+        values: '1+0x25'
+      - series: 'kube_node_status_condition{condition="Ready", status="true", node="node-cs-001"}'
+        values: '1+0x25'
+      - series: 'kube_node_spec_unschedulable{node="node-cs-001"}'
+        values: '0+0x25'
+      - series: 'kube_pod_container_status_ready{namespace="ovn-kubernetes", container="sb-ovsdb", pod="ovnkube-node-abc"}'
+        values: '0+0x25'
+    alert_rule_test:
+      - eval_time: 21m
+        alertname: K8sCriticalNodeWithoutOvnKubeReady
+        exp_alerts:
+          - exp_labels:
+              severity: major
+              namespace: ovn-kubernetes
+              condition: "true"
+              pod: ovnkube-node-abc
+              node: node-cs-001
+            exp_annotations:
+              message: |
+                OvnKube/Host K8s pod ovnkube-node-abc is in not Ready state on critical infrastructure node node-cs-001 for longer than 20min.
+                Not ready containers: sb-ovsdb

@@ -1,0 +1,991 @@
+{
+  "__inputs": [
+    {
+      "description": "",
+      "label": "prometheus",
+      "name": "DS_PROMETHEUS",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus",
+      "type": "datasource"
+    }
+  ],
+  "uid": "b246596647bea0b5a3fa81f15322b436",
+  "title": "OVN K8S IC / Northbound DB",
+  "tags": [
+    "SDN"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "fiscalYearStartMonth": 0,
+  "schemaVersion": 41,
+  "panels": [
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Northbound DB Overview",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "ovn_db_build_info{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Build Info",
+      "description": "A metric with a constant '1' value labeled by ovsdb-server version and NB and SB schema version.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "version",
+                "nb_schema_version",
+                "pod"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "nb_schema_version": 1,
+              "pod": 2,
+              "version": 0
+            },
+            "renameByName": {
+              "nb_schema_version": "NB Schema Version",
+              "version": "OVS Version"
+            }
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "NB Schema Version": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "OVS Version": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "pod": {
+                "aggregations": [
+                  "count"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "pod (count)": "Pods"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "targets": [
+        {
+          "expr": "sum(kube_pod_container_status_ready{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "legendFormat": "READY",
+          "refId": "A"
+        },
+        {
+          "expr": "count(kube_pod_container_status_ready{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}) - sum(kube_pod_container_status_ready{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "legendFormat": "NOT READY",
+          "refId": "B"
+        }
+      ],
+      "title": "Container nb-ovsdb Readiness",
+      "description": "The summary of ready and not ready nb-ovsdb containers.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "options": {
+        "displayMode": "lcd",
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "NOT READY"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "heatmap",
+      "targets": [
+        {
+          "expr": "ovn_db_db_size_bytes{db_name=\"OVN_Northbound\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "format": "heatmap",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "DB Size Overview",
+      "description": "The size of the database file associated with the OVN DB component.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "interval": "120s",
+      "options": {
+        "calculate": true,
+        "cellGap": 1,
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Oranges",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-9
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "selectionMode": "x",
+        "showValue": "auto",
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "reverse": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "custom": {
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Northbound DB Runtime",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 2,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m])) and topk($topk, sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[$__range] @ end())))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Usage (Top K)",
+      "description": "CPU usage of container nb-ovsdb. Only the $topk pods with the highest average usage over the selected time range are shown.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "custom": {
+            "axisBorderShow": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (container_memory_working_set_bytes{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}) / 1024 ^ 3 and topk($topk, sum by (pod) (avg_over_time(container_memory_working_set_bytes{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[$__range] @ end())) / 1024 ^ 3)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory Usage (Top K)",
+      "description": "Working set memory usage of container nb-ovsdb. Only the $topk pods with the highest average usage over the selected time range are shown.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes",
+          "custom": {
+            "axisBorderShow": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(kube_pod_container_status_restarts_total{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m])) and topk($topk, sum by (pod) (rate(kube_pod_container_status_restarts_total{container=\"nb-ovsdb\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[$__range] @ end())))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "nb-ovsdb Container Restart (Top K)",
+      "description": "Indicates the occurrence of a container restart. Only the $topk pods that restarted most over the selected time range are shown.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "axisBorderShow": false,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, max by (instance, pod) (ovn_db_e2e_timestamp{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}) - max by (instance, pod) (ovn_db_e2e_timestamp{db_name=\"OVN_Southbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "NB-\u003eSB E2E Timestamp Delay (Top K)",
+      "description": "The current e2e-timestamp value as observed in this instance of the database. This panel shows the delay between NB and SB timestamps.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "ovn_db_db_size_bytes{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"} and topk($topk, avg_over_time((ovn_db_db_size_bytes{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})[$__range:$__interval] @ end()))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "DB Size(Top K)",
+      "description": "The size of the database file associated with the OVN DB component.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (ovn_db_ovsdb_monitors{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Active DB Monitors(Top K)",
+      "description": "Number of OVSDB Monitors on the server.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "interval": "120s"
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Northbound DB Metrics",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 3,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (ovn_db_jsonrpc_server_sessions{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "JSON RPC Sessions (Top K)",
+      "description": "Active number of JSON RPC Server sessions to the DB.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 33
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_unixctl_received{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "JSON RPC Request Rate (Top K)",
+      "description": "How many JSON RPC requests were actually received in OVSDB server.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 33
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_unixctl_replied{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "JSON RPC Reply Rate (Top K)",
+      "description": "How many of received JSON RPC requests OVSDB server actually replied to.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 33
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_pstream_open{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PSTREAM Open Rate (Top K)",
+      "description": "The number of times passive connections were opened for the remote peer to connect.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 33
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_seq_change{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Object Creation Rate (Top K)",
+      "description": "Intensity of new object creations.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 41
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_util_xalloc{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory Allocation Rate (Top K)",
+      "description": "Intensity of memory allocations in OVSDB server.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 41
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_poll_zero_timeout{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Event Process Rate (Top K)",
+      "description": "How many scheduled events were processed without timeout (event loop effectiveness).",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 41
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_hmap_pathological{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HMAP Pathological Rate (Top K)",
+      "description": "How many hash map resize calls resulted in copying buckets with 6+ nodes (collision factor).",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 41
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_hmap_expand{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HMAP Expand Rate (Top K)",
+      "description": "How many hash map resizes have been made.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 49
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (rate(ovn_db_poll_create_node{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m])))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Event Loop Busy Rate (Top K)",
+      "description": "How many scheduled events to wake up blocking poller (event loop busy factor).",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 49
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, sum by (instance, pod) (ovn_db_lockfile_lock{db_name=\"OVN_Northbound\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Lock File Count (Top K)",
+      "description": "How many expensive file lock operations have been made.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 49
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "cluster",
+        "label": "Cluster",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "refresh": 1,
+        "includeAll": false,
+        "regex": ""
+      },
+      {
+        "type": "query",
+        "name": "instance",
+        "label": "Instance",
+        "skipUrlSync": false,
+        "query": "label_values(ovn_db_build_info{k8s_cluster_name=~\"$cluster\"}, instance)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "pod",
+        "label": "Pod",
+        "skipUrlSync": false,
+        "query": "label_values(ovn_db_build_info{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}, pod)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "custom",
+        "name": "topk",
+        "label": "Topk",
+        "skipUrlSync": false,
+        "query": "1,3,5,10,20,50",
+        "current": {
+          "selected": true,
+          "text": "5",
+          "value": "5"
+        },
+        "multi": false,
+        "allowCustomValue": true,
+        "includeAll": false,
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      }
+    ]
+  },
+  "annotations": {}
+}

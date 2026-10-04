@@ -1,0 +1,88 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
+{{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
+{{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
+{{- $dashboardPath := index $dashboardPaths "ovn-southbound-db" }}
+{{- if $dashboardBaseURL }}
+  {{- $_ := set $ruleLabels "dashboard" (printf "%s%s" $dashboardBaseURL $dashboardPath) }}
+{{- end }}
+
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+    {{- if .Values.enableShardingRules }}
+    shardable: "true"
+    {{- end }}
+  namespace: {{ .Values.namespace }}
+  name: ovn-k8s-ovn-southbound-db
+spec:
+  groups:
+  - name: ovn-k8s.ovn-southbound-db
+    rules:
+
+    - alert: OvnSBDBContainerRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="sb-ovsdb"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} sb-ovsdb container is
+         restarting {{ printf "%.2f" $value }} times / 5 minutes.`}}
+
+    - alert: OvnSBDBDbSize
+      expr: |
+        rate(ovn_db_db_size_bytes{namespace="ovn-kubernetes", db_name="OVN_Southbound"}[10m]) * 5 * 60 / 1024 / 1024 > 40
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} OVN_Southbound DB size is increasing
+         {{ printf "%.2f" $value }} MB / 5 minutes`}}
+
+    - alert: OvnSBDBMemoryConsumptionUnusuallyHigh
+      expr: |
+        container_memory_working_set_bytes{namespace="ovn-kubernetes", pod=~"^ovnkube-node-.*", container="sb-ovsdb"} / 1024 / 1024 / 1024 > 10
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} sb-ovsdb container memory consumption
+         crossed warning threshold and now at {{ printf "%.2f" $value }} GB`}}
+
+    - alert: OvnSBDBMemoryConsumptionTooHigh
+      expr: |
+        container_memory_working_set_bytes{namespace="ovn-kubernetes", pod=~"^ovnkube-node-.*", container="sb-ovsdb"} / 1024 / 1024 / 1024 > 15
+      for: 10m
+      labels:
+        severity: minor
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} sb-ovsdb container memory consumption
+         crossed threshold and now at {{ printf "%.2f" $value }} GB`}}
+
+    - alert: OvnSBDBMemoryConsumptionCriticallyHigh
+      expr: |
+        container_memory_working_set_bytes{namespace="ovn-kubernetes", pod=~"^ovnkube-node-.*", container="sb-ovsdb"} / 1024 / 1024 / 1024 > 20
+      for: 10m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} sb-ovsdb container memory consumption
+         crossed critical threshold and now at {{ printf "%.2f" $value }} GB`}}

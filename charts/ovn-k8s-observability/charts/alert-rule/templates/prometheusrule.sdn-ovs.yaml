@@ -1,0 +1,485 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
+{{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
+{{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
+{{- $dashboardPath := index $dashboardPaths "sdn-ovs" }}
+{{- if $dashboardBaseURL }}
+  {{- $_ := set $ruleLabels "dashboard" (printf "%s%s" $dashboardBaseURL $dashboardPath) }}
+{{- end }}
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+    {{- if .Values.enableShardingRules }}
+    shardable: "true"
+    {{- end }}
+  namespace: {{ .Values.namespace }}
+  name: sdn-ovs
+spec:
+  groups:
+  - name: sdn-ovs.commmon
+    rules:
+    {{- $rule := .Values.rules.ovsMegaFlows | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := $rule.filter | default "" }}
+    {{- $threshold := $rule.threshold | default 100000 }}
+    - alert: OvsMegaFlowsTotalUnusuallyHigh
+      # OVS legacy metrics use ovs_vswitchd_dp_flows_total, while OVS native metrics use ovs_vswitchd_datapath_n_flows.
+      # ovs_vswitchd_dp_offloaded_flows_total is absent in PV (veth-only) mode.
+      # Sum whichever metrics are available.
+      expr: |
+        sum without (datapath) (
+          {__name__=~"ovs_vswitchd_(dp_offloaded_flows_total|datapath_n_flows|dp_flows_total)",
+           namespace="ovn-kubernetes", job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}
+        ) > {{ $threshold }}
+      for: 5m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed unusually high number {{ $value }} of fast-path flows on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 5m`}}
+    {{- end }}
+
+    - alert: OvsTxRateLimitDropsUnusuallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_tx_misspkts_packets_drops[5m]) > 40
+      for: 5m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed TX rate limit caused {{ $value }} packet per second drops on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m`}}
+
+
+    - alert: OvsDBdbSize
+      expr: |
+        rate(ovs_ovsdb_db_size{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 1
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-db size is increasing
+         {{ printf "%.2f" $value }} Mb / 5 minutes`}}
+
+    - alert: OvsVswitchdDPFlowsLookupLostUnusuallyHigh
+      expr: |
+        rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 10
+      for: 5m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed unusually high rate of slow-path {{ $value }} packets flows lookup lost per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 10m`}}
+
+    - alert: OvsVswitchdDPFlowsLookupLostTooHigh
+      expr: |
+        rate(ovs_vswitchd_dp_flows_lookup_lost{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 50
+      for: 5m
+      labels:
+        severity: minor
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed too high rate of slow-path {{ $value }} packets flows lookup lost per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 10m`}}
+
+    - alert: OvsVswitchdDPFlowsLookupMissed
+      expr: |
+        rate(ovs_vswitchd_dp_flows_lookup_missed{namespace="ovn-kubernetes",job="ovnkube-node"}[5m]) > 1000
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed unusually high rate of slow-path {{ $value }} packets flows lookup misses per second on the host with
+         pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }} for longer than 10m`}}
+
+    - alert: OvsVswitchdInterfaceRxErrors
+      expr: |
+        rate(ovs_vswitchd_interface_rx_errors_total{namespace="ovn-kubernetes",job="ovnkube-node"}[15m]) > 100
+        or rate(ovs_vswitchd_interface_rx_errors{namespace="ovn-kubernetes",job="ovnkube-node"}[15m]) > 100
+      for: 15m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that total
+         number of packets with errors received by OVS interface is {{ printf "%.2f" $value }} per second.`}}
+
+    - alert: OvsVswitchdInterfaceTxErrors
+      expr: |
+        rate(ovs_vswitchd_interface_tx_errors_total{namespace="ovn-kubernetes",job="ovnkube-node"}[15m]) > 100
+        or rate(ovs_vswitchd_interface_tx_errors{namespace="ovn-kubernetes",job="ovnkube-node"}[15m]) > 100
+      for: 15m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that total
+         number of packets with errors transmitted by OVS interface is {{ printf "%.2f" $value }} per second.`}}
+
+    - alert: OvsVswitchdPacketInDrop
+      expr: |
+        rate(ovs_vswitchd_packet_in_drop{namespace="ovn-kubernetes",job="ovnkube-node"}[15m]) > 100
+      for: 15m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of packets that dropped due to resource constraints is {{ printf "%.2f" $value }} per second.`}}
+
+    {{- $rule := .Values.rules.ovsBridgeFlowsTooHighGPUNodes | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := $rule.filter | default "" }}
+    {{- $threshold := $rule.threshold | default 300000 }}
+    - alert: OvsVswitchdBridgeFlowsTooHighGPUNodes
+      expr: |
+        max by(pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
+      for: 15m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process
+            reports that number of Bridge flows on the OVS bridge
+            {{ $labels.instance }}/{{ $labels.bridge }}
+            is {{ printf "%.0f" $value }}.`}}
+    {{- end }}
+
+    {{- $rule := .Values.rules.ovsBridgeFlowsTooHighCPUNodes | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := $rule.filter | default "" }}
+    {{- $threshold := $rule.threshold | default 500000 }}
+    - alert: OvsVswitchdBridgeFlowsTooHighCPUNodes
+      expr: |
+        max by(pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
+      for: 15m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process
+            reports that number of Bridge flows on the OVS bridge
+            {{ $labels.instance }}/{{ $labels.bridge }}
+            is {{ printf "%.0f" $value }}.`}}
+    {{- end }}
+
+    {{- $rule := .Values.rules.ovsBridgeFlowsTotalTooHigh | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := $rule.filter | default "" }}
+    {{- $threshold := $rule.threshold | default 200000 }}
+    - alert: OvsVswitchdBridgeFlowsTotalTooHigh
+      expr: |
+        max by(pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
+      for: 15m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process
+            reports that number of Bridge flows on the OVS bridge
+            {{ $labels.instance }}/{{ $labels.bridge }}
+            is {{ printf "%.2f" $value }}.`}}
+    {{- end }}
+
+    - alert: OvsVswitchdDPFlowsTotalTooHigh
+      expr: |
+        max by (pod) (ovs_vswitchd_dp_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"}) > 10000
+      for: 15m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of DP flows is {{ printf "%.2f" $value }}.`}}
+
+    - alert: OvsVswitchdOfprotoRecvOpenflowRateTooHigh
+      expr: |
+        rate(ovs_vswitchd_ofproto_recv_openflow{namespace="ovn-kubernetes",job="ovnkube-node"}[15m]) > 50
+      for: 15m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovs-vswitchd process reports that
+         number of handled flows is {{ printf "%.2f" $value }} per second for longer than 15 mins.`}}
+
+    {{- $rule := .Values.rules.ovsNoIngressFilter | default dict }}
+    {{- if $rule.enable }}
+    {{- $uplinkFilter := required "rules.ovsNoIngressFilter.uplinkFilter is required when enabled" $rule.uplinkFilter }}
+    {{- $podInterfaceFilter := required "rules.ovsNoIngressFilter.podInterfaceFilter is required when enabled" $rule.podInterfaceFilter }}
+    - alert: OvsVswitchdNoIngressFilterOnUplinkInterface
+      annotations:
+        message: |
+          {{`The uplink interface {{ $labels.interface }} in instance {{ $labels.instance }} reports
+          the ingress filters count as {{ $value }}`}}
+      expr: |
+        ovs_vswitchd_interface_ingress_qdisc_total{ {{ $uplinkFilter }} } == 0 and ignoring(type)
+            ovs_vswitchd_interface_of_port{ {{ $uplinkFilter }} } != -1
+      for: 6m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+
+    - alert: OvsVswitchdNoIngressFilterOnPodInterface
+      annotations:
+        message: |
+          {{`The interface {{ $labels.interface }} in instance {{ $labels.instance }} reports
+          the ingress filters count as {{ $value }}`}}
+      expr: |
+        ovs_vswitchd_interface_ingress_qdisc_total{ {{ $podInterfaceFilter }} } == 0 and ignoring(type)
+            ovs_vswitchd_interface_of_port{ {{ $podInterfaceFilter }} } != -1
+      for: 6m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+    {{- end }}
+
+    - alert: OvsConntrackUsageHigh
+      expr: |
+        ((ovs_vswitchd_conntrack_n_connections{datapath="ovs-netdev"}
+          / clamp_min(ovs_vswitchd_conntrack_connection_limit{datapath="ovs-netdev"}, 1)
+        ) * 100 > 90) < 99
+      for: 30m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`OVS conntrack usage on pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }}
+         reached {{ printf "%.2f" $value }}% for longer than 30m.
+
+         Rationale: conntrack usage = n_connections / connection_limit. This warning fires for sustained
+         high usage in the 90%-99% range to detect pressure before conntrack saturation.`}}
+
+    - alert: OvsConntrackUsageCritical
+      expr: |
+        (
+          ovs_vswitchd_conntrack_n_connections{datapath="ovs-netdev"}
+          / clamp_min(ovs_vswitchd_conntrack_connection_limit{datapath="ovs-netdev"}, 1)
+        ) * 100 >= 99
+      for: 10m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Conntrack usage on pod ovn-kubernetes/ {{ $labels.pod }} instance {{ $labels.instance }}
+         reached critical level at {{ printf "%.2f" $value }}% for longer than 10m.
+
+         Rationale: conntrack usage = n_connections / connection_limit. This critical alert indicates
+         near-saturation (>=99%) where new connections can be dropped or delayed.`}}
+
+    - alert: OvsPollThreadFlowTableMissRatioHigh
+      expr: |
+        (
+          sum by (pod, instance) (
+            rate(ovs_vswitchd_poll_threads_missed_total{datapath="ovs-netdev",core!="main"}[10m])
+            +
+            rate(ovs_vswitchd_poll_threads_lost_total{datapath="ovs-netdev",core!="main"}[10m])
+          )
+          /
+          clamp_min(
+            sum by (pod, instance) (
+              rate(ovs_vswitchd_poll_threads_hit_total{datapath="ovs-netdev",core!="main"}[10m])
+              +
+              rate(ovs_vswitchd_poll_threads_missed_total{datapath="ovs-netdev",core!="main"}[10m])
+              +
+              rate(ovs_vswitchd_poll_threads_lost_total{datapath="ovs-netdev",core!="main"}[10m])
+            ),
+            1
+          )
+        ) * 100 > 30
+      for: 30m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Poll thread flow table miss ratio (missed + lost) on pod ovn-kubernetes/
+         {{ $labels.pod }} instance {{ $labels.instance }}
+         reached {{ printf "%.2f" $value }}% for longer than 30m.
+
+         Rationale: miss ratio = (MISSED + LOST) / (HIT + MISSED + LOST). Here HIT means flow table
+         match, MISSED means flow table miss with successful upcall, and LOST means flow table miss with failed
+         upcall.
+         The main core (core="main") is excluded because it represents non-PMD fallback/main-thread datapath
+         context; this alert is intended to track PMD poll-thread behavior only.`}}
+
+    - alert: OvsPollThreadPacketUpcallFailureRatioHigh
+      expr: |
+        (
+          sum by (pod, instance) (
+            rate(ovs_vswitchd_poll_threads_lost_total{datapath="ovs-netdev",core!="main"}[10m])
+          )
+          /
+          clamp_min(
+            sum by (pod, instance) (
+              rate(ovs_vswitchd_poll_threads_hit_total{datapath="ovs-netdev",core!="main"}[10m])
+              +
+              rate(ovs_vswitchd_poll_threads_lost_total{datapath="ovs-netdev",core!="main"}[10m])
+              +
+              rate(ovs_vswitchd_poll_threads_missed_total{datapath="ovs-netdev",core!="main"}[10m])
+            ),
+            1
+          )
+        ) * 100 > 10
+      for: 30m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Poll thread upcall failed ratio on pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} reached {{ printf "%.2f" $value }}% for longer than 30m.
+
+         Rationale: upcall failed ratio = LOST / (HIT + MISSED + LOST). LOST means flow table miss with
+         failed upcall, HIT means flow table match, and MISSED means flow table miss with successful upcall.
+         The main core (core="main") is excluded because it represents non-PMD fallback/main-thread datapath
+         context; this alert is intended to track PMD poll-thread behavior only.`}}
+
+    - alert: OvsVfRepInterfaceDown
+      # ovs_vswitchd_interface_link_state's value has different meanings in below cases:
+      # - ovs native metrics: down(0) or up(1).
+      # - ovnkube collected metrics: down(1) or up(2) or other(0)
+      # ovs native metrics has `type` label to distinguish the two cases.
+      expr: |
+        ovs_vswitchd_interface_link_state{interface=~"^enp.*_[0-9]+|^pf.*", port!="", type=""} != 2 and ovs_vswitchd_interface_of_port{interface=~"^enp.*_[0-9]+|^pf.*"} != -1
+        or ovs_vswitchd_interface_link_state{interface=~"^enp.*_[0-9]+|^pf.*", port!="", type!=""} != 1 and ovs_vswitchd_interface_of_port{interface=~"^enp.*_[0-9]+|^pf.*"} != -1
+      for: 10m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Interface {{ $labels.interface }} on instance {{ $labels.instance }} is not up for longer than 10m`}}
+
+    {{- $rule := .Values.rules.ovsNoOffloadBytes | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := required "rules.ovsNoOffloadBytes.filter is required when enabled" $rule.filter }}
+    - alert: OvsTxNoOffloadBytesTooHigh
+      expr: |
+        rate(ovs_vswitchd_interface_tx_sw_bytes{ {{ $filter }} }[10m]) / 1024 / 1024 > 40
+      for: 5m
+      labels:
+        severity: minor
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed higher than 40MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m`}}
+    - alert: OvsTxNoOffloadBytesUnusuallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_tx_sw_bytes{ {{ $filter }} }[5m]) / 1024 / 1024 > 20
+      for: 5m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed higher than 20MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m`}}
+
+    - alert: OvsTxNoOffloadBytesCriticallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_tx_sw_bytes{ {{ $filter }} }[15m]) / 1024 / 1024 > 60
+      for: 60m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 10m`}}
+    - alert: OvsRxNoOffloadBytesCriticallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_rx_sw_bytes{ {{ $filter }} }[15m]) / 1024 / 1024 > 60
+      for: 60m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed higher than 60MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 10m`}}
+    {{- end }}
+
+    {{- $rule := .Values.rules.ovsNoOffloadIntraNodeBytes | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := required "rules.ovsNoOffloadIntraNodeBytes.filter is required when enabled" $rule.filter }}
+    - alert: OvsTxNoOffloadIntraNodeBytesHigh
+      expr: |
+        rate(ovs_vswitchd_interface_tx_sw_bytes{ {{ $filter }} }[15m]) / 1024 / 1024 > 60
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 10m`}}
+    - alert: OvsRxNoOffloadIntraNodeBytesHigh
+      expr: |
+        rate(ovs_vswitchd_interface_rx_sw_bytes{ {{ $filter }} }[10m]) / 1024 / 1024 > 60
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+         instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m`}}
+    {{- end }}
+
+
+    {{- $rule := .Values.rules.ovsNoOffloadBytes | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := required "rules.ovsNoOffloadBytes.filter is required when enabled" $rule.filter }}
+    - alert: OvsRxNoOffloadBytesTooHigh
+      expr: |
+        rate(ovs_vswitchd_interface_rx_sw_bytes{ {{ $filter }} }[10m]) / 1024 / 1024 > 40
+      for: 5m
+      labels:
+        severity: minor
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+          instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m`}}
+
+    - alert: OvsRxNoOffloadBytesUnusuallyHigh
+      expr: |
+        rate(ovs_vswitchd_interface_rx_sw_bytes{ {{ $filter }} }[5m]) / 1024 / 1024 > 20
+      for: 5m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ {{ $labels.pod }}
+          instance {{ $labels.instance }} port {{ $labels.port }} interface {{ $labels.interface }} for longer than 5m`}}
+    {{- end }}

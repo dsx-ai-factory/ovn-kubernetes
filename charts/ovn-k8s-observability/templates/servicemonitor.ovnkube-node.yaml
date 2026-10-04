@@ -1,0 +1,60 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: ovnkube-node
+    {{- with .Values.monitoring.serviceMonitorSelectorLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  name: ovnkube-node
+  namespace: {{ default .Values.global.ovnkubeNamespace .Values.monitoring.namespace }}
+spec:
+  endpoints:
+  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    interval: 60s
+    metricRelabelings:
+    - action: drop
+      regex: (go|process)_.*
+      sourceLabels:
+      - __name__
+    - action: drop
+      regex: ovs_vswitchd_interface(_ingress_policing.+|_ingress_policy.+|_mtu|_duplex|_ifindex|_link_speed|_driver_name|_multicast_total)
+      sourceLabels:
+      - __name__
+    - action: drop
+      regex: ovs_vswitchd_interface_.*;ovn-.*
+      sourceLabels:
+      - __name__
+      - name
+    - action: labeldrop
+      regex: endpoint|service
+    - action: replace
+      regex: (ovs_vswitchd_interface_.*);(.+)
+      replacement: $2
+      sourceLabels:
+      - __name__
+      - name
+      targetLabel: interface
+    path: /metrics
+    port: ovnkube-node-metrics
+    relabelings:
+    - action: replace
+      regex: ([^.]+).*
+      replacement: ${1}
+      sourceLabels:
+      - __meta_kubernetes_pod_node_name
+      targetLabel: instance
+    scheme: https
+    tlsConfig:
+      insecureSkipVerify: true
+  jobLabel: k8s-app
+  namespaceSelector:
+    matchNames:
+    - {{ .Values.global.ovnkubeNamespace }}
+  selector:
+    matchLabels:
+      k8s-app: ovnkube-node

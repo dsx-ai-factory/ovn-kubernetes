@@ -1,0 +1,235 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
+{{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
+{{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
+{{- $dashboardPath := index $dashboardPaths "ovnkube-controller" }}
+{{- if $dashboardBaseURL }}
+  {{- $_ := set $ruleLabels "dashboard" (printf "%s%s" $dashboardBaseURL $dashboardPath) }}
+{{- end }}
+
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+    {{- if .Values.enableShardingRules }}
+    shardable: "true"
+    {{- end }}
+  namespace: {{ .Values.namespace }}
+  name: ovn-k8s-ovnkube-controller
+spec:
+  groups:
+  - name: ovn-k8s.ovnkube-controller
+    rules:
+
+    {{- $rule := .Values.rules.ovnKubePodHealthFilteredNodes | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := $rule.filter | default "" }}
+    - alert: K8sNodeWithoutOvnKubeRunning
+      expr: |
+        kube_node_info{{ printf "{%s}" $filter }} unless on(node)
+        (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node.*"}) > 0
+      for: 10m
+      labels:
+        severity: minor
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`All K8s nodes should be running OVN K8s Controller pods,
+         but OVN K8s Controller pod is not running on {{ $labels.node }} node.`}}
+
+    - alert: K8sNodeWithoutOvnKubeReady
+      expr: |
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*"}) == 0
+         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on (node) kube_node_spec_unschedulable == 0
+      for: 20m
+      labels:
+        severity: minor
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`ovnkube-node pod {{ $labels.pod }} is in not Ready state on node {{ $labels.node }} for longer than 20min.
+         Not ready containers:
+         {{- range $i, $c := printf "kube_pod_container_status_ready{namespace='ovn-kubernetes', pod='%s'} == 0" $labels.pod | query | sortByLabel "container" }}
+         {{- if $i }},{{ end }} {{ $c.Labels.container }}
+         {{- end }}`}}
+    {{- end }}
+
+    {{- $rule := .Values.rules.ovnKubePodHealthRequiredNodes | default dict }}
+    {{- if $rule.enable }}
+    {{- $filter := $rule.filter | default "" }}
+    - alert: K8sCriticalNodeWithoutOvnKubeRunning
+      expr: |
+        (kube_pod_status_phase{namespace="ovn-kubernetes", phase="Running", pod=~"ovnkube-node-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*"{{ if $filter }}, {{ $filter }}{{ end }}}) == 0
+         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on (node) kube_node_spec_unschedulable == 0
+      for: 20m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`OvnKube/Host K8s pod {{ $labels.pod }} is in not Running on critical infrastructure node {{ $labels.node }} for longer than 20min`}}
+
+    - alert: K8sCriticalNodeWithoutOvnKubeReady
+      expr: |
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*"} * on(pod) group_left(node)
+         kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*"{{ if $filter }}, {{ $filter }}{{ end }}}) == 0
+         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on (node) kube_node_spec_unschedulable == 0
+      for: 20m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`OvnKube/Host K8s pod {{ $labels.pod }} is in not Ready state on critical infrastructure node {{ $labels.node }} for longer than 20min.
+          Not ready containers:
+          {{- range $i, $c := printf "kube_pod_container_status_ready{namespace='ovn-kubernetes', pod='%s'} == 0" $labels.pod | query | sortByLabel "container" }}
+          {{- if $i }},{{ end }} {{ $c.Labels.container }}
+          {{- end }}`}}
+    {{- end }}
+
+    - alert: OvnKubeControllerContainerRestarts
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", container="ovnkube-controller"}[15m]) * 60 * 5 > 0
+      for: 30m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+        message: |
+          {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovnkube-controller container is restarting
+          {{ printf "%.2f" $value }} times / 5 minutes.`}}
+
+
+    # per-node
+    - alert: OvnKubeHighPodCreationLatencyP99
+      expr: |
+        histogram_quantile(0.99,
+         sum by (instance, le) (
+           rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m])
+         )
+        ) > 20
+      for: 30m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`The pod creation latency was {{ $value }}s on
+          node {{ $labels.instance }} for the last 30 minutes is more than 20 seconds.`}}
+
+    - alert: OvnKubeControllerLogFileGrowingTooFast
+      expr: |
+        rate(ovnkube_controller_logfile_size{namespace="ovn-kubernetes", job="ovnkube-node"}[15m]) * 5 * 60 / 1024 / 1024 > 20
+      for: 10m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} {{ $labels.logfile_name }} file size is
+         increasing {{ printf "%.2f" $value }} MB / 5 minutes`}}
+
+    - alert: OvnKubeCNIRequestSuccessRateLow
+      expr: |
+        50 <= 100 * (
+          sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count{err="false"}[20m]))
+          /
+          sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m]))
+        ) < 90
+        and
+        sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m])) >= 10
+      for: 10m
+      labels:
+        severity: warning
+        {{- with $ruleLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+       message: |
+         {{`CNI request success rate is {{ printf "%.0f" $value }}% for command {{ $labels.command }} on pod {{ $labels.pod }}
+         running on node {{ $labels.instance }} over the last 20 minutes. Requires at least 10 CNI requests in that window;
+         a low success rate with fewer than 10 requests does not alert, to avoid false positives from small samples.`}}
+
+    - alert: OvnKubeCNIRequestSuccessRateCriticalLow
+      expr: |
+        100 * (
+          sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count{err="false"}[20m]))
+          /
+          sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m]))
+        ) < 50
+        and
+        sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m])) >= 10
+      for: 10m
+      labels:
+        severity: critical
+        {{- with $ruleLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+       message: |
+         {{`CNI request success rate is {{ printf "%.0f" $value }}% for command {{ $labels.command }} on pod {{ $labels.pod }}
+         running on node {{ $labels.instance }} over the last 20 minutes. Requires at least 10 CNI requests in that window;
+         a low success rate with fewer than 10 requests does not alert, to avoid false positives from small samples.`}}
+
+{{- if .Values.enableShardingRules }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    shardable: "false"
+    role: alert-rules
+  namespace: {{ .Values.namespace }}
+  name: ovn-k8s-ovnkube-controller-nonshardable
+spec:
+  groups:
+  - name: ovn-k8s.ovnkube-controller
+    rules:
+{{- end }}
+
+    # cluster-wide
+    - alert: OvnKubeIncreaseInPodCreationLatencyP100
+      expr: |
+        histogram_quantile(1.0,
+         sum by (le) (
+          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m]
+          offset 15m)
+         )
+        )
+        -
+        histogram_quantile(1.0,
+         sum by (le) (
+          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m])
+         )
+        ) > 10
+      for: 30m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         The pod creation latency aggregated across all nodes for the last
+         30 minutes has increased 10 seconds as compared to 15 minutes before.
+
+    - alert: OvnKubeControllerStale
+      expr: time() - max(ovnkube_controller_nb_e2e_timestamp) > 120
+      for: 6m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }} ovnkube-controller container has not
+         updating the OVN northbound database for too long`}}

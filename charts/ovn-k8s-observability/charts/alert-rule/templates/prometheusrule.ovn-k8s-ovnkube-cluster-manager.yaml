@@ -1,0 +1,110 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
+{{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
+{{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
+{{- $dashboardPath := index $dashboardPaths "ovnkube-cluster-manager" }}
+{{- if $dashboardBaseURL }}
+  {{- $_ := set $ruleLabels "dashboard" (printf "%s%s" $dashboardBaseURL $dashboardPath) }}
+{{- end }}
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+    {{- if .Values.enableShardingRules }}
+    shardable: "true"
+    {{- end }}
+  namespace: {{ .Values.namespace }}
+  name: ovn-k8s-ovnkube-cluster-manager
+spec:
+  groups:
+  - name: ovn-k8s.ovnkube-cluster-manager
+    rules:
+
+    - alert: OvnKubeClusterManagerMemoryConsumptionUnusuallyHigh
+      # TODO: In IC mode, ovnkube-control-plane is lightweight,
+      # need to adjust the threshold based on the actual memory usage
+      expr: |
+        container_memory_working_set_bytes{namespace="ovn-kubernetes", pod=~"^ovnkube-control-plane-.*", container="ovnkube-cluster-manager"} / 1024 / 1024 / 1024 > 10
+      for: 10m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`Pod ovn-kubernetes/ {{ $labels.pod }}  memory consumption crossed normal threshold and now at {{ printf "%.2f" $value }} GB`}}
+
+    - alert: OvnKubeClusterManagerV4HostSubnetsUsageTooHigh
+      expr: |
+        ovnkube_clustermanager_allocated_v4_host_subnets{namespace="ovn-kubernetes"}
+        / ovnkube_clustermanager_num_v4_host_subnets{namespace="ovn-kubernetes"} > 0.8
+      for: 10m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`ovnkube cluster manager IPv4 host subnets usage exceed 80% for network {{ $labels.network_name }}.`}}
+
+    - alert: OvnKubeClusterManagerV6HostSubnetsUsageTooHigh
+      expr: |
+        ovnkube_clustermanager_allocated_v6_host_subnets{namespace="ovn-kubernetes"}
+        / ovnkube_clustermanager_num_v6_host_subnets{namespace="ovn-kubernetes"} > 0.8
+      for: 10m
+      labels:
+        severity: major
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`ovnkube cluster manager IPv6 host subnets usage exceed 80% for network {{ $labels.network_name }}.`}}
+
+{{- if .Values.enableShardingRules }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    shardable: "false"
+    role: alert-rules
+  namespace: {{ .Values.namespace }}
+  name: ovn-k8s-ovnkube-cluster-manager-nonshardable
+spec:
+  groups:
+  - name: ovn-k8s.ovnkube-cluster-manager
+    rules:
+{{- end }}
+
+    - alert: OvnKubeClusterManagerNotRunning
+      expr: |
+        absent(up{job="ovnkube-control-plane", namespace="ovn-kubernetes"} == 1) and sum(up{job=~"prometheus.*"}) > 0
+      for: 5m
+      labels:
+        severity: warning
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: |
+         {{`No ovnkube-cluster-manager running for longer than 5m`}}
+
+    - alert: OvnKubeClusterManagerMultipleLeaders
+      expr: sum(ovnkube_clustermanager_leader{namespace="ovn-kubernetes"}) > 1
+      for: 6m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: There are multiple ovnkube-cluster-manager leaders
+
+    - alert: OvnKubeClusterManagerNoLeader
+      expr: max(ovnkube_clustermanager_leader{namespace="ovn-kubernetes"}) == 0
+      for: 6m
+      labels:
+        severity: critical
+        {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
+      annotations:
+       message: There is no running ovnkube-cluster-manager leader

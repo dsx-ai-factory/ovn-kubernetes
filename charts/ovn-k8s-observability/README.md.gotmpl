@@ -1,0 +1,60 @@
+{{ template "chart.header" . }}
+{{ template "chart.badgesSection" . }}
+
+{{ template "chart.maintainersSection" . }}
+
+{{ template "chart.sourcesSection" . }}
+
+Helm chart for ovn-kubernetes observability resources: `ServiceMonitor`,
+`PrometheusRule`, and `GrafanaDashboard`. It is packaged separately from
+[`ovn-kubernetes`](../ovn-kubernetes) because those CRDs are not present when
+the CNI chart is installed.
+
+Prometheus Operator and Grafana Operator CRDs must already exist in the cluster.
+
+## Quick start
+
+```bash
+helm install ovn-k8s-observability charts/ovn-k8s-observability \
+  --namespace ovn-kubernetes --create-namespace
+```
+
+By default, this command deploys interconnect alert rules and dashboards,
+plus ServiceMonitors for `ovnkube-node` and `ovnkube-control-plane`. Optional
+OVS offload and ingress-filter alerts are disabled (`ovsNoOffloadBytes`,
+`ovsNoOffloadIntraNodeBytes`, `ovsNoIngressFilter`, and the per-node
+`ovsBridgeFlowsTooHigh*` rules); enable them under `alert-rule.rules` when
+they apply to the cluster.
+
+Override a setting at install time, for example:
+
+```bash
+helm upgrade --install ovn-k8s-observability charts/ovn-k8s-observability \
+  --namespace ovn-kubernetes \
+  --set dashboard.grafana.datasourceName=prometheus
+```
+
+Render manifests without installing:
+
+```bash
+helm template ovn-k8s-observability charts/ovn-k8s-observability \
+  --namespace ovn-kubernetes
+```
+
+## Package
+
+```bash
+helm package charts/ovn-k8s-observability
+```
+
+That produces `ovn-k8s-observability-{{ .Version }}.tgz`. `obs-as-code/` is excluded by
+`.helmignore` and is not part of the package.
+
+## Sub-charts
+
+| Chart | Version | Path |
+| --- | --- | --- |
+| `alert-rule` | `1.0.0` | `charts/alert-rule` |
+| `dashboard` | `1.0.0` | `charts/dashboard` |
+
+{{ template "chart.valuesSection" . }}

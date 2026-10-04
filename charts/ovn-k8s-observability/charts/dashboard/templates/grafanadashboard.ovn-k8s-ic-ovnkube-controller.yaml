@@ -1,0 +1,23 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: sdn-ovn-k8s-ic-ovnkube-controller
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: grafana
+spec:
+  allowCrossNamespaceImport: {{ .Values.grafana.allowCrossNamespaceImport }}
+  instanceSelector:
+  {{- with .Values.grafana.instanceSelector }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  folder: SDN
+  datasources:
+  - inputName: "DS_PROMETHEUS"
+    datasourceName: {{ .Values.grafana.datasourceName }}
+  json: |-
+{{- .Files.Get "json/sdn-ovn-k8s-ic-ovnkube-controller.json" | nindent 4 }}

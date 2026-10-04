@@ -1,0 +1,2707 @@
+{
+  "__inputs": [
+    {
+      "description": "",
+      "label": "prometheus",
+      "name": "DS_PROMETHEUS",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus",
+      "type": "datasource"
+    }
+  ],
+  "uid": "9ad6c1e913ff02dfc8599fc61903318b",
+  "title": "Host / OVS",
+  "tags": [
+    "SDN"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "fiscalYearStartMonth": 0,
+  "schemaVersion": 41,
+  "panels": [
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Info",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "sum by (version) (ovs_build_info{k8s_cluster_name=~\"$cluster\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "OVS BUILD INFO",
+      "description": "Shows the summary of various ovs versions and number of nodes having a specific OVS version",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      }
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "sum by (bridge, version) (ovs_vswitchd_interface_driver_version{k8s_cluster_name=~\"$cluster\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (bridge, version) (label_replace(ovs_vswitchd_interface_info{k8s_cluster_name=~\"$cluster\"}, \"version\", \"$1\", \"driver_version\", \"(.*)\"))",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "B"
+        }
+      ],
+      "title": "INTERFACE DRIVER VERSION",
+      "description": "Shows summary of various Interface's network driver versions with number of interfaces having that specific version",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "Interface",
+            "mode": "reduceRow",
+            "reduce": {
+              "include": [
+                "Value #B",
+                "Value #A"
+              ],
+              "reducer": "sum"
+            }
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value #A": true,
+              "Value #B": true
+            },
+            "include": {
+              "names": [
+                "bridge",
+                "version",
+                "Interface"
+              ]
+            },
+            "includeByName": {},
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "sum by (bridge, version) (ovs_vswitchd_interface_firmware_version{k8s_cluster_name=~\"$cluster\"})",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (bridge, version) (label_replace(ovs_vswitchd_interface_info{k8s_cluster_name=~\"$cluster\"}, \"version\", \"$1\", \"firmware_version\", \"(.*)\"))",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "B"
+        }
+      ],
+      "title": "INTERFACE FIRMWARE VERSION",
+      "description": "Shows summary of various Firmware version of the network adapter and number of interfaces having that specific versions",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "Interface",
+            "mode": "reduceRow",
+            "reduce": {
+              "include": [
+                "Value #B",
+                "Value #A"
+              ],
+              "reducer": "sum"
+            }
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value #A": true,
+              "Value #B": true
+            },
+            "include": {
+              "names": [
+                "bridge",
+                "version",
+                "Interface"
+              ]
+            },
+            "includeByName": {},
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "label_replace(sum by (instance) (ovs_vswitchd_poll_threads_n{k8s_cluster_name=~\"$cluster\"}), \"DP\", \"ovs-doca\", \"\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "expr": "label_replace(sum by (instance) (ovs_vswitchd_dp{k8s_cluster_name=~\"$cluster\"} unless on (instance) ovs_vswitchd_poll_threads_n{k8s_cluster_name=~\"$cluster\"}), \"DP\", \"ovs-kernel\", \"\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "B"
+        }
+      ],
+      "title": "Node OVS Datapath Type",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value #A": true,
+              "Value #B": true
+            },
+            "includeByName": {},
+            "indexByName": {
+              "DP": 2,
+              "instance": 1
+            },
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "OVS Daemon (TOP K)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 2,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (host_name) (rate(process_cpu_time_seconds_total{host_name=~\"$instance\",k8s_cluster_name=~\"$cluster\",process_command=\"ovs-vswitchd\"}[$__rate_interval])) * 100)",
+              "legendFormat": "{{host_name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU Utilization Rate (TOP K)",
+          "description": "ovs-vswitchd process CPU usage",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 18
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, process_memory_usage_bytes{host_name=~\"$instance\",k8s_cluster_name=~\"$cluster\",process_command=\"ovs-vswitchd\"})",
+              "legendFormat": "{{host_name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Memory Utilization (TOP K)",
+          "description": "ovs-vswitchd process RSS memory",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 24
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "decbytes"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_dp_flows_lookup_lost{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_datapath_lost_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Flow Lookups Failed and Discarded (worst) (TOP K)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 30
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "value": null,
+                    "color": "transparent"
+                  },
+                  {
+                    "value": 50,
+                    "color": "red"
+                  }
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {
+                  "mode": "line+area"
+                }
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_dp_flows_lookup_missed{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_datapath_missed_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Flow Lookups Processed in Userspace (bad) (TOP K)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 36
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_dp_flows_lookup_hit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_datapath_hit_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "legendFormat": "{{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Flow Lookups Processed in Kernel (TOP K)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 42
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance) (ovs_vswitchd_dp_offloaded_flows_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Total Offloaded Flows (TOP K)",
+          "description": "Represents the total offloaded flows in datapath.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 24,
+            "x": 0,
+            "y": 48
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_port_add{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "PORT ACTION ADD RATE (TOP K)",
+          "description": "Rate of number of times a netdev was added as a port from the dpif",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 54
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_port_del{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "PORT ACTION DEL RATE (TOP K)",
+          "description": "Rate of number of times a netdev was removed as a port from the dpif",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 54
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_xlate_actions_oversize{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "DP ACTION OVERSIZED RATE ( TOP K )",
+          "description": "rate of number of times the translated OpenFlow actions into a datapath actions were too big for a netlink attribute",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 63
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_get{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "DP OPEN FLOW GET RATE ( TOP K)",
+          "description": "Rate of number of times flows were retrived from the datapath (Linux kernel datapath module)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 63
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "locale"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_put{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "DP OPEN FLOW PUT RATE (TOP K)",
+          "description": "Rate of number of times flows were added to the datapath (Linux kernel datapath module)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 71
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "locale"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_del{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "DP OPEN FLOW DEL RATE ( TOP K)",
+          "description": "Rate of number of times flows were deleted from the datapath (Linux kernel datapath module)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 71
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "locale"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "avg(topk($topk, rate(ovs_vswitchd_netlink_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m])))",
+              "legendFormat": "Sent",
+              "refId": "A"
+            },
+            {
+              "expr": "avg(topk($topk, rate(ovs_vswitchd_netlink_received{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m])))",
+              "legendFormat": "Received",
+              "refId": "B"
+            }
+          ],
+          "title": "NETLINK I/O RATE (TOP K AVG)",
+          "description": "Rate of netlink messages sent/received by the kernel",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 79
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "mps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_xlate_actions{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "TRANSLATION ACTIONS RATE (TOP K)",
+          "description": "Rate of OpenFlow actions were translated into datapath actions",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 79
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_rconn_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "Sent, {{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_rconn_queued{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "Queued, {{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "RCONN SENT/QUEUED (TOP K)",
+          "description": "Specifies the number of messages that have been sent to the underlying virtual connection (unix, tcp, or ssl) to OpenFlow devices, or queued  because it couldn't be sent using the underlying virtual connection to OpenFlow devices.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 87
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "mps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_txn_success{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "TXN SUCCESS RATE (TOP K)",
+          "description": "Specifies the rate of the OVSDB transaction has successfully completed",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 87
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "sum(ovs_vswitchd_txn_error{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "Error",
+              "refId": "D"
+            },
+            {
+              "expr": "sum(ovs_vswitchd_txn_aborted{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "Aborted",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(ovs_vswitchd_txn_try_again{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "Try Again",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(ovs_vswitchd_txn_uncommitted{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "Uncommitted",
+              "refId": "C"
+            }
+          ],
+          "title": "ABNORMAL TRANSACTIONS",
+          "description": "Number of abnormal transactions",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 95
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_vconn_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "Sent, {{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_vconn_received{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "Received, {{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "VCONN I/O RATE (TOP K)",
+          "description": "Specifies the number of messages sent to/received from the OpenFlow Device",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 95
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "mps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "sum(ovs_vswitchd_rconn_discarded{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "Discarded",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(ovs_vswitchd_rconn_overflow{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "Overflow",
+              "refId": "C"
+            }
+          ],
+          "title": "ABNORMAL CONNECTIONS",
+          "description": "Number of messages that have been dropped causing by flushed queue when reconnecting or queue overflow.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 103
+          },
+          "interval": "120s"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "OVS DB (TOP K)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 111
+      },
+      "id": 3,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (host_name) (rate(process_cpu_time_seconds_total{host_name=~\"$instance\",k8s_cluster_name=~\"$cluster\",process_command=\"ovsdb-server\"}[$__rate_interval])) * 100)",
+              "legendFormat": "{{host_name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CPU Utilization Rate (TOP K)",
+          "description": "TOP K of ovsdb-server process CPU usage",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 112
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, process_memory_usage_bytes{host_name=~\"$instance\",k8s_cluster_name=~\"$cluster\",process_command=\"ovsdb-server\"})",
+              "legendFormat": "{{host_name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Memory Utilization (TOP K)",
+          "description": "TOP K of ovsdb-server process RSS memory",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 12,
+            "y": 112
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "decbytes"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_ovsdb_unixctl_received{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "RX:{{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_ovsdb_unixctl_replied{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "TX:{{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "JSONRPC DETAILS (TOP K)",
+          "description": "The JSON RPC requests processed per second",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 0,
+            "y": 118
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            },
+            "overrides": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "Datapath (TOP K)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 124
+      },
+      "id": 4,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_dp_packets_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_datapath_packets_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "DP PACKETS RATE (TOP K)",
+          "description": "Represents the total number of packets datapath processed which is the sum of \"hit\" and \"missed\"",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 125
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "bargauge",
+          "targets": [
+            {
+              "expr": "topk($topk, ovs_vswitchd_dp_if_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "PORTS CONNECTED (TOP K)",
+          "description": "Represents the number of ports connected to the datapath",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 125
+          },
+          "options": {
+            "displayMode": "gradient",
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "maxVizHeight": 300,
+            "minVizHeight": 16,
+            "minVizWidth": 8,
+            "namePlacement": "auto",
+            "orientation": "",
+            "reduceOptions": {
+              "calcs": []
+            },
+            "showUnfilled": true,
+            "sizing": "auto",
+            "valueMode": "color"
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovs_vswitchd_dp_masks_hit_ratio{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "MASKS HIT RATIO (TOP K)",
+          "description": "Represents the average number of masks visited per packet",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 133
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovs_vswitchd_dp_flows_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovs_vswitchd_datapath_n_flows{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "TOTAL DP FLOWS (TOP K)",
+          "description": "Represents the number of flows in datapath.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 133
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovs_vswitchd_dp_masks_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovs_vswitchd_datapath_n_masks{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}",
+              "refId": "B"
+            }
+          ],
+          "title": "MASKS (TOP K)",
+          "description": "Represents the number of masks in a datapath",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 141
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_rev{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "upcall_flow_del_rev (TOP K)",
+          "description": "Rate of flows deleted per second after revalidation determined to delete the flow",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 141
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_no_rev{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "upcall_flow_del_no_rev (TOP K)",
+          "description": "Rate of flows deleted per second because the flow didn't have min-revalidator-pps fulfilled",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 149
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_idle_or_limit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "upcall_flow_del_idle_or_limit (TOP K)",
+          "description": "Rate of flows deleted per second because we reached the limit or the flow was idle for more than max-idle time",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 149
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_revalidate_missed_dp_flow{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "revalidate_missed_dp_flow (TOP K)",
+          "description": "Rate of missed datapath flows per second that had to be revalidated",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 157
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "Bridge (TOP K)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 165
+      },
+      "id": 5,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovs_vswitchd_bridge_flows_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}/{{bridge}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovs_vswitchd_bridge_n_flows{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$bridge\"})",
+              "legendFormat": "{{instance}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "TOTAL BRIDGE FLOWS (TOP K)",
+          "description": "Total number of OpenFlow flows on the OVS bridge",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 166
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "bargauge",
+          "targets": [
+            {
+              "expr": "topk($topk, ovs_vswitchd_bridge_ports_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}/{{bridge}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovs_vswitchd_bridge_n_ports{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$bridge\"})",
+              "legendFormat": "{{instance}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "BRIDGE PORTS (TOP K)",
+          "description": "Number of OVS ports on the bridge",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 166
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_bridge_flows_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_bridge_n_flows{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$bridge\"}[5m]))",
+              "legendFormat": "{{instance}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "TOTAL BRIDGE FLOWS RATE (TOP K)",
+          "description": "Rate of total number of OpenFlow flows on the OVS bridge",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 174
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "Interface (TOP K)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 182
+      },
+      "id": 6,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_link_resets{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_link_resets_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "LINK RESETS RATE (TOP K)",
+          "description": "Represents rate of number of times Open vSwitch has observed the link_state of OVS interface change.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 183
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_collisions{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_collisions_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "COLLISIONS RATE (TOP K)",
+          "description": "Represents rate of number of collisions on interfaces",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 183
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_over_err{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_over_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "OVERRUN ERRORS RATE (TOP K)",
+          "description": "Represents rate of RX overrun errors",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 191
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "error/s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_frame_err{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_frame_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "FRAME ERRORS RATE (TOP K)",
+          "description": "Represents rate of frame errors",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 191
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "error/s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_crc_err{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_crc_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "CRC ERRORS RATE (TOP K)",
+          "description": "Represents rate of CRC errors",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 199
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "error/s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_bytes{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_bytes{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "TX: {{instance}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_bytes_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_bytes_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "TX: {{instance}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "INSTANCE - INTERFACE BANDWIDTH (TOP K)",
+          "description": "Represents total received/transmitted bytes by OVS interface.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 199
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_packets{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{bridge}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_packets{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "TX: {{instance}}/{{bridge}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_packets_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{bridge}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_packets_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "TX: {{instance}}/{{bridge}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "NETWORK PACKET RATE (TOP K)",
+          "description": "Represents the rate of received/transmitted packets by OVS interface.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 207
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_errors{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{bridge}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_errors{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "TX: {{instance}}/{{bridge}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{bridge}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "TX: {{instance}}/{{bridge}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "PACKET I/O ERROR  RATE (TOP K)",
+          "description": "Rate of error received/transmitted packets by OVS interface.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 207
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_dropped{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{bridge}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_dropped{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "TX, {{instance}}, {{bridge}}, {{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_dropped_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{bridge}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_dropped_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "TX: {{instance}}/{{bridge}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "PACKET I/O DROPPED RATE (TOP K)",
+          "description": "Rate of dropped received/transmitted packets by OVS interface.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 215
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_misspkts_packets_drops{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_misspkts_packets_drops{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
+              "refId": "B"
+            }
+          ],
+          "title": "VF MISSPKTS DROP RATE (TOP K)",
+          "description": "Rate of number of new connection packets dropped on the interface backed by VF",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 215
+          },
+          "interval": "120s"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "Offloads (TOP K)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 223
+      },
+      "id": 7,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "TX: {{instance}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "legendFormat": "RX: {{instance}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "legendFormat": "TX: {{instance}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "TOP K HW OFFLOAD RATE (BYTES)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 224
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "binBps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "TX: {{instance}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "legendFormat": "RX: {{instance}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "legendFormat": "TX: {{instance}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "TOP K HW OFFLOAD RATE (PACKETS)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 224
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "TX: {{instance}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "legendFormat": "RX: {{instance}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "legendFormat": "TX: {{instance}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "TOP K SW OFFLOAD RATE (BYTES)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 232
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "binBps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "legendFormat": "TX: {{instance}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "legendFormat": "RX: {{instance}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "legendFormat": "TX: {{instance}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "TOP K SW OFFLOAD RATE (PACKETS)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 232
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]) \u003e 100000)",
+              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]) \u003e 100000)",
+              "legendFormat": "TX: {{instance}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]) \u003e 100000)",
+              "legendFormat": "RX: {{instance}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]) \u003e 100000)",
+              "legendFormat": "TX: {{instance}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "TOP K SW BUSY RATE (BYTES)",
+          "description": "Top K interfaces that sends greater then 100KB of data per second averaging over 15min interval",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 240
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "binBps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]) \u003e 1000)",
+              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]) \u003e 1000)",
+              "legendFormat": "TX: {{instance}}/{{interface}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]) \u003e 1000)",
+              "legendFormat": "RX: {{instance}}/{{name}}",
+              "refId": "C"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]) \u003e 1000)",
+              "legendFormat": "TX: {{instance}}/{{name}}",
+              "refId": "D"
+            }
+          ],
+          "title": "TOP K SW BUSY RATE (PACKETS)",
+          "description": "Top K interfaces that sends greater then 1000 networking packets of data per second averaging over 15min interval",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 240
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "OVS DOCA (TOP K)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 248
+      },
+      "id": 8,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_poll_threads_lost_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Flow table misses and upcall failed (worst) (TOP K)",
+          "description": "Rate of flow table misses and upcall failed.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 249
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_poll_threads_missed_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Flow table misses and upcall succeeded (bad) (TOP K)",
+          "description": "Rate of flow table misses and upcall succeeded.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 257
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_poll_threads_hit_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Flow table matched (TOP K)",
+          "description": "Rate of flow table misses and upcall succeeded.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 265
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance, core) (rate(ovs_vswitchd_poll_threads_packets_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "legendFormat": "{{instance}}: {{core}}",
+              "refId": "A"
+            }
+          ],
+          "title": "PMD Packet RX Rate(TOP K)",
+          "description": "Rate of received packets.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 273
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance, core) (rate(ovs_vswitchd_poll_threads_packets_total{instance=~\"$topPMDNode\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "legendFormat": "core: {{core}}",
+              "refId": "A"
+            }
+          ],
+          "title": "PMD Packet RX Rate Per Node - $topPMDNode",
+          "description": "Rate of received packets.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 281
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, sum by (instance, core) (ovs_vswitchd_poll_threads_busy_cycles{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}))",
+              "legendFormat": "{{instance}}: {{core}}",
+              "refId": "A"
+            }
+          ],
+          "title": "PMD Busy cycles (TOP K)",
+          "description": "Percent of useful CPU cycles",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 290
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_queue_none_processed{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Completion Queue Stalled (TOP K)",
+          "description": "Completion queue could not process any packets while the queue was not empty, this cloud be caused by eSwitch pipe resize.\n\nThe ideal rate is 0.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 290
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "barchart",
+          "targets": [
+            {
+              "expr": "sum by (core) (ovs_vswitchd_poll_threads_busy_cycles{instance=~\"$topPMDNode\",k8s_cluster_name=~\"$cluster\"})",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "busy: {{core}}",
+              "range": false,
+              "refId": "A"
+            },
+            {
+              "expr": "sum by (core) (ovs_vswitchd_poll_threads_idle_cycles{instance=~\"$topPMDNode\",k8s_cluster_name=~\"$cluster\"})",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "idle: {{core}}",
+              "range": false,
+              "refId": "B"
+            }
+          ],
+          "title": "PMD Busy cycles Per Node - $topPMDNode",
+          "description": "Percent of useful CPU cycles",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 298
+          },
+          "options": {
+            "barRadius": 0,
+            "barWidth": 0.8,
+            "fullHighlight": false,
+            "groupWidth": 0.52,
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "right",
+              "showLegend": true
+            },
+            "orientation": "auto",
+            "showValue": "never",
+            "stacking": "normal",
+            "tooltip": {
+              "mode": "",
+              "sort": ""
+            },
+            "xField": "core",
+            "xTickLabelMaxLength": 0,
+            "xTickLabelRotation": 0,
+            "xTickLabelSpacing": 0
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_invalid_classify_port{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Packets Dropped - invalid port (TOP K)",
+          "description": "Number of packets dropped because their receiving port was invalid.\n\nThe ideal rate is 0.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 308
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_no_mark{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Packets Dropped - no mark (TOP K)",
+          "description": "Number of packets dropped because their receiving port was invalid.\n\nThe ideal rate is 0.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 308
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_pipe_resize{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "legendFormat": "resize: {{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_pipe_resize_over_10_ms{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "legendFormat": "slow: {{instance}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_resize_block{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "legendFormat": "blocked: {{instance}}",
+              "refId": "C"
+            }
+          ],
+          "title": "eSwitch Pipe Resize Rate (TOP K)",
+          "description": "Rates of eSwitch resize for:\n- resize: due to reaching the congestion level percentage\n- slow: resize takes over 10ms\n- blocking: not process any packets due to eSwitch pipe resizing\n\nThe ideal rate is 0.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 316
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovs_vswitchd_conntrack_n_connections{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            },
+            {
+              "expr": "min(ovs_vswitchd_conntrack_connection_limit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "LIMIT",
+              "refId": "B"
+            }
+          ],
+          "title": "Conntrack - Connections (TOP K)",
+          "description": "Number of tracked connections.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 12,
+            "y": 316
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovs_vswitchd_conntrack_n_connections{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"} / ovs_vswitchd_conntrack_connection_limit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Conntrack Entries Usage (TOP K)",
+          "description": "TOP K Conntrack Entries Usage in OVS DOCA.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 324
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "ovs_vswitchd_conntrack_connection_limit{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "LIMIT",
+              "refId": "A"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_connections{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "total",
+              "refId": "B"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_tcp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "tcp",
+              "refId": "C"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_udp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "udp",
+              "refId": "D"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_udplite{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "udplite",
+              "refId": "E"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_icmp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "icmp",
+              "refId": "F"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_icmp6{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "icmp6",
+              "refId": "G"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_igmp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "igmp",
+              "refId": "H"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_sctp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "sctp",
+              "refId": "I"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_dccp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "dccp",
+              "refId": "J"
+            },
+            {
+              "expr": "ovs_vswitchd_conntrack_n_other{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "legendFormat": "other",
+              "refId": "K"
+            }
+          ],
+          "title": "Conntrack - Breakdown By Protocol - $topConntrackNode",
+          "description": "Number of tracked connections and Maximum number of connections allowed.\n\nConnections are tracked per-protocol:\n- tcp\n- udp\n- udplite\n- icmp\n- icmp6\n- igmp\n- sctp\n- dccp\n- other\n\nThis panel displays only TCP and UDP, while other protocols are hidden.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 332
+          },
+          "interval": "120s"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "cluster",
+        "label": "Cluster",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "refresh": 1,
+        "includeAll": false,
+        "regex": ""
+      },
+      {
+        "type": "query",
+        "name": "instance",
+        "label": "Instance",
+        "skipUrlSync": false,
+        "query": "label_values(ovs_build_info{k8s_cluster_name=~\"$cluster\"}, instance)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "multi": true,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "sort": 3,
+        "includeAll": false,
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "bridge",
+        "label": "Bridge",
+        "skipUrlSync": false,
+        "query": "label_values(ovs_vswitchd_bridge{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}, bridge)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": false,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "interface",
+        "label": "Interface",
+        "skipUrlSync": false,
+        "query": "label_values(ovs_vswitchd_interface_admin_state{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}, interface)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": false,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "custom",
+        "name": "topk",
+        "label": "topk",
+        "skipUrlSync": false,
+        "query": "5, 10, 20, 100, 1000, 2000",
+        "current": {
+          "selected": true,
+          "text": "5",
+          "value": "5"
+        },
+        "multi": false,
+        "allowCustomValue": true,
+        "includeAll": false,
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "topPMDNode",
+        "hide": 2,
+        "skipUrlSync": false,
+        "description": "Top 4 nodes have the highest PMD packets rate.",
+        "query": "query_result(topk(4, sum by (instance) (rate(ovs_vswitchd_poll_threads_packets_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))))",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": false,
+        "refresh": 1,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "regex": "/.*instance=\"([^\"]*).*/",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "topConntrackNode",
+        "hide": 2,
+        "skipUrlSync": false,
+        "description": "Top 4 nodes have the highest conntrack entries usage.",
+        "query": "query_result(topk(4, ovs_vswitchd_conntrack_n_connections{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"} / ovs_vswitchd_conntrack_connection_limit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}))",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": false,
+        "refresh": 1,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "regex": "/.*instance=\"([^\"]*).*/",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      }
+    ]
+  },
+  "annotations": {}
+}

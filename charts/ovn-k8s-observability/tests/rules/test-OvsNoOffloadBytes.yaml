@@ -1,0 +1,139 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+---
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  - name: No-offload byte alerts should use the interface label
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_tx_sw_bytes{interface="enp1s0f0_14",instance="ngn-node",pod="ovnkube-node-test",port="test-port"}'
+        values: '0+4404019200x90'
+      - series: 'ovs_vswitchd_interface_rx_sw_bytes{interface="enp1s0f0_14",instance="ngn-node",pod="ovnkube-node-test",port="test-port"}'
+        values: '0+4404019200x90'
+      - series: 'ovs_vswitchd_interface_tx_sw_bytes{interface="enp1s0f0_15",instance="ngn-node",pod="ovnkube-node-test",port="intra-node"}'
+        values: '0+4404019200x90'
+      - series: 'ovs_vswitchd_interface_rx_sw_bytes{interface="enp1s0f0_15",instance="ngn-node",pod="ovnkube-node-test",port="intra-node"}'
+        values: '0+4404019200x90'
+    alert_rule_test:
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadBytesTooHigh
+        exp_alerts:
+          - exp_labels:
+              severity: minor
+              interface: enp1s0f0_14
+              instance: ngn-node
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance ngn-node port test-port interface enp1s0f0_14 for longer than 5m
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadBytesUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_14
+              instance: ngn-node
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 20MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance ngn-node port test-port interface enp1s0f0_14 for longer than 5m
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadBytesCriticallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              interface: enp1s0f0_14
+              instance: ngn-node
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance ngn-node port test-port interface enp1s0f0_14 for longer than 10m
+      - eval_time: 76m
+        alertname: OvsRxNoOffloadBytesCriticallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              interface: enp1s0f0_14
+              instance: ngn-node
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance ngn-node port test-port interface enp1s0f0_14 for longer than 10m
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadIntraNodeBytesHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_15
+              instance: ngn-node
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance ngn-node port intra-node interface enp1s0f0_15 for longer than 10m
+      - eval_time: 76m
+        alertname: OvsRxNoOffloadIntraNodeBytesHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_15
+              instance: ngn-node
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance ngn-node port intra-node interface enp1s0f0_15 for longer than 5m
+      - eval_time: 76m
+        alertname: OvsRxNoOffloadBytesTooHigh
+        exp_alerts:
+          - exp_labels:
+              severity: minor
+              interface: enp1s0f0_14
+              instance: ngn-node
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance ngn-node port test-port interface enp1s0f0_14 for longer than 5m
+      - eval_time: 76m
+        alertname: OvsRxNoOffloadBytesUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_14
+              instance: ngn-node
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance ngn-node port test-port interface enp1s0f0_14 for longer than 5m
+
+  - name: Interfaces excluded by profile filters should not alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_tx_sw_bytes{interface="ens1f0np0",instance="dsx-node",pod="ovnkube-node-test",port="ens1f0np0"}'
+        values: '0+4404019200x90'
+      - series: 'ovs_vswitchd_interface_rx_sw_bytes{interface="ens1f0np0",instance="dsx-node",pod="ovnkube-node-test",port="ens1f0np0"}'
+        values: '0+4404019200x90'
+    alert_rule_test:
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadBytesTooHigh
+        exp_alerts: []
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadIntraNodeBytesHigh
+        exp_alerts: []
