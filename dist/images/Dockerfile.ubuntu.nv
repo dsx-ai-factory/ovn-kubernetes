@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1
+
+ARG BASE_IMAGE=artifactory.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb
+FROM golang:1.26 as builder
+ARG OVN_K8S_SRC_ROOT=.
+COPY ${OVN_K8S_SRC_ROOT} /ovn-kubernetes
+RUN make bld -C /ovn-kubernetes/dist/images
+
+FROM ${BASE_IMAGE} as ovnk8s
+USER root
+
+ARG OVS_VER  # Example: 3.3.1.5f875996.19422428
+ARG OVN_VER  # Example: 24.03.2.e9db0dbb.21320785
+ARG DIST_CODE=noble
+ARG K8S_VER=v1.37
+
+RUN --mount=type=secret,id=artifactory_cert,required=true \
+ARTIFACTORY_CERT="$(cat /run/secrets/artifactory_cert)" && \
+curl --fail --show-error --location --retry 3 "https://${ARTIFACTORY_CERT}@artifactory.nvidia.com/artifactory/api/gpg/key/public" -o /usr/share/keyrings/nvidia-artifactory.asc \
+&& printf 'deb [signed-by=/usr/share/keyrings/nvidia-artifactory.asc] https://%s@artifactory.nvidia.com/artifactory/sw-ngn-sdn-debian-local %s main\n' \
+"${ARTIFACTORY_CERT}" "${DIST_CODE}" \
+> /etc/apt/sources.list.d/ngn-sdn-ovn.list \
+&& DEBIAN_FRONTEND=noninteractive apt-get update \
+&& apt-get install -y --no-install-recommends openvswitch-switch=${OVS_VER} openvswitch-common=${OVS_VER} \
+ovn-common=${OVN_VER} ovn-host=${OVN_VER} ovn-central=${OVN_VER} \
+&& rm -f /etc/apt/sources.list.d/ngn-sdn-ovn.list /usr/share/keyrings/nvidia-artifactory.asc \
+&& DEBIAN_FRONTEND=noninteractive apt-get update \
+&& apt-get install -y --no-install-recommends curl netcat-traditional net-tools firewalld nftables iptables iproute2 iputils-arping ncat dnsutils socat \
+&& mkdir -p -m 755 /etc/apt/keyrings \
+&& curl -fsSL "https://pkgs.k8s.io/core:/stable:/${K8S_VER}/deb/Release.key" | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+&& chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+&& echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${K8S_VER}/deb/ /" \
+  > /etc/apt/sources.list.d/kubernetes.list \
+&& chmod 644 /etc/apt/sources.list.d/kubernetes.list \
+&& DEBIAN_FRONTEND=noninteractive apt-get update \
+&& apt-get install -y --no-install-recommends kubectl \
+&& rm -f /etc/apt/sources.list.d/kubernetes.list /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+&& apt-get autoremove -y \
+&& rm -rf /var/lib/apt/lists/* \
+&& rm -rf /tmp/* /var/tmp/* \
+&& mkdir -p /usr/libexec/cni/ \
+&& mkdir -p /var/run/openvswitch/ \
+&& mkdir -p /etc/openvswitch/ 
+# Copy binaries and assets from builder (grouped by destination to minimize layers)
+COPY --chmod=755  --from=builder /ovn-kubernetes/dist/images/ovnkube /ovn-kubernetes/dist/images/ovnkube-identity /ovn-kubernetes/dist/images/ovn-kube-util /usr/bin/
+COPY --chmod=755  --from=builder /ovn-kubernetes/dist/images/git_info /ovn-kubernetes/dist/images/ovnkube.sh /ovn-kubernetes/dist/images/ovnkube-init.sh /ovn-kubernetes/dist/images/ovnkube-node-readiness-check.sh /ovn-kubernetes/dist/images/ovnkube-node-liveness-check.sh /root/
+COPY  --from=builder /ovn-kubernetes/dist/images/ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
+COPY --chmod=755  --from=builder /ovn-kubernetes/dist/images/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
+
+LABEL io.k8s.display-name="ovnk8s" \
+      io.k8s.description="ovn k8s ubuntu image"
+
+WORKDIR /root
+ENTRYPOINT /root/ovnkube.sh
