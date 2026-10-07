@@ -19,6 +19,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel/attribute"
@@ -210,10 +211,8 @@ type ovnkubeRunMode struct {
 	node              bool // node (--init-node) is enabled
 	cleanupNode       bool // cleanup (--cleanup-node) is enabled
 
-	// Along with the run mode, an identity is provided that uniquely identifies
-	// this instance vs other instances that might be running in the cluster.
-	// The identity is usually the node name. It's used for leader election
-	// among other things.
+	// The node this ovnkube instance runs on. Not unique per process: two
+	// instances on the same node share it.
 	identity string
 }
 
@@ -372,6 +371,19 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	haConfig := &config.ClusterMgrHA
 	name := "ovn-kubernetes-master"
 
+	// The lease identity must be unique per process, not per node: client-go
+	// treats a lease whose holder matches its own identity as already won, so a
+	// replacement pod on the same node would inherit a lease the outgoing
+	// process still holds and both would be active. Preferring the pod UID over
+	// a random value lets a container restarted in the same pod reclaim its own
+	// lease rather than wait out the lease duration.
+	instanceID := os.Getenv("POD_UID")
+	if instanceID == "" {
+		instanceID = uuid.New().String()
+	}
+	// The node name prefix keeps holderIdentity greppable by node.
+	lockIdentity := fmt.Sprintf("%s_%s", runMode.identity, instanceID)
+
 	// Set up leader election process. Use lease resource lock as configmap and
 	// endpoint lock support has been removed from leader election library.
 	rl, err := resourcelock.New(
@@ -381,7 +393,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		ovnClientset.KubeClient.CoreV1(),
 		ovnClientset.KubeClient.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
-			Identity:      runMode.identity,
+			Identity:      lockIdentity,
 			EventRecorder: eventRecorder,
 		},
 	)
@@ -432,7 +444,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 				cancel()
 			},
 			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != runMode.identity {
+				if newLeaderName != lockIdentity {
 					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
 				}
 			},
