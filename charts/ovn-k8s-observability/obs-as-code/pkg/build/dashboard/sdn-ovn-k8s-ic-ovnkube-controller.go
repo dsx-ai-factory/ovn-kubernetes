@@ -55,6 +55,7 @@ func (d *OvnkubeControllerDashboard) Build() (dashboard.Dashboard, error) {
 		Editable().
 		Time("now-30m", "now").
 		Timezone(common.TimeZoneBrowser).
+		WithVariable(lib.ClusterVariable(d)).
 		// Instance variable
 		WithVariable(ovnkubeControllerInstanceVariable(d)).
 		// Pod variable
@@ -131,7 +132,7 @@ func BuildOvnkubeControllerDashboard() (*lib.BaseSdnDashboard, error) {
 func ovnkubeControllerInstanceVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 	return dashboard.NewQueryVariableBuilder("instance").
 		Label("instance").
-		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovnkube_controller_build_info{},instance)")}).
+		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovnkube_controller_build_info{cluster=\"$cluster\"},instance)")}).
 		Datasource(d.DataSourceRef()).
 		Current(dashboard.VariableOption{
 			Selected: cog.ToPtr(true),
@@ -148,7 +149,7 @@ func ovnkubeControllerInstanceVariable(d lib.SdnDashboard) *dashboard.QueryVaria
 func ovnkubeControllerPodVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 	return dashboard.NewQueryVariableBuilder("pod").
 		Label("Pod").
-		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovnkube_controller_build_info{instance=~\"$instance\"},pod)")}).
+		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovnkube_controller_build_info{cluster=\"$cluster\", instance=~\"$instance\"},pod)")}).
 		Datasource(d.DataSourceRef()).
 		Description("Pods of ovnkube-node.").
 		Current(dashboard.VariableOption{
@@ -165,7 +166,7 @@ func ovnkubeControllerPodVariable(d lib.SdnDashboard) *dashboard.QueryVariableBu
 
 func ovnkubeControllerBuildInfo(d lib.SdnDashboard) *table.PanelBuilder {
 	return lib.BuildInfoTable(d, "ovnkube-controller build info.",
-		`ovnkube_controller_build_info{namespace="ovn-kubernetes"}`,
+		`ovnkube_controller_build_info{cluster="$cluster", namespace="ovn-kubernetes"}`,
 		lib.OvnkubeBuildInfoFields(),
 	).Span(8)
 }
@@ -174,13 +175,13 @@ func ovnkubeControllerNodeAgentReadiness(d lib.SdnDashboard) *bargauge.PanelBuil
 	return lib.NewSdnBarGaugePanelBuilder(d, "Node Agent Readiness", "shows summary of ovnkube-node pods that are ready").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`kube_daemonset_status_number_ready{namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
+				Expr(`kube_daemonset_status_number_ready{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
 				LegendFormat("READY").
 				RefId("A"),
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`kube_daemonset_status_number_available{namespace="ovn-kubernetes",daemonset="ovnkube-node"} + kube_daemonset_status_number_unavailable{namespace="ovn-kubernetes",daemonset="ovnkube-node"} - kube_daemonset_status_number_ready{namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
+				Expr(`kube_daemonset_status_number_available{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"} + kube_daemonset_status_number_unavailable{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"} - kube_daemonset_status_number_ready{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
 				LegendFormat("NOT READY").
 				RefId("B"),
 		)
@@ -190,13 +191,13 @@ func ovnkubeControllerNodeAgentAvailability(d lib.SdnDashboard) *bargauge.PanelB
 	return lib.NewSdnBarGaugePanelBuilder(d, "Node Agent Availability", "The summary of available and unavailable ovnkube-node pods").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`kube_daemonset_status_number_available{namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
+				Expr(`kube_daemonset_status_number_available{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
 				LegendFormat("AVAILABLE").
 				RefId("A"),
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`kube_daemonset_status_number_unavailable{namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
+				Expr(`kube_daemonset_status_number_unavailable{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
 				LegendFormat("UNAVAILABLE").
 				RefId("B"),
 		)
@@ -215,7 +216,7 @@ func ovnkubeControllerContainerRestartOverview(d lib.SdnDashboard) *timeseries.P
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum(increase(kube_pod_container_status_restarts_total{container="ovnkube-controller", namespace="ovn-kubernetes"}[5m]))`).
+				Expr(`sum(increase(kube_pod_container_status_restarts_total{cluster="$cluster", container="ovnkube-controller", namespace="ovn-kubernetes"}[5m]))`).
 				RefId("A"),
 		)
 }
@@ -225,7 +226,7 @@ func ovnkubeControllerNBSBTimestampDiffOverview(d lib.SdnDashboard) *heatmap.Pan
 		Calculate(true).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`ovnkube_controller_nb_e2e_timestamp{} - ovnkube_controller_sb_e2e_timestamp{}`).
+				Expr(`ovnkube_controller_nb_e2e_timestamp{cluster="$cluster"} - ovnkube_controller_sb_e2e_timestamp{cluster="$cluster"}`).
 				LegendFormat("__auto").
 				Format(prometheus.PromQueryFormatHeatmap).
 				Range().
@@ -250,7 +251,7 @@ func ovnkubeControllerNBSBTimestampDiff(d lib.SdnDashboard) *timeseries.PanelBui
 		Span(12).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, (ovnkube_controller_nb_e2e_timestamp{instance=~"$instance", pod=~"$pod"} - ovnkube_controller_sb_e2e_timestamp{instance=~"$instance", pod=~"$pod"}))`).
+				Expr(`topk($topk, (ovnkube_controller_nb_e2e_timestamp{cluster="$cluster", instance=~"$instance", pod=~"$pod"} - ovnkube_controller_sb_e2e_timestamp{cluster="$cluster", instance=~"$instance", pod=~"$pod"}))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -266,13 +267,13 @@ func ovnkubeControllerCNIRequestRateOverview(d lib.SdnDashboard) *timeseries.Pan
 		Unit("reqps").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum(rate(ovnkube_node_cni_request_duration_seconds_count{command="ADD"}[5m]))`).
+				Expr(`sum(rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", command="ADD"}[5m]))`).
 				LegendFormat("ADD").
 				RefId("A"),
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum(rate(ovnkube_node_cni_request_duration_seconds_count{command="DEL"}[5m]))`).
+				Expr(`sum(rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", command="DEL"}[5m]))`).
 				LegendFormat("DEL").
 				RefId("B"),
 		)
@@ -288,13 +289,13 @@ func ovnkubeControllerCNIRequestRate(d lib.SdnDashboard) *timeseries.PanelBuilde
 		Unit("reqps").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{instance=~"$instance", pod=~"$pod", command="ADD"}[5m]))`).
+				Expr(`topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", instance=~"$instance", pod=~"$pod", command="ADD"}[5m]))`).
 				LegendFormat("ADD:{{instance}}/{{pod}}").
 				RefId("A"),
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{instance=~"$instance", pod=~"$pod", command="DEL"}[5m]))`).
+				Expr(`topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", instance=~"$instance", pod=~"$pod", command="DEL"}[5m]))`).
 				LegendFormat("DEL:{{instance}}/{{pod}}").
 				RefId("B"),
 		)
@@ -308,7 +309,7 @@ func ovnkubeControllerCniCmdAddDurationOverview(d lib.SdnDashboard) *heatmap.Pan
 		CellValues(heatmap.NewCellValuesBuilder().Unit("rps")).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{command="ADD", err="false"}[5m]))`).
+				Expr(`sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{cluster="$cluster", command="ADD", err="false"}[5m]))`).
 				LegendFormat("{{instance}}").
 				Format(prometheus.PromQueryFormatHeatmap).
 				Range().
@@ -324,7 +325,7 @@ func ovnkubeControllerCniCmdDelDurationOverview(d lib.SdnDashboard) *heatmap.Pan
 		CellValues(heatmap.NewCellValuesBuilder().Unit("rps")).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{command="DEL", err="false"}[5m]))`).
+				Expr(`sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{cluster="$cluster", command="DEL", err="false"}[5m]))`).
 				LegendFormat("{{instance}}").
 				Format(prometheus.PromQueryFormatHeatmap).
 				Range().
@@ -342,7 +343,7 @@ func ovnkubeControllerCNIRequestDuration(d lib.SdnDashboard) *timeseries.PanelBu
 		Unit("s").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_node_cni_request_duration_seconds_bucket{instance=~"$instance", pod=~"$pod", err="false"}[5m])) by (instance, pod, command, le)))`).
+				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_node_cni_request_duration_seconds_bucket{cluster="$cluster", instance=~"$instance", pod=~"$pod", err="false"}[5m])) by (instance, pod, command, le)))`).
 				LegendFormat("{{command}}:{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -359,7 +360,7 @@ func ovnkubeControllerCNIRequestSuccessRateOverview(d lib.SdnDashboard) *timeser
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{err="false"}[5m]))/sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{}[5m]))`).
+				Expr(`sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", err="false"}[5m]))/sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster"}[5m]))`).
 				LegendFormat("{{command}}").
 				RefId("A"),
 		)
@@ -376,13 +377,13 @@ func ovnkubeControllerCNIRequestSuccessRate(d lib.SdnDashboard) *timeseries.Pane
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{err="false", command="ADD", instance=~"$instance", pod=~"$pod"}[5m]))/sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{command="ADD", instance=~"$instance", pod=~"$pod"}[5m])))`).
+				Expr(`bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", err="false", command="ADD", instance=~"$instance", pod=~"$pod"}[5m]))/sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", command="ADD", instance=~"$instance", pod=~"$pod"}[5m])))`).
 				LegendFormat("ADD:{{instance}}/{{pod}}").
 				RefId("A"),
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{err="false", command="DEL", instance=~"$instance", pod=~"$pod"}[5m]))/sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{command="DEL", instance=~"$instance", pod=~"$pod"}[5m])))`).
+				Expr(`bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", err="false", command="DEL", instance=~"$instance", pod=~"$pod"}[5m]))/sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster="$cluster", command="DEL", instance=~"$instance", pod=~"$pod"}[5m])))`).
 				LegendFormat("DEL:{{instance}}/{{pod}}").
 				RefId("B"),
 		)
@@ -397,7 +398,7 @@ func ovnkubeControllerServiceSyncRate(d lib.SdnDashboard) *timeseries.PanelBuild
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, irate(ovnkube_controller_sync_service_total{instance=~"$instance", pod=~"$pod"}[5m]))`).
+				Expr(`topk($topk, irate(ovnkube_controller_sync_service_total{cluster="$cluster", instance=~"$instance", pod=~"$pod"}[5m]))`).
 				LegendFormat("{{instance}}").
 				RefId("A"),
 		)
@@ -412,7 +413,7 @@ func ovnkubeControllerServiceSyncLatency(d lib.SdnDashboard) *timeseries.PanelBu
 		Unit("s").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_sync_service_latency_seconds_bucket{instance=~"$instance", pod=~"$pod"}[5m])) by (le, instance)))`).
+				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_sync_service_latency_seconds_bucket{cluster="$cluster", instance=~"$instance", pod=~"$pod"}[5m])) by (le, instance)))`).
 				LegendFormat("{{instance}}").
 				RefId("A"),
 		)
@@ -427,7 +428,7 @@ func ovnkubeControllerServiceReQueueRate(d lib.SdnDashboard) *timeseries.PanelBu
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, irate(ovnkube_controller_requeue_service_total{instance=~"$instance", pod=~"$pod"}[5m]))`).
+				Expr(`topk($topk, irate(ovnkube_controller_requeue_service_total{cluster="$cluster", instance=~"$instance", pod=~"$pod"}[5m]))`).
 				LegendFormat("{{instance}}").
 				RefId("A"),
 		)
@@ -442,7 +443,7 @@ func ovnkubeControllerResourceUpdateRate(d lib.SdnDashboard) *timeseries.PanelBu
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, irate(ovnkube_controller_resource_update_total{instance=~"$instance", pod=~"$pod"}[5m]))`).
+				Expr(`topk($topk, irate(ovnkube_controller_resource_update_total{cluster="$cluster", instance=~"$instance", pod=~"$pod"}[5m]))`).
 				LegendFormat("{{instance}} {{kind}}").
 				RefId("A"),
 		)
@@ -457,7 +458,7 @@ func ovnkubeControllerPodCreationDurationOverview(d lib.SdnDashboard) *heatmap.P
 		CellValues(heatmap.NewCellValuesBuilder().Unit("rps")).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum by (le) (rate(ovnkube_controller_pod_creation_latency_seconds_bucket[5m]))`).
+				Expr(`sum by (le) (rate(ovnkube_controller_pod_creation_latency_seconds_bucket{cluster="$cluster"}[5m]))`).
 				LegendFormat("{{instance}}").
 				Format(prometheus.PromQueryFormatHeatmap).
 				Range().
@@ -474,7 +475,7 @@ func ovnkubeControllerPodCreationDuration(d lib.SdnDashboard) *timeseries.PanelB
 		Unit("s").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_pod_creation_latency_seconds_bucket{instance=~"$instance", pod=~"$pod"}[5m])) by (le, instance)))`).
+				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_pod_creation_latency_seconds_bucket{cluster="$cluster", instance=~"$instance", pod=~"$pod"}[5m])) by (le, instance)))`).
 				LegendFormat("{{instance}}").
 				RefId("A"),
 		)
@@ -490,7 +491,7 @@ func ovnkubeControllerWorkQueueDepth(d lib.SdnDashboard) *timeseries.PanelBuilde
 		Span(12).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, ovnkube_controller_workqueue_depth{namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"})`).
+				Expr(`topk($topk, ovnkube_controller_workqueue_depth{cluster="$cluster", namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"})`).
 				LegendFormat("{{instance}}/{{pod}}:{{name}}").
 				RefId("A"),
 		)
@@ -506,7 +507,7 @@ func ovnkubeControllerWorkQueueAddRate(d lib.SdnDashboard) *timeseries.PanelBuil
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, irate(ovnkube_controller_workqueue_adds_total{namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"}[5m]))`).
+				Expr(`topk($topk, irate(ovnkube_controller_workqueue_adds_total{cluster="$cluster", namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"}[5m]))`).
 				LegendFormat("{{instance}}/{{pod}}:{{name}}").
 				RefId("A"),
 		)
@@ -522,7 +523,7 @@ func ovnkubeControllerWorkQueueRetryRate(d lib.SdnDashboard) *timeseries.PanelBu
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, irate(ovnkube_controller_workqueue_retries_total{namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"}[5m]))`).
+				Expr(`topk($topk, irate(ovnkube_controller_workqueue_retries_total{cluster="$cluster", namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"}[5m]))`).
 				LegendFormat("{{instance}}/{{pod}}:{{name}}").
 				RefId("A"),
 		)
@@ -538,7 +539,7 @@ func ovnkubeControllerWorkQueueProcessingDuration(d lib.SdnDashboard) *timeserie
 		Unit("s").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_workqueue_work_duration_seconds_bucket{namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"}[5m])) by (le, instance, pod, name)))`).
+				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_workqueue_work_duration_seconds_bucket{cluster="$cluster", namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"}[5m])) by (le, instance, pod, name)))`).
 				LegendFormat("{{instance}}/{{pod}}:{{name}}").
 				RefId("A"),
 		)
@@ -554,7 +555,7 @@ func ovnkubeControllerWorkQueuePendingDuration(d lib.SdnDashboard) *timeseries.P
 		Unit("s").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_workqueue_queue_duration_seconds_bucket{namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"}[5m])) by (le, instance, pod, name)))`).
+				Expr(`topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_workqueue_queue_duration_seconds_bucket{cluster="$cluster", namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"}[5m])) by (le, instance, pod, name)))`).
 				LegendFormat("{{instance}}/{{pod}}:{{name}}").
 				RefId("A"),
 		)
@@ -570,7 +571,7 @@ func ovnkubeControllerWorkQueueLongestRunningTime(d lib.SdnDashboard) *timeserie
 		Unit("s").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, ovnkube_controller_workqueue_longest_running_processor_seconds{namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"})`).
+				Expr(`topk($topk, ovnkube_controller_workqueue_longest_running_processor_seconds{cluster="$cluster", namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"})`).
 				LegendFormat("{{instance}}/{{pod}}:{{name}}").
 				RefId("A"),
 		)
@@ -586,7 +587,7 @@ func ovnkubeControllerWorkQueueUnfinishedWorkTime(d lib.SdnDashboard) *timeserie
 		Unit("s").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, ovnkube_controller_workqueue_unfinished_work_seconds{namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"})`).
+				Expr(`topk($topk, ovnkube_controller_workqueue_unfinished_work_seconds{cluster="$cluster", namespace="ovn-kubernetes", instance=~"$instance", pod=~"$pod"})`).
 				LegendFormat("{{instance}}/{{pod}}:{{name}}").
 				RefId("A"),
 		)

@@ -54,6 +54,7 @@ func (d *OvnControllerDashboard) Build() (dashboard.Dashboard, error) {
 		Editable().
 		Time("now-30m", "now").
 		Timezone(common.TimeZoneBrowser).
+		WithVariable(lib.ClusterVariable(d)).
 		// Instance variable
 		WithVariable(instanceVariable(d)).
 		// Pod variable
@@ -191,7 +192,7 @@ func BuildOvnControllerDashboard() (*lib.BaseSdnDashboard, error) {
 func instanceVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 	return dashboard.NewQueryVariableBuilder("instance").
 		Label("instance").
-		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovn_controller_build_info{},instance)")}).
+		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovn_controller_build_info{cluster=\"$cluster\"},instance)")}).
 		Datasource(d.DataSourceRef()).
 		Current(dashboard.VariableOption{
 			Selected: cog.ToPtr(true),
@@ -208,7 +209,7 @@ func instanceVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 func podVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 	return dashboard.NewQueryVariableBuilder("pod").
 		Label("Pod").
-		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovn_controller_build_info{instance=~\"$instance\"},pod)")}).
+		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovn_controller_build_info{cluster=\"$cluster\", instance=~\"$instance\"},pod)")}).
 		Datasource(d.DataSourceRef()).
 		Description("Pods of ovnkube-node.").
 		Current(dashboard.VariableOption{
@@ -227,7 +228,7 @@ func podVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 
 func ovnControllerBuildInfo(d lib.SdnDashboard) *table.PanelBuilder {
 	return lib.BuildInfoTable(d, "ovn-controller build info.",
-		`ovn_controller_build_info{namespace="ovn-kubernetes"}`,
+		`ovn_controller_build_info{cluster="$cluster", namespace="ovn-kubernetes"}`,
 		[]lib.BuildInfoField{
 			{Label: "version", Name: "OVN Version"},
 			{Label: "ovs_lib_version", Name: "OVS Lib Version"},
@@ -247,7 +248,7 @@ func ovnControllerSBConnectionOverview(d lib.SdnDashboard) *gauge.PanelBuilder {
 		Max(1).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum by (namespace) (ovn_controller_southbound_database_connected{namespace="ovn-kubernetes"} == 1) / sum by (namespace) (ovn_controller_southbound_database_connected{namespace="ovn-kubernetes"})`).
+				Expr(`sum by (namespace) (ovn_controller_southbound_database_connected{cluster="$cluster", namespace="ovn-kubernetes"} == bool 1) / count by (namespace) (ovn_controller_southbound_database_connected{cluster="$cluster", namespace="ovn-kubernetes"})`).
 				LegendFormat("CONNECTED").
 				RefId("A"),
 		).
@@ -292,7 +293,7 @@ func ovnControllerTransactionSuccess(d lib.SdnDashboard) *timeseries.PanelBuilde
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_txn_success{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_txn_success{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -309,7 +310,7 @@ func ovnControllerTransactionIncomplete(d lib.SdnDashboard) *timeseries.PanelBui
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_northd_txn_incomplete{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_txn_incomplete{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).
@@ -335,7 +336,7 @@ func ovnControllerTransactionAbort(d lib.SdnDashboard) *timeseries.PanelBuilder 
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_txn_aborted{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_txn_aborted{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).
@@ -360,7 +361,7 @@ func ovnControllerTransactionError(d lib.SdnDashboard) *timeseries.PanelBuilder 
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_txn_error{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_txn_error{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -376,7 +377,7 @@ func ovnControllerTransactionTryAgain(d lib.SdnDashboard) *timeseries.PanelBuild
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_txn_try_again{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_txn_try_again{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -392,7 +393,7 @@ func ovnControllerTransactionUncommitted(d lib.SdnDashboard) *timeseries.PanelBu
 		Unit("locale").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_txn_uncommitted{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_txn_uncommitted{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -408,7 +409,7 @@ func ovnControllerTransactionNoChange(d lib.SdnDashboard) *timeseries.PanelBuild
 		Unit("locale").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_txn_unchanged{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_txn_unchanged{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -426,7 +427,7 @@ func ovnControllerRconnQueued(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_rconn_queued{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_rconn_queued{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -443,7 +444,7 @@ func ovnControllerRconnOverflow(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_rconn_overflow{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_rconn_overflow{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -460,7 +461,7 @@ func ovnControllerRconnSent(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_rconn_sent{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_rconn_sent{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -477,7 +478,7 @@ func ovnControllerRconnDiscarded(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_rconn_discarded{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_rconn_discarded{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -494,7 +495,7 @@ func ovnControllerVconnSent(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_vconn_sent{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_vconn_sent{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -511,7 +512,7 @@ func ovnControllerVconnReceived(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_vconn_received{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_vconn_received{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).
@@ -536,7 +537,7 @@ func ovnControllerVconnOpen(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_vconn_open{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_vconn_open{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -553,7 +554,7 @@ func ovnControllerStreamOpen(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_stream_open{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_stream_open{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -572,7 +573,7 @@ func ovnControllerNetlinkSent(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		FillOpacity(10).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_netlink_sent{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_netlink_sent{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).
@@ -598,7 +599,7 @@ func ovnControllerNetlinkReceived(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		FillOpacity(10).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_netlink_received{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_netlink_received{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).
@@ -624,7 +625,7 @@ func ovnControllerNetlinkOverflow(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		FillOpacity(10).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_netlink_overflow{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_netlink_overflow{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).
@@ -650,7 +651,7 @@ func ovnControllerNetlinkJumbo(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		FillOpacity(10).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_netlink_recv_jumbo{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_netlink_recv_jumbo{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).
@@ -677,7 +678,7 @@ func ovnControllerPacketIn(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		FillOpacity(10).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_packet_in{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_packet_in{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).
@@ -702,7 +703,7 @@ func ovnControllerPacketInDrop(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_packet_in_drop{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_packet_in_drop{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -719,7 +720,7 @@ func ovnControllerLogicalFlowTranslate(d lib.SdnDashboard) *timeseries.PanelBuil
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, rate(ovn_controller_lflow_run{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
+				Expr(`topk($topk, rate(ovn_controller_lflow_run{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[2m]))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		).

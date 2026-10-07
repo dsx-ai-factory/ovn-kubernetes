@@ -74,6 +74,7 @@ func (d *OvnDbDashboard) Build() (dashboard.Dashboard, error) {
 		Editable().
 		Time("now-3h", "now").
 		Timezone(common.TimeZoneBrowser).
+		WithVariable(lib.ClusterVariable(d)).
 		// Instance variable
 		WithVariable(ovnDbInstanceVariable(d)).
 		// Pod variable
@@ -172,7 +173,7 @@ func getDbNameLabelValue(name string) string {
 func ovnDbInstanceVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 	return dashboard.NewQueryVariableBuilder("instance").
 		Label("Instance").
-		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovn_db_build_info{},instance)")}).
+		Query(dashboard.StringOrMap{String: cog.ToPtr("label_values(ovn_db_build_info{cluster=\"$cluster\"},instance)")}).
 		Datasource(d.DataSourceRef()).
 		Current(dashboard.VariableOption{
 			Selected: cog.ToPtr(true),
@@ -188,7 +189,7 @@ func ovnDbInstanceVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 func ovnDbPodVariable(d lib.SdnDashboard) *dashboard.QueryVariableBuilder {
 	return dashboard.NewQueryVariableBuilder("pod").
 		Label("Pod").
-		Query(dashboard.StringOrMap{String: cog.ToPtr(`label_values(ovn_db_build_info{instance=~"$instance"},pod)`)}).
+		Query(dashboard.StringOrMap{String: cog.ToPtr(`label_values(ovn_db_build_info{cluster="$cluster", instance=~"$instance"},pod)`)}).
 		Datasource(d.DataSourceRef()).
 		Current(dashboard.VariableOption{
 			Selected: cog.ToPtr(true),
@@ -223,7 +224,7 @@ func ovnDbInfoTable(d lib.SdnDashboard, name string) *table.PanelBuilder {
 
 	return lib.BuildInfoTable(d,
 		"A metric with a constant '1' value labeled by ovsdb-server version and NB and SB schema version.",
-		`ovn_db_build_info{namespace="ovn-kubernetes"}`,
+		`ovn_db_build_info{cluster="$cluster", namespace="ovn-kubernetes"}`,
 		[]lib.BuildInfoField{
 			{Label: "version", Name: "OVS Version"},
 			{Label: schemaVersionLabel, Name: schemaVersionName},
@@ -242,7 +243,7 @@ func ovnDbSizeOverview(d lib.SdnDashboard, name string) *heatmap.PanelBuilder {
 		Calculate(true).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`ovn_db_db_size_bytes{namespace="ovn-kubernetes", db_name="%s"}`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`ovn_db_db_size_bytes{cluster="$cluster", namespace="ovn-kubernetes", db_name="%s"}`, dbNameLabelValue)).
 				LegendFormat("__auto").
 				Format(prometheus.PromQueryFormatHeatmap).
 				Range().
@@ -261,7 +262,7 @@ func ovnDbSizePanel(d lib.SdnDashboard, name string) *timeseries.PanelBuilder {
 		Unit("decbytes").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(lib.TopKQuery(fmt.Sprintf(`ovn_db_db_size_bytes{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}`, dbNameLabelValue))).
+				Expr(lib.TopKQuery(fmt.Sprintf(`ovn_db_db_size_bytes{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}`, dbNameLabelValue))).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -281,7 +282,7 @@ func ovnDbMonitorsPanel(d lib.SdnDashboard, name string) *timeseries.PanelBuilde
 		Span(12).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance,pod) (ovn_db_ovsdb_monitors{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance,pod) (ovn_db_ovsdb_monitors{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -309,7 +310,7 @@ func ovnDbE2ETimestampDelayPanel(d lib.SdnDashboard, name string) *timeseries.Pa
 		Unit("s").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`topk($topk, max by(instance,pod) (ovn_db_e2e_timestamp{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="OVN_Northbound"}) - max by(instance,pod) (ovn_db_e2e_timestamp{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="OVN_Southbound"}))`).
+				Expr(`topk($topk, max by(instance,pod) (ovn_db_e2e_timestamp{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="OVN_Northbound"}) - max by(instance,pod) (ovn_db_e2e_timestamp{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="OVN_Southbound"}))`).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -326,7 +327,7 @@ func ovnDbJSONRPCSessionsPanel(d lib.SdnDashboard, name string) *timeseries.Pane
 		Unit("short").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (ovn_db_jsonrpc_server_sessions{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (ovn_db_jsonrpc_server_sessions{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -343,7 +344,7 @@ func ovnDbJSONRPCRequestRatePanel(d lib.SdnDashboard, name string) *timeseries.P
 		Unit("reqps").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by(instance, pod) (rate(ovn_db_unixctl_received{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes",db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by(instance, pod) (rate(ovn_db_unixctl_received{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes",db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -360,7 +361,7 @@ func ovnDbJSONRPCReplyRatePanel(d lib.SdnDashboard, name string) *timeseries.Pan
 		Unit("reqps").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_unixctl_replied{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_unixctl_replied{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -378,7 +379,7 @@ func ovnDbPStreamOpenRatePanel(d lib.SdnDashboard, name string) *timeseries.Pane
 		Min(0).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_pstream_open{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_pstream_open{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -395,7 +396,7 @@ func ovnDbObjectCreationRatePanel(d lib.SdnDashboard, name string) *timeseries.P
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by(instance, pod) (rate(ovn_db_seq_change{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by(instance, pod) (rate(ovn_db_seq_change{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -412,7 +413,7 @@ func ovnDbMemoryAllocationRatePanel(d lib.SdnDashboard, name string) *timeseries
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_util_xalloc{instance=~"$instance", namespace="ovn-kubernetes", pod=~"$pod", db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_util_xalloc{cluster="$cluster", instance=~"$instance", namespace="ovn-kubernetes", pod=~"$pod", db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -429,7 +430,7 @@ func ovnDbEventProcessRatePanel(d lib.SdnDashboard, name string) *timeseries.Pan
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_poll_zero_timeout{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_poll_zero_timeout{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -446,7 +447,7 @@ func ovnDbHMAPPathologicalRatePanel(d lib.SdnDashboard, name string) *timeseries
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_hmap_pathological{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_hmap_pathological{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -463,7 +464,7 @@ func ovnDbHMAPExpandRatePanel(d lib.SdnDashboard, name string) *timeseries.Panel
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_hmap_expand{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_hmap_expand{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -480,7 +481,7 @@ func ovnDbEventLoopBusyRatePanel(d lib.SdnDashboard, name string) *timeseries.Pa
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_poll_create_node{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by (instance, pod) (rate(ovn_db_poll_create_node{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}[2m])))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
@@ -497,7 +498,7 @@ func ovnDbLockFileCountPanel(d lib.SdnDashboard, name string) *timeseries.PanelB
 		Unit("short").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`topk($topk, sum by(instance, pod) (ovn_db_lockfile_lock{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}))`, dbNameLabelValue)).
+				Expr(fmt.Sprintf(`topk($topk, sum by(instance, pod) (ovn_db_lockfile_lock{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes", db_name="%s"}))`, dbNameLabelValue)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)

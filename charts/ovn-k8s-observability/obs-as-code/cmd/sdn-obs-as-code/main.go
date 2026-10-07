@@ -27,9 +27,9 @@ func newRootCmd() *cobra.Command {
 	}
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable debug logs")
 
-	modifyCmd := &cobra.Command{
-		Use:   "modify",
-		Short: "Modify resources by type",
+	patchCmd := &cobra.Command{
+		Use:   "patch",
+		Short: "Patch raw JSON dashboards into Helm templates",
 	}
 
 	var dashboardFile string
@@ -52,10 +52,10 @@ func newRootCmd() *cobra.Command {
 	}
 	dashboardCmd.Flags().StringVar(&dashboardFile, "dashboard-file", "", "Grafana dashboard JSON file")
 	dashboardCmd.Flags().StringVar(&dashboardDir, "dashboard-dir", "", "Directory containing Grafana dashboard JSON files")
-	dashboardCmd.Flags().StringVar(&outDir, "out-dir", "", "Output directory for modified dashboard JSON (preserves source file)")
+	dashboardCmd.Flags().StringVar(&outDir, "out-dir", "", "Output directory for patched dashboard JSON (preserves source file)")
 
-	modifyCmd.AddCommand(dashboardCmd)
-	rootCmd.AddCommand(modifyCmd)
+	patchCmd.AddCommand(dashboardCmd)
+	rootCmd.AddCommand(patchCmd)
 
 	buildCmd := &cobra.Command{
 		Use:   "build",

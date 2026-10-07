@@ -1,12 +1,12 @@
-{
+{{`{
   "__inputs": [
     {
-      "description": "",
-      "label": "prometheus",
       "name": "DS_PROMETHEUS",
+      "label": "prometheus",
+      "description": "",
+      "type": "datasource",
       "pluginId": "prometheus",
-      "pluginName": "Prometheus",
-      "type": "datasource"
+      "pluginName": "Prometheus"
     }
   ],
   "uid": "3d661b446857a40c585d2bcab88aa658",
@@ -41,10 +41,10 @@
       "type": "table",
       "targets": [
         {
-          "expr": "ovnkube_controller_build_info{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
-          "format": "table",
+          "expr": "ovnkube_controller_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"}",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "A"
         }
       ],
@@ -142,12 +142,12 @@
       "type": "bargauge",
       "targets": [
         {
-          "expr": "kube_daemonset_status_number_ready{daemonset=\"ovnkube-node\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "expr": "kube_daemonset_status_number_ready{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"}",
           "legendFormat": "READY",
           "refId": "A"
         },
         {
-          "expr": "kube_daemonset_status_number_available{daemonset=\"ovnkube-node\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"} + kube_daemonset_status_number_unavailable{daemonset=\"ovnkube-node\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"} - kube_daemonset_status_number_ready{daemonset=\"ovnkube-node\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "expr": "kube_daemonset_status_number_available{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"} + kube_daemonset_status_number_unavailable{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"} - kube_daemonset_status_number_ready{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"}",
           "legendFormat": "NOT READY",
           "refId": "B"
         }
@@ -167,26 +167,26 @@
       },
       "options": {
         "displayMode": "lcd",
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "maxVizHeight": 300,
-        "minVizHeight": 16,
-        "minVizWidth": 8,
+        "valueMode": "color",
         "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
         "showUnfilled": true,
         "sizing": "auto",
-        "valueMode": "color"
+        "minVizWidth": 8,
+        "minVizHeight": 16,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false,
+          "calcs": []
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "maxVizHeight": 300,
+        "orientation": "horizontal"
       },
       "fieldConfig": {
         "defaults": {
@@ -210,12 +210,12 @@
       "type": "bargauge",
       "targets": [
         {
-          "expr": "kube_daemonset_status_number_available{daemonset=\"ovnkube-node\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "expr": "kube_daemonset_status_number_available{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"}",
           "legendFormat": "AVAILABLE",
           "refId": "A"
         },
         {
-          "expr": "kube_daemonset_status_number_unavailable{daemonset=\"ovnkube-node\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "expr": "kube_daemonset_status_number_unavailable{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"}",
           "legendFormat": "UNAVAILABLE",
           "refId": "B"
         }
@@ -235,26 +235,26 @@
       },
       "options": {
         "displayMode": "lcd",
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "maxVizHeight": 300,
-        "minVizHeight": 16,
-        "minVizWidth": 8,
+        "valueMode": "color",
         "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
         "showUnfilled": true,
         "sizing": "auto",
-        "valueMode": "color"
+        "minVizWidth": 8,
+        "minVizHeight": 16,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false,
+          "calcs": []
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "maxVizHeight": 300,
+        "orientation": "horizontal"
       },
       "fieldConfig": {
         "defaults": {
@@ -278,7 +278,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(increase(kube_pod_container_status_restarts_total{container=\"ovnkube-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}[5m]))",
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", container=\"ovnkube-controller\", namespace=\"ovn-kubernetes\"}[5m]))",
           "refId": "A"
         }
       ],
@@ -298,10 +298,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "hidden",
           "placement": "bottom",
-          "showLegend": false
+          "showLegend": false,
+          "calcs": []
         },
         "tooltip": {
           "mode": "",
@@ -313,11 +313,11 @@
       "type": "heatmap",
       "targets": [
         {
-          "expr": "ovnkube_controller_nb_e2e_timestamp{k8s_cluster_name=~\"$cluster\"} - ovnkube_controller_sb_e2e_timestamp{k8s_cluster_name=~\"$cluster\"}",
-          "format": "heatmap",
+          "expr": "ovnkube_controller_nb_e2e_timestamp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"} - ovnkube_controller_sb_e2e_timestamp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}",
           "instant": false,
-          "legendFormat": "__auto",
           "range": true,
+          "format": "heatmap",
+          "legendFormat": "__auto",
           "refId": "A"
         }
       ],
@@ -337,39 +337,39 @@
       "interval": "120s",
       "options": {
         "calculate": true,
-        "cellGap": 1,
         "color": {
-          "exponent": 0.5,
-          "fill": "dark-orange",
           "mode": "scheme",
-          "reverse": false,
-          "scale": "exponential",
           "scheme": "Oranges",
-          "steps": 64
-        },
-        "exemplars": {
-          "color": "rgba(255,0,255,0.7)"
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "steps": 64,
+          "reverse": false
         },
         "filterValues": {
           "le": 1e-9
         },
-        "legend": {
-          "show": true
-        },
         "rowsFrame": {
           "layout": "auto"
         },
-        "selectionMode": "x",
         "showValue": "auto",
+        "cellGap": 1,
+        "yAxis": {
+          "reverse": false,
+          "axisPlacement": "left"
+        },
+        "legend": {
+          "show": true
+        },
         "tooltip": {
           "mode": "single",
-          "showColorScale": false,
-          "yHistogram": false
+          "yHistogram": false,
+          "showColorScale": false
         },
-        "yAxis": {
-          "axisPlacement": "left",
-          "reverse": false
-        }
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "selectionMode": "x"
       },
       "fieldConfig": {
         "defaults": {
@@ -386,12 +386,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(ovnkube_node_cni_request_duration_seconds_count{command=\"ADD\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+          "expr": "sum(rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", command=\"ADD\"}[5m]))",
           "legendFormat": "ADD",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(ovnkube_node_cni_request_duration_seconds_count{command=\"DEL\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+          "expr": "sum(rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", command=\"DEL\"}[5m]))",
           "legendFormat": "DEL",
           "refId": "B"
         }
@@ -421,7 +421,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{err=\"false\",k8s_cluster_name=~\"$cluster\"}[5m])) / sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{k8s_cluster_name=~\"$cluster\"}[5m]))",
+          "expr": "sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", err=\"false\"}[5m]))/sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}[5m]))",
           "legendFormat": "{{command}}",
           "refId": "A"
         }
@@ -452,11 +452,11 @@
       "type": "heatmap",
       "targets": [
         {
-          "expr": "sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{command=\"ADD\",err=\"false\",k8s_cluster_name=~\"$cluster\"}[5m]))",
-          "format": "heatmap",
+          "expr": "sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", command=\"ADD\", err=\"false\"}[5m]))",
           "instant": false,
-          "legendFormat": "{{instance}}",
           "range": true,
+          "format": "heatmap",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
@@ -476,42 +476,42 @@
       "interval": "120s",
       "options": {
         "calculate": false,
-        "cellGap": 1,
-        "cellValues": {
-          "unit": "rps"
-        },
         "color": {
-          "exponent": 0.5,
-          "fill": "dark-orange",
           "mode": "scheme",
-          "reverse": false,
-          "scale": "exponential",
           "scheme": "Oranges",
-          "steps": 128
-        },
-        "exemplars": {
-          "color": "rgba(255,0,255,0.7)"
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "steps": 128,
+          "reverse": false
         },
         "filterValues": {
           "le": 1e-9
         },
-        "legend": {
-          "show": true
-        },
         "rowsFrame": {
           "layout": "auto"
         },
-        "selectionMode": "x",
         "showValue": "auto",
-        "tooltip": {
-          "mode": "single",
-          "showColorScale": false,
-          "yHistogram": false
+        "cellGap": 1,
+        "cellValues": {
+          "unit": "rps"
         },
         "yAxis": {
-          "axisPlacement": "left",
-          "reverse": false
-        }
+          "reverse": false,
+          "axisPlacement": "left"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "selectionMode": "x"
       },
       "fieldConfig": {
         "defaults": {
@@ -529,11 +529,11 @@
       "type": "heatmap",
       "targets": [
         {
-          "expr": "sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{command=\"DEL\",err=\"false\",k8s_cluster_name=~\"$cluster\"}[5m]))",
-          "format": "heatmap",
+          "expr": "sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", command=\"DEL\", err=\"false\"}[5m]))",
           "instant": false,
-          "legendFormat": "{{instance}}",
           "range": true,
+          "format": "heatmap",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
@@ -553,42 +553,42 @@
       "interval": "120s",
       "options": {
         "calculate": false,
-        "cellGap": 1,
-        "cellValues": {
-          "unit": "rps"
-        },
         "color": {
-          "exponent": 0.5,
-          "fill": "dark-orange",
           "mode": "scheme",
-          "reverse": false,
-          "scale": "exponential",
           "scheme": "Oranges",
-          "steps": 128
-        },
-        "exemplars": {
-          "color": "rgba(255,0,255,0.7)"
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "steps": 128,
+          "reverse": false
         },
         "filterValues": {
           "le": 1e-9
         },
-        "legend": {
-          "show": true
-        },
         "rowsFrame": {
           "layout": "auto"
         },
-        "selectionMode": "x",
         "showValue": "auto",
-        "tooltip": {
-          "mode": "single",
-          "showColorScale": false,
-          "yHistogram": false
+        "cellGap": 1,
+        "cellValues": {
+          "unit": "rps"
         },
         "yAxis": {
-          "axisPlacement": "left",
-          "reverse": false
-        }
+          "reverse": false,
+          "axisPlacement": "left"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "selectionMode": "x"
       },
       "fieldConfig": {
         "defaults": {
@@ -606,11 +606,11 @@
       "type": "heatmap",
       "targets": [
         {
-          "expr": "sum by (le) (rate(ovnkube_controller_pod_creation_latency_seconds_bucket{k8s_cluster_name=~\"$cluster\"}[5m]))",
-          "format": "heatmap",
+          "expr": "sum by (le) (rate(ovnkube_controller_pod_creation_latency_seconds_bucket{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}[5m]))",
           "instant": false,
-          "legendFormat": "{{instance}}",
           "range": true,
+          "format": "heatmap",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
@@ -630,42 +630,42 @@
       "interval": "120s",
       "options": {
         "calculate": false,
-        "cellGap": 1,
-        "cellValues": {
-          "unit": "rps"
-        },
         "color": {
-          "exponent": 0.5,
-          "fill": "dark-orange",
           "mode": "scheme",
-          "reverse": false,
-          "scale": "exponential",
           "scheme": "Oranges",
-          "steps": 128
-        },
-        "exemplars": {
-          "color": "rgba(255,0,255,0.7)"
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "steps": 128,
+          "reverse": false
         },
         "filterValues": {
           "le": 1e-9
         },
-        "legend": {
-          "show": true
-        },
         "rowsFrame": {
           "layout": "auto"
         },
-        "selectionMode": "x",
         "showValue": "auto",
-        "tooltip": {
-          "mode": "single",
-          "showColorScale": false,
-          "yHistogram": false
+        "cellGap": 1,
+        "cellValues": {
+          "unit": "rps"
         },
         "yAxis": {
-          "axisPlacement": "left",
-          "reverse": false
-        }
+          "reverse": false,
+          "axisPlacement": "left"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "selectionMode": "x"
       },
       "fieldConfig": {
         "defaults": {
@@ -696,7 +696,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"ovnkube-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m])) and topk($topk, sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"ovnkube-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[$__range] @ end())))",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-controller\"}[5m]))\nand\ntopk($topk, sum by (pod) (rate(container_cpu_usage_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-controller\"}[$__range] @ end())))",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -717,10 +717,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -731,16 +731,16 @@
         "defaults": {
           "unit": "cores",
           "custom": {
-            "axisBorderShow": false,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
           }
         },
         "overrides": []
@@ -750,7 +750,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (container_memory_working_set_bytes{container=\"ovnkube-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}) / 1024 ^ 3 and topk($topk, sum by (pod) (avg_over_time(container_memory_working_set_bytes{container=\"ovnkube-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[$__range] @ end())) / 1024 ^ 3)",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-controller\"}) / 1024^3\nand\ntopk($topk, sum by (pod) (avg_over_time(container_memory_working_set_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-controller\"}[$__range] @ end())) / 1024^3)",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -771,10 +771,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -785,16 +785,16 @@
         "defaults": {
           "unit": "decgbytes",
           "custom": {
-            "axisBorderShow": false,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
           }
         },
         "overrides": []
@@ -804,7 +804,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, (ovnkube_controller_nb_e2e_timestamp{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"} - ovnkube_controller_sb_e2e_timestamp{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}))",
+          "expr": "topk($topk, (ovnkube_controller_nb_e2e_timestamp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"} - ovnkube_controller_sb_e2e_timestamp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -828,7 +828,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, histogram_quantile(0.99, sum by (le, instance) (rate(ovnkube_controller_pod_creation_latency_seconds_bucket{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m]))))",
+          "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_pod_creation_latency_seconds_bucket{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m])) by (le, instance)))",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -857,12 +857,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{command=\"ADD\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m]))",
+          "expr": "topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", command=\"ADD\"}[5m]))",
           "legendFormat": "ADD:{{instance}}/{{pod}}",
           "refId": "A"
         },
         {
-          "expr": "topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{command=\"DEL\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m]))",
+          "expr": "topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", command=\"DEL\"}[5m]))",
           "legendFormat": "DEL:{{instance}}/{{pod}}",
           "refId": "B"
         }
@@ -892,7 +892,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, histogram_quantile(0.99, sum by (instance, pod, command, le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{err=\"false\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m]))))",
+          "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_node_cni_request_duration_seconds_bucket{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", err=\"false\"}[5m])) by (instance, pod, command, le)))",
           "legendFormat": "{{command}}:{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -922,12 +922,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{command=\"ADD\",err=\"false\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m])) / sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{command=\"ADD\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m])))",
+          "expr": "bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", err=\"false\", command=\"ADD\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))/sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", command=\"ADD\", instance=~\"$instance\", pod=~\"$pod\"}[5m])))",
           "legendFormat": "ADD:{{instance}}/{{pod}}",
           "refId": "A"
         },
         {
-          "expr": "bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{command=\"DEL\",err=\"false\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m])) / sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{command=\"DEL\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m])))",
+          "expr": "bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", err=\"false\", command=\"DEL\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))/sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", command=\"DEL\", instance=~\"$instance\", pod=~\"$pod\"}[5m])))",
           "legendFormat": "DEL:{{instance}}/{{pod}}",
           "refId": "B"
         }
@@ -970,7 +970,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, irate(ovnkube_controller_sync_service_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, irate(ovnkube_controller_sync_service_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -999,7 +999,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, histogram_quantile(0.99, sum by (le, instance) (rate(ovnkube_controller_sync_service_latency_seconds_bucket{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m]))))",
+              "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_sync_service_latency_seconds_bucket{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m])) by (le, instance)))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -1028,7 +1028,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, irate(ovnkube_controller_requeue_service_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, irate(ovnkube_controller_requeue_service_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -1057,7 +1057,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, irate(ovnkube_controller_resource_update_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, irate(ovnkube_controller_resource_update_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
               "legendFormat": "{{instance}} {{kind}}",
               "refId": "A"
             }
@@ -1100,7 +1100,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovnkube_controller_workqueue_depth{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovnkube_controller_workqueue_depth{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"})",
               "legendFormat": "{{instance}}/{{pod}}:{{name}}",
               "refId": "A"
             }
@@ -1124,7 +1124,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, irate(ovnkube_controller_workqueue_adds_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, irate(ovnkube_controller_workqueue_adds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}:{{name}}",
               "refId": "A"
             }
@@ -1154,7 +1154,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, irate(ovnkube_controller_workqueue_retries_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, irate(ovnkube_controller_workqueue_retries_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}:{{name}}",
               "refId": "A"
             }
@@ -1184,7 +1184,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, histogram_quantile(0.99, sum by (le, instance, pod, name) (rate(ovnkube_controller_workqueue_work_duration_seconds_bucket{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))))",
+              "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_workqueue_work_duration_seconds_bucket{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"}[5m])) by (le, instance, pod, name)))",
               "legendFormat": "{{instance}}/{{pod}}:{{name}}",
               "refId": "A"
             }
@@ -1214,7 +1214,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, histogram_quantile(0.99, sum by (le, instance, pod, name) (rate(ovnkube_controller_workqueue_queue_duration_seconds_bucket{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))))",
+              "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_workqueue_queue_duration_seconds_bucket{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"}[5m])) by (le, instance, pod, name)))",
               "legendFormat": "{{instance}}/{{pod}}:{{name}}",
               "refId": "A"
             }
@@ -1244,7 +1244,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovnkube_controller_workqueue_longest_running_processor_seconds{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovnkube_controller_workqueue_longest_running_processor_seconds{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"})",
               "legendFormat": "{{instance}}/{{pod}}:{{name}}",
               "refId": "A"
             }
@@ -1274,7 +1274,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovnkube_controller_workqueue_unfinished_work_seconds{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovnkube_controller_workqueue_unfinished_work_seconds{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"})",
               "legendFormat": "{{instance}}/{{pod}}:{{name}}",
               "refId": "A"
             }
@@ -1309,25 +1309,33 @@
         "type": "query",
         "name": "cluster",
         "label": "Cluster",
+        "skipUrlSync": false,
         "query": {
           "qryType": 1,
-          "query": "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          "query": `}}{{ printf "label_values(%s, %s)" .Values.clusterLabel.discoveryMetric .Values.clusterLabel.label | toJson }}{{`,
+          "refId": "prometheus-cluster-Variable-Query"
         },
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
+        "multi": false,
+        "allowCustomValue": true,
         "refresh": 1,
+        "sort": 0,
         "includeAll": false,
-        "regex": ""
+        "allValue": "\"\"",
+        "regex": "",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
       },
       {
         "type": "query",
         "name": "instance",
         "label": "instance",
         "skipUrlSync": false,
-        "query": "label_values(ovnkube_controller_build_info{k8s_cluster_name=~\"$cluster\"}, instance)",
+        "query": "label_values(ovnkube_controller_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"},instance)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -1355,7 +1363,7 @@
         "label": "Pod",
         "skipUrlSync": false,
         "description": "Pods of ovnkube-node.",
-        "query": "label_values(ovnkube_controller_build_info{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}, pod)",
+        "query": "label_values(ovnkube_controller_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"},pod)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -1399,3 +1407,4 @@
   },
   "annotations": {}
 }
+`}}

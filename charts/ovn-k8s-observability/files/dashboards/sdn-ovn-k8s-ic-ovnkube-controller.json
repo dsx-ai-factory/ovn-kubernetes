@@ -1,0 +1,1409 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "uid": "3d661b446857a40c585d2bcab88aa658",
+  "title": "OVN K8S IC / Ovnkube Controller",
+  "tags": [
+    "SDN"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "fiscalYearStartMonth": 0,
+  "schemaVersion": 41,
+  "panels": [
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Overview",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "ovnkube_controller_build_info{cluster=\"$cluster\", namespace=\"ovn-kubernetes\"}",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "title": "Build Info",
+      "description": "ovnkube-controller build info.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "version",
+                "branch",
+                "revision",
+                "goversion",
+                "pod"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "branch": 1,
+              "goversion": 3,
+              "pod": 4,
+              "revision": 2,
+              "version": 0
+            },
+            "renameByName": {
+              "branch": "Branch",
+              "goversion": "Go",
+              "revision": "Revision",
+              "version": "Version"
+            }
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Branch": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Go": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Revision": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Version": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "pod": {
+                "aggregations": [
+                  "count"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "pod (count)": "Pods"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "targets": [
+        {
+          "expr": "kube_daemonset_status_number_ready{cluster=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"}",
+          "legendFormat": "READY",
+          "refId": "A"
+        },
+        {
+          "expr": "kube_daemonset_status_number_available{cluster=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"} + kube_daemonset_status_number_unavailable{cluster=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"} - kube_daemonset_status_number_ready{cluster=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"}",
+          "legendFormat": "NOT READY",
+          "refId": "B"
+        }
+      ],
+      "title": "Node Agent Readiness",
+      "description": "shows summary of ovnkube-node pods that are ready",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "options": {
+        "displayMode": "lcd",
+        "valueMode": "color",
+        "namePlacement": "auto",
+        "showUnfilled": true,
+        "sizing": "auto",
+        "minVizWidth": 8,
+        "minVizHeight": 16,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false,
+          "calcs": []
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "maxVizHeight": 300,
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "bargauge",
+      "targets": [
+        {
+          "expr": "kube_daemonset_status_number_available{cluster=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"}",
+          "legendFormat": "AVAILABLE",
+          "refId": "A"
+        },
+        {
+          "expr": "kube_daemonset_status_number_unavailable{cluster=\"$cluster\", namespace=\"ovn-kubernetes\",daemonset=\"ovnkube-node\"}",
+          "legendFormat": "UNAVAILABLE",
+          "refId": "B"
+        }
+      ],
+      "title": "Node Agent Availability",
+      "description": "The summary of available and unavailable ovnkube-node pods",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "options": {
+        "displayMode": "lcd",
+        "valueMode": "color",
+        "namePlacement": "auto",
+        "showUnfilled": true,
+        "sizing": "auto",
+        "minVizWidth": 8,
+        "minVizHeight": 16,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false,
+          "calcs": []
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "maxVizHeight": 300,
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{cluster=\"$cluster\", container=\"ovnkube-controller\", namespace=\"ovn-kubernetes\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Container ovnkube-controller Restart Overview",
+      "description": "The number of restarts of the ovnkube-controller container in the last 5 minutes.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "displayMode": "hidden",
+          "placement": "bottom",
+          "showLegend": false,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "",
+          "sort": ""
+        }
+      }
+    },
+    {
+      "type": "heatmap",
+      "targets": [
+        {
+          "expr": "ovnkube_controller_nb_e2e_timestamp{cluster=\"$cluster\"} - ovnkube_controller_sb_e2e_timestamp{cluster=\"$cluster\"}",
+          "instant": false,
+          "range": true,
+          "format": "heatmap",
+          "legendFormat": "__auto",
+          "refId": "A"
+        }
+      ],
+      "title": "NB-SB E2E Timestamp Difference Overview",
+      "description": "The difference between the NB and SB E2E timestamps on the ovnkube-controller instance.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "interval": "120s",
+      "options": {
+        "calculate": true,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "steps": 64,
+          "reverse": false
+        },
+        "filterValues": {
+          "le": 1e-9
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "showValue": "auto",
+        "cellGap": 1,
+        "yAxis": {
+          "reverse": false,
+          "axisPlacement": "left"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "selectionMode": "x"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", command=\"ADD\"}[5m]))",
+          "legendFormat": "ADD",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", command=\"DEL\"}[5m]))",
+          "legendFormat": "DEL",
+          "refId": "B"
+        }
+      ],
+      "title": "CNI Request Rate Overview",
+      "description": "The number of CNI requests per second cross all ovnkube-controller instances.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", err=\"false\"}[5m]))/sum by (command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\"}[5m]))",
+          "legendFormat": "{{command}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CNI Request Success Rate Overview",
+      "description": "The portion of CNI requests that finished successfully without returning any error cross all ovnkube-controller instances.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "heatmap",
+      "targets": [
+        {
+          "expr": "sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{cluster=\"$cluster\", command=\"ADD\", err=\"false\"}[5m]))",
+          "instant": false,
+          "range": true,
+          "format": "heatmap",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CNI CMD ADD Duration Overview",
+      "description": "The heatmap of the duration of the CNI CMD ADD requests.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "interval": "120s",
+      "options": {
+        "calculate": false,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "steps": 128,
+          "reverse": false
+        },
+        "filterValues": {
+          "le": 1e-9
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "showValue": "auto",
+        "cellGap": 1,
+        "cellValues": {
+          "unit": "rps"
+        },
+        "yAxis": {
+          "reverse": false,
+          "axisPlacement": "left"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "selectionMode": "x"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "heatmap",
+      "targets": [
+        {
+          "expr": "sum by (le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{cluster=\"$cluster\", command=\"DEL\", err=\"false\"}[5m]))",
+          "instant": false,
+          "range": true,
+          "format": "heatmap",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CNI CMD DEL Duration Overview",
+      "description": "The heatmap of the duration of the CNI CMD DEL requests.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "interval": "120s",
+      "options": {
+        "calculate": false,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "steps": 128,
+          "reverse": false
+        },
+        "filterValues": {
+          "le": 1e-9
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "showValue": "auto",
+        "cellGap": 1,
+        "cellValues": {
+          "unit": "rps"
+        },
+        "yAxis": {
+          "reverse": false,
+          "axisPlacement": "left"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "selectionMode": "x"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "heatmap",
+      "targets": [
+        {
+          "expr": "sum by (le) (rate(ovnkube_controller_pod_creation_latency_seconds_bucket{cluster=\"$cluster\"}[5m]))",
+          "instant": false,
+          "range": true,
+          "format": "heatmap",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Pod Creation Duration Overview",
+      "description": "The duration between a pod being scheduled and completing its logical switch port configuration",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "interval": "120s",
+      "options": {
+        "calculate": false,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "steps": 128,
+          "reverse": false
+        },
+        "filterValues": {
+          "le": 1e-9
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "showValue": "auto",
+        "cellGap": 1,
+        "cellValues": {
+          "unit": "rps"
+        },
+        "yAxis": {
+          "reverse": false,
+          "axisPlacement": "left"
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "selectionMode": "x"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Ovnkube Controller Runtime",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "id": 2,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-controller\"}[5m]))\nand\ntopk($topk, sum by (pod) (rate(container_cpu_usage_seconds_total{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-controller\"}[$__range] @ end())))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Usage (Top K)",
+      "description": "CPU usage of container ovnkube-controller. Only the $topk pods with the highest average usage over the selected time range are shown.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "custom": {
+            "drawStyle": "line",
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (container_memory_working_set_bytes{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-controller\"}) / 1024^3\nand\ntopk($topk, sum by (pod) (avg_over_time(container_memory_working_set_bytes{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-controller\"}[$__range] @ end())) / 1024^3)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory Usage (Top K)",
+      "description": "Working set memory usage of container ovnkube-controller. Only the $topk pods with the highest average usage over the selected time range are shown.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 40
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes",
+          "custom": {
+            "drawStyle": "line",
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, (ovnkube_controller_nb_e2e_timestamp{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"} - ovnkube_controller_sb_e2e_timestamp{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "NB-SB E2E Timestamp Difference (Top K)",
+      "description": "The difference between the NB and SB E2E timestamps on the ovnkube-controller instance.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "interval": "120s"
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_pod_creation_latency_seconds_bucket{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m])) by (le, instance)))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Pod Creation Duration(Top K)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", command=\"ADD\"}[5m]))",
+          "legendFormat": "ADD:{{instance}}/{{pod}}",
+          "refId": "A"
+        },
+        {
+          "expr": "topk($topk, rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", command=\"DEL\"}[5m]))",
+          "legendFormat": "DEL:{{instance}}/{{pod}}",
+          "refId": "B"
+        }
+      ],
+      "title": "CNI Request Rate(Top K)",
+      "description": "The number of CNI requests per second handled by the ovnkube-controller instance.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_node_cni_request_duration_seconds_bucket{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", err=\"false\"}[5m])) by (instance, pod, command, le)))",
+          "legendFormat": "{{command}}:{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CNI Request Duration P99(Top K)",
+      "description": "The duration of the CNI requests.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", err=\"false\", command=\"ADD\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))/sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", command=\"ADD\", instance=~\"$instance\", pod=~\"$pod\"}[5m])))",
+          "legendFormat": "ADD:{{instance}}/{{pod}}",
+          "refId": "A"
+        },
+        {
+          "expr": "bottomk($topk, sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", err=\"false\", command=\"DEL\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))/sum by (instance, pod, command) (rate(ovnkube_node_cni_request_duration_seconds_count{cluster=\"$cluster\", command=\"DEL\", instance=~\"$instance\", pod=~\"$pod\"}[5m])))",
+          "legendFormat": "DEL:{{instance}}/{{pod}}",
+          "refId": "B"
+        }
+      ],
+      "title": "CNI Request Success Rate(Bottom K)",
+      "description": "The portion of CNI requests that finished successfully without returning any error",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "Resource",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 72
+      },
+      "id": 3,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, irate(ovnkube_controller_sync_service_total{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Service Sync Rate(Top K)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 73
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_sync_service_latency_seconds_bucket{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m])) by (le, instance)))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Service Sync Latency(Top K)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 73
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, irate(ovnkube_controller_requeue_service_total{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
+              "legendFormat": "{{instance}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Service Re-Queue Rate(Top K)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 81
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, irate(ovnkube_controller_resource_update_total{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
+              "legendFormat": "{{instance}} {{kind}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Resource Update Rate(Top K)",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 81
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "Workqueue",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 89
+      },
+      "id": 4,
+      "panels": [
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovnkube_controller_workqueue_depth{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"})",
+              "legendFormat": "{{instance}}/{{pod}}:{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Work Queue Depth(Top K)",
+          "description": "Current depth of workqueue.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 90
+          },
+          "interval": "120s"
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, irate(ovnkube_controller_workqueue_adds_total{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}:{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Work Queue ADD Rate(Top K)",
+          "description": "Rate of adds handled by workqueue.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 90
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, irate(ovnkube_controller_workqueue_retries_total{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}:{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Work Queue Retry Rate(Top K)",
+          "description": "Rate of retries handled by workqueue.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 98
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_workqueue_work_duration_seconds_bucket{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"}[5m])) by (le, instance, pod, name)))",
+              "legendFormat": "{{instance}}/{{pod}}:{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Work Queue Processing Duration(Top K)",
+          "description": "How long in seconds processing an item from workqueue takes (p99).",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 98
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, histogram_quantile(0.99, sum(rate(ovnkube_controller_workqueue_queue_duration_seconds_bucket{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"}[5m])) by (le, instance, pod, name)))",
+              "legendFormat": "{{instance}}/{{pod}}:{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Work Queue Pending Duration(Top K)",
+          "description": "How long in seconds an item stays in workqueue before being requested (p99).",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 106
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovnkube_controller_workqueue_longest_running_processor_seconds{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"})",
+              "legendFormat": "{{instance}}/{{pod}}:{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Work Queue Longest Running Time(Top K)",
+          "description": "How many seconds has the longest running processor for workqueue been running.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 106
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovnkube_controller_workqueue_unfinished_work_seconds{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", instance=~\"$instance\", pod=~\"$pod\"})",
+              "legendFormat": "{{instance}}/{{pod}}:{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Work Queue Unfinished Work Time(Top K)",
+          "description": "How many seconds of work has been done that is in progress and hasn't been observed by work duration. Large values indicate stuck threads.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 114
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "cluster",
+        "label": "Cluster",
+        "skipUrlSync": false,
+        "query": {
+          "qryType": 1,
+          "query": "label_values(up{job=\"ovnkube-node\"}, cluster)",
+          "refId": "prometheus-cluster-Variable-Query"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "multi": false,
+        "allowCustomValue": true,
+        "refresh": 1,
+        "sort": 0,
+        "includeAll": false,
+        "allValue": "\"\"",
+        "regex": "",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "instance",
+        "label": "instance",
+        "skipUrlSync": false,
+        "query": "label_values(ovnkube_controller_build_info{cluster=\"$cluster\"},instance)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "sort": 3,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "pod",
+        "label": "Pod",
+        "skipUrlSync": false,
+        "description": "Pods of ovnkube-node.",
+        "query": "label_values(ovnkube_controller_build_info{cluster=\"$cluster\", instance=~\"$instance\"},pod)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "custom",
+        "name": "topk",
+        "label": "topk",
+        "skipUrlSync": false,
+        "query": "1,3,5,10,20,100",
+        "current": {
+          "selected": true,
+          "text": "5",
+          "value": "5"
+        },
+        "multi": false,
+        "allowCustomValue": true,
+        "includeAll": false,
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      }
+    ]
+  },
+  "annotations": {}
+}

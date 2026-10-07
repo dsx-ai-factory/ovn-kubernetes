@@ -1,12 +1,12 @@
-{
+{{`{
   "__inputs": [
     {
-      "description": "",
-      "label": "prometheus",
       "name": "DS_PROMETHEUS",
+      "label": "prometheus",
+      "description": "",
+      "type": "datasource",
       "pluginId": "prometheus",
-      "pluginName": "Prometheus",
-      "type": "datasource"
+      "pluginName": "Prometheus"
     }
   ],
   "uid": "952a078d1f7d2aa9eefb171c871191e8",
@@ -41,10 +41,10 @@
       "type": "table",
       "targets": [
         {
-          "expr": "ovn_controller_build_info{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
-          "format": "table",
+          "expr": "ovn_controller_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"}",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "A"
         }
       ],
@@ -128,12 +128,12 @@
       "type": "bargauge",
       "targets": [
         {
-          "expr": "sum(kube_pod_container_status_ready{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "expr": "sum(kube_pod_container_status_ready{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", container=\"ovn-controller\"})",
           "legendFormat": "READY",
           "refId": "A"
         },
         {
-          "expr": "count(kube_pod_container_status_ready{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}) - sum(kube_pod_container_status_ready{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "expr": "count(kube_pod_container_status_ready{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", container=\"ovn-controller\"}) - sum(kube_pod_container_status_ready{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", container=\"ovn-controller\"})",
           "legendFormat": "NOT READY",
           "refId": "B"
         }
@@ -153,26 +153,26 @@
       },
       "options": {
         "displayMode": "lcd",
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "maxVizHeight": 300,
-        "minVizHeight": 16,
-        "minVizWidth": 8,
+        "valueMode": "color",
         "namePlacement": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "values": false
-        },
         "showUnfilled": true,
         "sizing": "auto",
-        "valueMode": "color"
+        "minVizWidth": 8,
+        "minVizHeight": 16,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false,
+          "calcs": []
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "maxVizHeight": 300,
+        "orientation": "horizontal"
       },
       "fieldConfig": {
         "defaults": {
@@ -221,7 +221,7 @@
       "type": "gauge",
       "targets": [
         {
-          "expr": "sum by (namespace) (ovn_controller_southbound_database_connected{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"} == 1) / sum by (namespace) (ovn_controller_southbound_database_connected{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "expr": "sum by (namespace) (ovn_controller_southbound_database_connected{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"} == bool 1) / count by (namespace) (ovn_controller_southbound_database_connected{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "legendFormat": "CONNECTED",
           "refId": "A"
         }
@@ -282,7 +282,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m])) and topk($topk, sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[$__range] @ end())))",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[5m]))\nand\ntopk($topk, sum by (pod) (rate(container_cpu_usage_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[$__range] @ end())))",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -303,10 +303,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -317,16 +317,16 @@
         "defaults": {
           "unit": "cores",
           "custom": {
-            "axisBorderShow": false,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
           }
         },
         "overrides": []
@@ -336,7 +336,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (container_memory_working_set_bytes{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}) / 1024 ^ 3 and topk($topk, sum by (pod) (avg_over_time(container_memory_working_set_bytes{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[$__range] @ end())) / 1024 ^ 3)",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}) / 1024^3\nand\ntopk($topk, sum by (pod) (avg_over_time(container_memory_working_set_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[$__range] @ end())) / 1024^3)",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -357,10 +357,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -371,16 +371,16 @@
         "defaults": {
           "unit": "decgbytes",
           "custom": {
-            "axisBorderShow": false,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
           }
         },
         "overrides": []
@@ -390,7 +390,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (rate(kube_pod_container_status_restarts_total{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m])) and topk($topk, sum by (pod) (rate(kube_pod_container_status_restarts_total{container=\"ovn-controller\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[$__range] @ end())))",
+          "expr": "sum by (pod) (rate(kube_pod_container_status_restarts_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[5m]))\nand\ntopk($topk, sum by (pod) (rate(kube_pod_container_status_restarts_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[$__range] @ end())))",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -411,10 +411,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -426,16 +426,16 @@
           "unit": "none",
           "min": 0,
           "custom": {
-            "axisBorderShow": false,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
           }
         },
         "overrides": []
@@ -445,7 +445,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (instance, pod) (ovn_controller_southbound_database_connected{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"} == bool 0) \u003e 0",
+          "expr": "sum by (instance,pod) (ovn_controller_southbound_database_connected{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"} == bool 0) \u003e 0",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -489,7 +489,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_txn_success{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_txn_success{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -519,7 +519,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_northd_txn_incomplete{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_txn_incomplete{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -567,7 +567,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_txn_aborted{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_txn_aborted{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -615,7 +615,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_txn_error{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_txn_error{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -645,7 +645,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_txn_try_again{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_txn_try_again{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -675,7 +675,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_txn_uncommitted{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_txn_uncommitted{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -705,7 +705,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_txn_unchanged{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_txn_unchanged{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -748,7 +748,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_rconn_queued{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_rconn_queued{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -779,7 +779,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_rconn_overflow{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_rconn_overflow{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -810,7 +810,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_rconn_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_rconn_sent{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -841,7 +841,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_rconn_discarded{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_rconn_discarded{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -872,7 +872,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_vconn_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_vconn_sent{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -903,7 +903,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_vconn_received{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_vconn_received{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -947,7 +947,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_vconn_open{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_vconn_open{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -978,7 +978,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_stream_open{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_stream_open{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -1022,7 +1022,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_netlink_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_netlink_sent{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -1069,7 +1069,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_netlink_received{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_netlink_received{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -1116,7 +1116,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_netlink_overflow{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_netlink_overflow{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -1163,7 +1163,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_netlink_recv_jumbo{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_netlink_recv_jumbo{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -1223,7 +1223,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_packet_in{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_packet_in{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -1270,7 +1270,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_packet_in_drop{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_packet_in_drop{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -1301,7 +1301,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "topk($topk, rate(ovn_controller_lflow_run{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[2m]))",
+          "expr": "topk($topk, rate(ovn_controller_lflow_run{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
           "legendFormat": "{{instance}}/{{pod}}",
           "refId": "A"
         }
@@ -1364,15 +1364,15 @@
             "y": 112
           },
           "options": {
-            "content": "Each performance counter has below stats:\n\n\u003ctable\u003e\n  \u003cthead\u003e\n    \u003ctr\u003e\n      \u003cth\u003eCounter\u003c/th\u003e\n      \u003cth\u003eDescription\u003c/th\u003e\n    \u003c/tr\u003e\n  \u003c/thead\u003e\n  \u003ctbody\u003e\n    \u003ctr\u003e\n      \u003ctd\u003e95th_percentile\u003c/td\u003e\n      \u003ctd\u003eThe 95th percentile of execution times.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003emaximum\u003c/td\u003e\n      \u003ctd\u003eThe maximum (worst-case) execution time observed across all samples.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003eminimum\u003c/td\u003e\n      \u003ctd\u003eThe minimum (best-case) execution time observed across all samples.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003eshort_term_avg\u003c/td\u003e\n      \u003ctd\u003eUses an Exponentially Weighted Moving Average (alpha=0.50) for a smoothed average that quickly reflects recent changes by weighting newer samples more heavily.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003elong_term_avg\u003c/td\u003e\n      \u003ctd\u003eA stable, long-term average is calculated using an Exponentially Weighted Moving Average with alpha=0.01, making it less sensitive to recent fluctuations.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003etotal_samples\u003c/td\u003e\n      \u003ctd\u003eTotal number of measurements recorded by the stopwatch.\u003c/td\u003e\n    \u003c/tr\u003e\n  \u003c/tbody\u003e\n\u003c/table\u003e",
-            "mode": "markdown"
+            "mode": "markdown",
+            "content": "Each performance counter has below stats:\n\n\u003ctable\u003e\n  \u003cthead\u003e\n    \u003ctr\u003e\n      \u003cth\u003eCounter\u003c/th\u003e\n      \u003cth\u003eDescription\u003c/th\u003e\n    \u003c/tr\u003e\n  \u003c/thead\u003e\n  \u003ctbody\u003e\n    \u003ctr\u003e\n      \u003ctd\u003e95th_percentile\u003c/td\u003e\n      \u003ctd\u003eThe 95th percentile of execution times.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003emaximum\u003c/td\u003e\n      \u003ctd\u003eThe maximum (worst-case) execution time observed across all samples.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003eminimum\u003c/td\u003e\n      \u003ctd\u003eThe minimum (best-case) execution time observed across all samples.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003eshort_term_avg\u003c/td\u003e\n      \u003ctd\u003eUses an Exponentially Weighted Moving Average (alpha=0.50) for a smoothed average that quickly reflects recent changes by weighting newer samples more heavily.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003elong_term_avg\u003c/td\u003e\n      \u003ctd\u003eA stable, long-term average is calculated using an Exponentially Weighted Moving Average with alpha=0.01, making it less sensitive to recent fluctuations.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003etotal_samples\u003c/td\u003e\n      \u003ctd\u003eTotal number of measurements recorded by the stopwatch.\u003c/td\u003e\n    \u003c/tr\u003e\n  \u003c/tbody\u003e\n\u003c/table\u003e"
           }
         },
         {
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_bfd_run_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_bfd_run_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -1403,17 +1403,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_bfd_run_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_bfd_run_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_bfd_run_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_bfd_run_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_bfd_run_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_bfd_run_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -1444,12 +1444,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_bfd_run_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_bfd_run_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_bfd_run_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_bfd_run_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -1480,7 +1480,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_ct_zone_commit_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_ct_zone_commit_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -1511,17 +1511,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_ct_zone_commit_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_ct_zone_commit_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_ct_zone_commit_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -1552,12 +1552,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_ct_zone_commit_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_ct_zone_commit_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -1588,7 +1588,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_flow_generation_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_flow_generation_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -1619,17 +1619,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_flow_generation_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_generation_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_flow_generation_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_generation_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_flow_generation_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_generation_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -1660,12 +1660,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_flow_generation_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_generation_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_flow_generation_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_generation_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -1696,7 +1696,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_flow_installation_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_flow_installation_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -1727,17 +1727,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_flow_installation_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_installation_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_flow_installation_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_installation_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_flow_installation_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_installation_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -1768,12 +1768,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_flow_installation_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_installation_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_flow_installation_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_flow_installation_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -1804,7 +1804,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_if_status_mgr_run_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_if_status_mgr_run_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -1835,17 +1835,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_run_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_run_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_run_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -1876,12 +1876,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_run_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_run_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -1912,7 +1912,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_if_status_mgr_update_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_if_status_mgr_update_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -1943,17 +1943,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_update_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_update_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_update_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -1984,12 +1984,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_update_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_if_status_mgr_update_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -2020,7 +2020,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_ofctrl_seqno_run_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_ofctrl_seqno_run_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -2051,17 +2051,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -2092,12 +2092,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -2128,7 +2128,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_ofctrl_seqno_update_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_ofctrl_seqno_update_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -2159,17 +2159,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -2200,12 +2200,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -2236,7 +2236,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_patch_run_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_patch_run_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -2267,17 +2267,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_patch_run_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_patch_run_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_patch_run_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_patch_run_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_patch_run_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_patch_run_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -2308,12 +2308,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_patch_run_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_patch_run_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_patch_run_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_patch_run_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -2344,7 +2344,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_pinctrl_run_total_samples{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+              "expr": "topk($topk, rate(ovn_controller_pinctrl_run_total_samples{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
             }
@@ -2375,17 +2375,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_pinctrl_run_minimum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_pinctrl_run_minimum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MIN: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_pinctrl_run_maximum{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_pinctrl_run_maximum{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "MAX: {{instance}}/{{pod}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, ovn_controller_pinctrl_run_95th_percentile{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_pinctrl_run_95th_percentile{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "P95: {{instance}}/{{pod}}",
               "refId": "C"
             }
@@ -2416,12 +2416,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovn_controller_pinctrl_run_short_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_pinctrl_run_short_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "short-term: {{instance}}/{{pod}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovn_controller_pinctrl_run_long_term_avg{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"})",
+              "expr": "topk($topk, ovn_controller_pinctrl_run_long_term_avg{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
               "legendFormat": "long-term: {{instance}}/{{pod}}",
               "refId": "B"
             }
@@ -2457,25 +2457,33 @@
         "type": "query",
         "name": "cluster",
         "label": "Cluster",
+        "skipUrlSync": false,
         "query": {
           "qryType": 1,
-          "query": "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          "query": `}}{{ printf "label_values(%s, %s)" .Values.clusterLabel.discoveryMetric .Values.clusterLabel.label | toJson }}{{`,
+          "refId": "prometheus-cluster-Variable-Query"
         },
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
+        "multi": false,
+        "allowCustomValue": true,
         "refresh": 1,
+        "sort": 0,
         "includeAll": false,
-        "regex": ""
+        "allValue": "\"\"",
+        "regex": "",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
       },
       {
         "type": "query",
         "name": "instance",
         "label": "instance",
         "skipUrlSync": false,
-        "query": "label_values(ovn_controller_build_info{k8s_cluster_name=~\"$cluster\"}, instance)",
+        "query": "label_values(ovn_controller_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"},instance)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -2503,7 +2511,7 @@
         "label": "Pod",
         "skipUrlSync": false,
         "description": "Pods of ovnkube-node.",
-        "query": "label_values(ovn_controller_build_info{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}, pod)",
+        "query": "label_values(ovn_controller_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"},pod)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -2547,3 +2555,4 @@
   },
   "annotations": {}
 }
+`}}

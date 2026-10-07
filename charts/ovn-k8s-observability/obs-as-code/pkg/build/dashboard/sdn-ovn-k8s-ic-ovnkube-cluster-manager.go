@@ -51,6 +51,7 @@ func (d *OvnKubeClusterManagerDashboard) Build() (dashboard.Dashboard, error) {
 		Timezone(common.TimeZoneBrowser).
 
 		// Variables
+		WithVariable(lib.ClusterVariable(d)).
 		// Pod variable
 		WithVariable(lib.PodVariable(d)).
 
@@ -77,7 +78,7 @@ func (d *OvnKubeClusterManagerDashboard) Build() (dashboard.Dashboard, error) {
 
 func ovnkubeBuildInfoTable(d lib.SdnDashboard) *table.PanelBuilder {
 	return lib.BuildInfoTable(d, "ovnkube-cluster-manager build info.",
-		`ovnkube_clustermanager_build_info{namespace="ovn-kubernetes"}`,
+		`ovnkube_clustermanager_build_info{cluster="$cluster", namespace="ovn-kubernetes"}`,
 		lib.OvnkubeBuildInfoFields()).
 		Height(6).
 		Span(12)
@@ -101,7 +102,7 @@ func ovnkubeLeaderStat(d lib.SdnDashboard) *stat.PanelBuilder {
 		ReduceOptions(common.NewReduceDataOptionsBuilder().Calcs([]string{"lastNotNull"}).Values(false)).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`ovnkube_clustermanager_leader{namespace="ovn-kubernetes"}`).
+				Expr(`ovnkube_clustermanager_leader{cluster="$cluster", namespace="ovn-kubernetes"}`).
 				LegendFormat("{{pod}}:").
 				Instant().
 				RefId("A"))
@@ -132,7 +133,7 @@ func ovnkubeLeaderTimeline(d lib.SdnDashboard) *statetimeline.PanelBuilder {
 		Tooltip(common.NewVizTooltipOptionsBuilder().Mode(common.TooltipDisplayModeSingle)).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`ovnkube_clustermanager_leader{namespace="ovn-kubernetes"}`).
+				Expr(`ovnkube_clustermanager_leader{cluster="$cluster", namespace="ovn-kubernetes"}`).
 				LegendFormat("{{pod}}").
 				RefId("A"),
 		)
@@ -157,28 +158,28 @@ func ovnkubeHostSubnetsTable(d lib.SdnDashboard) *table.PanelBuilder {
 		CellHeight(common.TableCellHeightSm).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`max by (network_name) (ovnkube_clustermanager_allocated_v4_host_subnets{namespace="ovn-kubernetes"})`).
+				Expr(`max by (network_name) (ovnkube_clustermanager_allocated_v4_host_subnets{cluster="$cluster", namespace="ovn-kubernetes"})`).
 				Instant().
 				Format(prometheus.PromQueryFormatTable).
 				RefId("A"),
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`max by (network_name) (ovnkube_clustermanager_num_v4_host_subnets{namespace="ovn-kubernetes"})`).
+				Expr(`max by (network_name) (ovnkube_clustermanager_num_v4_host_subnets{cluster="$cluster", namespace="ovn-kubernetes"})`).
 				Instant().
 				Format(prometheus.PromQueryFormatTable).
 				RefId("B"),
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`max by (network_name) (ovnkube_clustermanager_allocated_v6_host_subnets{namespace="ovn-kubernetes"})`).
+				Expr(`max by (network_name) (ovnkube_clustermanager_allocated_v6_host_subnets{cluster="$cluster", namespace="ovn-kubernetes"})`).
 				Instant().
 				Format(prometheus.PromQueryFormatTable).
 				RefId("C"),
 		).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`max by (network_name) (ovnkube_clustermanager_num_v6_host_subnets{namespace="ovn-kubernetes"})`).
+				Expr(`max by (network_name) (ovnkube_clustermanager_num_v6_host_subnets{cluster="$cluster", namespace="ovn-kubernetes"})`).
 				Instant().
 				Format(prometheus.PromQueryFormatTable).
 				RefId("D"),
@@ -216,9 +217,9 @@ func ovnkubeHostSubnetsTable(d lib.SdnDashboard) *table.PanelBuilder {
 				"renameByName": map[string]any{
 					"network_name": "Network",
 					"Value #A":     "IPv4 Allocated",
-					"Value #B":     "IPv4 Available",
+					"Value #B":     "IPv4 Total",
 					"Value #C":     "IPv6 Allocated",
-					"Value #D":     "IPv6 Available",
+					"Value #D":     "IPv6 Total",
 				},
 			},
 		})
@@ -232,7 +233,7 @@ func ovnkubeEgressIpsTimeseries(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Span(12).
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`max(ovnkube_clustermanager_num_egress_ips{namespace="ovn-kubernetes"})`).
+				Expr(`max(ovnkube_clustermanager_num_egress_ips{cluster="$cluster", namespace="ovn-kubernetes"})`).
 				LegendFormat("Total").
 				RefId("A"),
 		)
@@ -245,7 +246,7 @@ func ovnkubeResourceRetryFailuresTimeseries(d lib.SdnDashboard) *timeseries.Pane
 		Unit("ops").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
-				Expr(`sum by (pod) (rate(ovnkube_resource_retry_failures_total{namespace="ovn-kubernetes", pod=~"ovnkube-control-plane-.*"}[5m]))`).
+				Expr(`sum by (pod) (rate(ovnkube_resource_retry_failures_total{cluster="$cluster", namespace="ovn-kubernetes", pod=~"ovnkube-control-plane-.*"}[5m]))`).
 				LegendFormat("{{pod}}").
 				RefId("A"),
 		)

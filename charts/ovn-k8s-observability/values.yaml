@@ -10,6 +10,14 @@ global:
 dashboard:
   # -- Namespace for GrafanaDashboard resources
   namespace: ovn-kubernetes
+  clusterLabel:
+    # -- Prometheus label used by the cluster variable and panel selectors
+    label: cluster
+    # -- PromQL series selector used to discover cluster-label values
+    discoveryMetric: up{job="ovnkube-node"}
+  processMetrics:
+    # -- Host OVS process metric source: process_exporter or otel_process_scraper
+    profile: otel_process_scraper
   grafana:
     # -- Grafana datasource mapped to `DS_PROMETHEUS`
     datasourceName: prom-victoriametrics

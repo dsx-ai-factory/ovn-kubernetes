@@ -4,75 +4,9 @@
 package patch
 
 import (
-	"obs-as-code/pkg/log"
-
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 )
-
-type PromQLMatcher struct {
-	Label string
-	Value string
-	Type  labels.MatchType
-}
-
-func DashboardPatch() (DashboardModifier, TargetRewriter) {
-	matcher := NewClusterPromQLMatcher()
-	return NewDashboardModifier(), NewPatchTargetRewriter(matcher)
-}
-
-func NewDashboardModifier() DashboardModifier {
-	return DashboardPatchModifier{
-		BaseDashboardModifier{
-			TemplateVar: TemplateVarSpec{
-				Name:       "cluster",
-				Label:      "Cluster",
-				QueryLabel: "k8s_cluster_name",
-			},
-			PromQLMatcher: func() *PromQLMatcher {
-				m := NewClusterPromQLMatcher()
-				return &m
-			}(),
-			TemplateVars: []map[string]any{
-				NewClusterTemplateVarObject(),
-			},
-		},
-	}
-}
-
-type DashboardPatchModifier struct {
-	BaseDashboardModifier
-}
-
-func NewClusterPromQLMatcher() PromQLMatcher {
-	return PromQLMatcher{
-		Label: "k8s_cluster_name",
-		Value: "$cluster",
-		Type:  labels.MatchRegexp,
-	}
-}
-
-func NewClusterTemplateVarObject() map[string]any {
-	return map[string]any{
-		"datasource": map[string]any{
-			"type": "prometheus",
-			"uid":  "${DS_PROMETHEUS}",
-		},
-		"definition": "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
-		"includeAll": false,
-		"label":      "Cluster",
-		"name":       "cluster",
-		"options":    []any{},
-		"query": map[string]any{
-			"qryType": 1,
-			"query":   "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
-			"refId":   "PrometheusVariableQueryEditor-VariableQuery",
-		},
-		"refresh": 1,
-		"regex":   "",
-		"type":    "query",
-	}
-}
 
 const translatedMetricLegend = "{{host_name}}"
 
@@ -84,37 +18,6 @@ var processMetricByName = map[string]string{
 var processCommands = map[string]struct{}{
 	"ovs-vswitchd": {},
 	"ovsdb-server": {},
-}
-
-// NewPatchTargetRewriter translates the host-ovs process-exporter CPU and
-// memory metrics to their OTEL equivalents before adding the cluster matcher.
-func NewPatchTargetRewriter(matcher PromQLMatcher) TargetRewriter {
-	return func(target map[string]any) {
-		original, ok := target["expr"].(string)
-		if !ok || original == "" {
-			return
-		}
-
-		translated, didTranslate, err := TransformProcessExporterExprs(original)
-		if err != nil {
-			log.Infof("skipping process-exporter rewrite for %q: %v", original, err)
-			return
-		}
-
-		final, err := TweakExpr(translated, matcher)
-		if err != nil {
-			log.Infof("skipping cluster matcher for %q: %v", original, err)
-			return
-		}
-		if final != original {
-			PrintExprDiff(original, final)
-		}
-		target["expr"] = final
-
-		if didTranslate {
-			target["legendFormat"] = translatedMetricLegend
-		}
-	}
 }
 
 // TransformProcessExporterExprs rewrites the host-ovs process-exporter
@@ -163,6 +66,7 @@ func TransformProcessExporterExprs(expr string) (string, bool, error) {
 
 		newMatchers := []*labels.Matcher{
 			mustMatcher(labels.MatchEqual, "__name__", newMetricName),
+			mustMatcher(labels.MatchEqual, "cluster", "$cluster"),
 			mustMatcher(labels.MatchEqual, "process_command", processCommand),
 		}
 		if hostMatcher != nil {

@@ -6,8 +6,6 @@ package patch
 import (
 	"fmt"
 	"strings"
-
-	"github.com/prometheus/prometheus/promql/parser"
 )
 
 // grafanaPlaceholder substitutes a Grafana template variable with a PromQL-legal
@@ -56,21 +54,4 @@ func restoreTemplateVarPlaceholders(expr string, applied map[string]struct{}) st
 		out = strings.ReplaceAll(out, p.value, p.name)
 	}
 	return out
-}
-
-func TweakExpr(expr string, matcher PromQLMatcher) (string, error) {
-	preprocessed, applied, err := applyTemplateVarPlaceholders(expr)
-	if err != nil {
-		return "", err
-	}
-
-	parsedExpr, err := parser.ParseExpr(preprocessed)
-	if err != nil {
-		return "", err
-	}
-	addPromQLMatcher(parsedExpr, matcher)
-
-	updated := parsedExpr.String()
-	updated = restoreTemplateVarPlaceholders(updated, applied)
-	return updated, nil
 }

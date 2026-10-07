@@ -1,0 +1,2557 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "uid": "952a078d1f7d2aa9eefb171c871191e8",
+  "title": "OVN K8S IC / OVN Controller",
+  "tags": [
+    "SDN"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 0,
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "fiscalYearStartMonth": 0,
+  "schemaVersion": 41,
+  "panels": [
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "OVN Controller Overview",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "targets": [
+        {
+          "expr": "ovn_controller_build_info{cluster=\"$cluster\", namespace=\"ovn-kubernetes\"}",
+          "instant": true,
+          "range": false,
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "title": "Build Info",
+      "description": "ovn-controller build info.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "version",
+                "ovs_lib_version",
+                "pod"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {
+              "ovs_lib_version": 1,
+              "pod": 2,
+              "version": 0
+            },
+            "renameByName": {
+              "ovs_lib_version": "OVS Lib Version",
+              "version": "OVN Version"
+            }
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "OVN Version": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "OVS Lib Version": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "pod": {
+                "aggregations": [
+                  "count"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "pod (count)": "Pods"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "targets": [
+        {
+          "expr": "sum(kube_pod_container_status_ready{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", container=\"ovn-controller\"})",
+          "legendFormat": "READY",
+          "refId": "A"
+        },
+        {
+          "expr": "count(kube_pod_container_status_ready{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", container=\"ovn-controller\"}) - sum(kube_pod_container_status_ready{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", container=\"ovn-controller\"})",
+          "legendFormat": "NOT READY",
+          "refId": "B"
+        }
+      ],
+      "title": "Container ovn-controller Readiness",
+      "description": "The summary of ready and not ready ovn-controller containers.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "options": {
+        "displayMode": "lcd",
+        "valueMode": "color",
+        "namePlacement": "auto",
+        "showUnfilled": true,
+        "sizing": "auto",
+        "minVizWidth": 8,
+        "minVizHeight": 16,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false,
+          "calcs": []
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "maxVizHeight": 300,
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "NOT READY"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "gauge",
+      "targets": [
+        {
+          "expr": "sum by (namespace) (ovn_controller_southbound_database_connected{cluster=\"$cluster\", namespace=\"ovn-kubernetes\"} == bool 1) / count by (namespace) (ovn_controller_southbound_database_connected{cluster=\"$cluster\", namespace=\"ovn-kubernetes\"})",
+          "legendFormat": "CONNECTED",
+          "refId": "A"
+        }
+      ],
+      "title": "SB Connection Status: Connected",
+      "description": "Connection status of OVN controller to OVN southbound database.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 0.9,
+                "color": "#EAB839"
+              },
+              {
+                "value": 1,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "OVN Controller Runtime",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "id": 2,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[5m]))\nand\ntopk($topk, sum by (pod) (rate(container_cpu_usage_seconds_total{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[$__range] @ end())))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Usage (Top K)",
+      "description": "CPU usage of container ovn-controller. Only the $topk pods with the highest average usage over the selected time range are shown.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "custom": {
+            "drawStyle": "line",
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (container_memory_working_set_bytes{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}) / 1024^3\nand\ntopk($topk, sum by (pod) (avg_over_time(container_memory_working_set_bytes{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[$__range] @ end())) / 1024^3)",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Memory Usage (Top K)",
+      "description": "Working set memory usage of container ovn-controller. Only the $topk pods with the highest average usage over the selected time range are shown.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes",
+          "custom": {
+            "drawStyle": "line",
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(kube_pod_container_status_restarts_total{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[5m]))\nand\ntopk($topk, sum by (pod) (rate(kube_pod_container_status_restarts_total{cluster=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovn-controller\"}[$__range] @ end())))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "ovn-controller Container Restart (Top K)",
+      "description": "Indicates the occurrence of a container restart. Only the $topk pods that restarted most over the selected time range are shown.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "interval": "120s",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (instance,pod) (ovn_controller_southbound_database_connected{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"} == bool 0) \u003e 0",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "SB Connection Status: Not Connected",
+      "description": "Pods whose ovn-controller is not connected to the OVN southbound database. A pod that stopped exporting metrics altogether does not show up here.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "OVSDB Transactions",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 3,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_txn_success{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "OVSDB Transaction Success Rate (Top K)",
+      "description": "The rate of the OVSDB transaction has successfully completed.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_txn_incomplete{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "OVSDB Transaction Incomplete Rate (Top K)",
+      "description": "The OVSDB transaction did not complete and the client had to re-try",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "dark-green"
+              },
+              {
+                "value": 1,
+                "color": "dark-yellow"
+              },
+              {
+                "value": 1.5,
+                "color": "semi-dark-red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_txn_aborted{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "OVSDB Transaction Abort Rate (Top K)",
+      "description": "The rate of the OVSDB  transaction has been aborted.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 25
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "dark-green"
+              },
+              {
+                "value": 1,
+                "color": "dark-yellow"
+              },
+              {
+                "value": 1.5,
+                "color": "semi-dark-red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_txn_error{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "OVSDB Transaction Error Rate (Top K)",
+      "description": "The rate of the OVSDB transaction has errored out.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_txn_try_again{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "OVSDB Transaction Try Again Rate (TOP $topk)",
+      "description": "The rate of the OVSDB transaction failed and the client had to re-try.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_txn_uncommitted{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "OVSDB Transaction Uncommitted Rate (Top K)",
+      "description": "The rate of the OVSDB transaction were uncommitted.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_txn_unchanged{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "OVSDB Transaction No Change Rate (TOP $topk)",
+      "description": "The rate of the OVSDB transaction resulted in no change to the database.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 41
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "locale"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "OpenFlow Connections",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "id": 4,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_rconn_queued{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Rconn Message Queued Rate (Top K)",
+      "description": "The rate of messages that have been queued because it couldn't be sent using the underlying virtual connection to OpenFlow devices.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_rconn_overflow{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Rconn Message Overflow Rate (Top K)",
+      "description": "The rate of messages that have been dropped because of the queue overflow.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_rconn_sent{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Rconn Message Sent Rate (Top K)",
+      "description": "The rate of messages that have been sent to the underlying. virtual connection.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 58
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_rconn_discarded{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Rconn Message Discarded Rate (Top K)",
+      "description": "The rate of messages that have been dropped because the send queue had to be flushed because of reconnection.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 58
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_vconn_sent{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Vconn Message Sent Rate (Top K)",
+      "description": "The rate of messages sent to the OpenFlow Device.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_vconn_received{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Vconn Message RX Rate (Top K)",
+      "description": "The rate of messages received from the OpenFlow Device.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 66
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_vconn_open{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Vconn Open Rate (Top K)",
+      "description": "The rate of attempts to connect to an OpenFlow Device.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 75
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_stream_open{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "STREAM Open Rate (Top K)",
+      "description": "Specifies the number of attempts to connect to a remote peer (active connection) per second",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 75
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Netlink",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 84
+      },
+      "id": 5,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_netlink_sent{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Netlink Message TX Rate (Top K)",
+      "description": "The rate of netlink messages received by the kernel.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 85
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_netlink_received{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Netlink Message RX Rate (Top K)",
+      "description": "The rate of netlink messages received by the kernel.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 85
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_netlink_overflow{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Netlink Message Overflow Rate (Top K)",
+      "description": "The rate of netlink messages dropped by the daemon due to buffer overflow.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 93
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_netlink_recv_jumbo{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Netlink Jumbo Message RX Rate (Top K)",
+      "description": "The rate of netlink messages that were received from the kernel were more than the allocated buffer.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 93
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "OpenFlow",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 101
+      },
+      "id": 6,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_packet_in{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Packet-In Message Rate (Top K)",
+      "description": "The rate of packet-in packets from ovs-vswitchd being handled.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 102
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_packet_in_drop{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Packet-In Message Drop Rate (Top K)",
+      "description": "The rate of the packet-ins from ovs-vswitchd being dropped due to resource constraints",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 102
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk($topk, rate(ovn_controller_lflow_run{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[2m]))",
+          "legendFormat": "{{instance}}/{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Logical Flow Translate Rate (Top K)",
+      "description": "The rate of translating the Logical_Flow table in the OVN SB database into OpenFlow flows.",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 102
+      },
+      "interval": "120s",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": true,
+      "title": "OVN Controller Performance Counters",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 111
+      },
+      "id": 7,
+      "panels": [
+        {
+          "type": "text",
+          "title": "Performance Counters Stats",
+          "transparent": false,
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 112
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "Each performance counter has below stats:\n\n\u003ctable\u003e\n  \u003cthead\u003e\n    \u003ctr\u003e\n      \u003cth\u003eCounter\u003c/th\u003e\n      \u003cth\u003eDescription\u003c/th\u003e\n    \u003c/tr\u003e\n  \u003c/thead\u003e\n  \u003ctbody\u003e\n    \u003ctr\u003e\n      \u003ctd\u003e95th_percentile\u003c/td\u003e\n      \u003ctd\u003eThe 95th percentile of execution times.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003emaximum\u003c/td\u003e\n      \u003ctd\u003eThe maximum (worst-case) execution time observed across all samples.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003eminimum\u003c/td\u003e\n      \u003ctd\u003eThe minimum (best-case) execution time observed across all samples.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003eshort_term_avg\u003c/td\u003e\n      \u003ctd\u003eUses an Exponentially Weighted Moving Average (alpha=0.50) for a smoothed average that quickly reflects recent changes by weighting newer samples more heavily.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003elong_term_avg\u003c/td\u003e\n      \u003ctd\u003eA stable, long-term average is calculated using an Exponentially Weighted Moving Average with alpha=0.01, making it less sensitive to recent fluctuations.\u003c/td\u003e\n    \u003c/tr\u003e\n    \u003ctr\u003e\n      \u003ctd\u003etotal_samples\u003c/td\u003e\n      \u003ctd\u003eTotal number of measurements recorded by the stopwatch.\u003c/td\u003e\n    \u003c/tr\u003e\n  \u003c/tbody\u003e\n\u003c/table\u003e"
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_bfd_run_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "BFD Run Sample Rate (Top K)",
+          "description": "Time spent processing Bidirectional Forwarding Detection (BFD) for tunnel monitoring.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 120
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_bfd_run_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_bfd_run_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_bfd_run_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "BFD Run Time (Top K)",
+          "description": "Time spent processing Bidirectional Forwarding Detection (BFD) for tunnel monitoring.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 120
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_bfd_run_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_bfd_run_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "BFD Run Average Time (Top K)",
+          "description": "Time spent processing Bidirectional Forwarding Detection (BFD) for tunnel monitoring.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 120
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_ct_zone_commit_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "CT Zone Commit Sample Rate (Top K)",
+          "description": "Time spent committing connection tracking zone assignments to the kernel.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 128
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "CT Zone Commit Time (Top K)",
+          "description": "Time spent committing connection tracking zone assignments to the kernel.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 128
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ct_zone_commit_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "CT Zone Commit Average Time (Top K)",
+          "description": "Time spent committing connection tracking zone assignments to the kernel.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 128
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_flow_generation_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Flow Generation Sample Rate (Top K)",
+          "description": "Time spent generating OpenFlow rules from logical flows and port bindings.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 136
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_flow_generation_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_flow_generation_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_flow_generation_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "Flow Generation Time (Top K)",
+          "description": "Time spent generating OpenFlow rules from logical flows and port bindings.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 136
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_flow_generation_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_flow_generation_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Flow Generation Average Time (Top K)",
+          "description": "Time spent generating OpenFlow rules from logical flows and port bindings.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 136
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_flow_installation_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Flow Installation Sample Rate (Top K)",
+          "description": "Time spent installing/updating OpenFlow rules in the local OVS bridge.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 144
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_flow_installation_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_flow_installation_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_flow_installation_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "Flow Installation Time (Top K)",
+          "description": "Time spent installing/updating OpenFlow rules in the local OVS bridge.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 144
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_flow_installation_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_flow_installation_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Flow Installation Average Time (Top K)",
+          "description": "Time spent installing/updating OpenFlow rules in the local OVS bridge.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 144
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_if_status_mgr_run_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Interface Status Manager Run Sample Rate (Top K)",
+          "description": "Time spent managing interface status and lifecycle events.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 152
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "Interface Status Manager Run Time (Top K)",
+          "description": "Time spent managing interface status and lifecycle events.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 152
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_run_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Interface Status Manager Run Average Time (Top K)",
+          "description": "Time spent managing interface status and lifecycle events.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 152
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_if_status_mgr_update_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Interface Status Manager Update Sample Rate (Top K)",
+          "description": "Time spent updating interface status information in the Southbound database.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 160
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "Interface Status Manager Update Time (Top K)",
+          "description": "Time spent updating interface status information in the Southbound database.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 160
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_if_status_mgr_update_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Interface Status Manager Update Average Time (Top K)",
+          "description": "Time spent updating interface status information in the Southbound database.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 160
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_ofctrl_seqno_run_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "OpenFlow Control SeqNo Run Sample Rate (Top K)",
+          "description": "Time spent managing OpenFlow sequence numbers for flow synchronization.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 168
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "OpenFlow Control SeqNo Run Time (Top K)",
+          "description": "Time spent managing OpenFlow sequence numbers for flow synchronization.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 168
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_run_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "OpenFlow Control SeqNo Run Average Time (Top K)",
+          "description": "Time spent managing OpenFlow sequence numbers for flow synchronization.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 168
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_ofctrl_seqno_update_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "OpenFlow Control SeqNo Update Sample Rate (Top K)",
+          "description": "Time spent managing patch ports between integration and provider bridges.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 176
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "OpenFlow Control SeqNo Update Time (Top K)",
+          "description": "Time spent managing patch ports between integration and provider bridges.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 176
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "OpenFlow Control SeqNo Update Average Time (Top K)",
+          "description": "Time spent managing patch ports between integration and provider bridges.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 176
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_patch_run_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Patch Run Sample Rate (Top K)",
+          "description": "Time spent managing patch ports between integration and provider bridges.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 184
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_patch_run_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_patch_run_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_patch_run_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "Patch Run Time (Top K)",
+          "description": "Time spent managing patch ports between integration and provider bridges.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 184
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_patch_run_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_patch_run_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Patch Run Average Time (Top K)",
+          "description": "Time spent managing patch ports between integration and provider bridges.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 184
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, rate(ovn_controller_pinctrl_run_total_samples{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
+              "legendFormat": "{{instance}}/{{pod}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Pinctrl Run Sample Rate (Top K)",
+          "description": "Time spent processing control plane packets (ARP, DHCP, DNS, etc.) and generating responses.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 192
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "recps",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_pinctrl_run_minimum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MIN: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_pinctrl_run_maximum{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "MAX: {{instance}}/{{pod}}",
+              "refId": "B"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_pinctrl_run_95th_percentile{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "P95: {{instance}}/{{pod}}",
+              "refId": "C"
+            }
+          ],
+          "title": "Pinctrl Run Time (Top K)",
+          "description": "Time spent processing control plane packets (ARP, DHCP, DNS, etc.) and generating responses.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 192
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "topk($topk, ovn_controller_pinctrl_run_short_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "short-term: {{instance}}/{{pod}}",
+              "refId": "A"
+            },
+            {
+              "expr": "topk($topk, ovn_controller_pinctrl_run_long_term_avg{cluster=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
+              "legendFormat": "long-term: {{instance}}/{{pod}}",
+              "refId": "B"
+            }
+          ],
+          "title": "Pinctrl Run Average Time (Top K)",
+          "description": "Time spent processing control plane packets (ARP, DHCP, DNS, etc.) and generating responses.",
+          "transparent": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 192
+          },
+          "interval": "120s",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "min": 0
+            },
+            "overrides": []
+          }
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "cluster",
+        "label": "Cluster",
+        "skipUrlSync": false,
+        "query": {
+          "qryType": 1,
+          "query": "label_values(up{job=\"ovnkube-node\"}, cluster)",
+          "refId": "prometheus-cluster-Variable-Query"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "multi": false,
+        "allowCustomValue": true,
+        "refresh": 1,
+        "sort": 0,
+        "includeAll": false,
+        "allValue": "\"\"",
+        "regex": "",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "instance",
+        "label": "instance",
+        "skipUrlSync": false,
+        "query": "label_values(ovn_controller_build_info{cluster=\"$cluster\"},instance)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "sort": 3,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "query",
+        "name": "pod",
+        "label": "Pod",
+        "skipUrlSync": false,
+        "description": "Pods of ovnkube-node.",
+        "query": "label_values(ovn_controller_build_info{cluster=\"$cluster\", instance=~\"$instance\"},pod)",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "multi": true,
+        "allowCustomValue": true,
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      },
+      {
+        "type": "custom",
+        "name": "topk",
+        "label": "topk",
+        "skipUrlSync": false,
+        "query": "1,3,5,10,20,100",
+        "current": {
+          "selected": true,
+          "text": "5",
+          "value": "5"
+        },
+        "multi": false,
+        "allowCustomValue": true,
+        "includeAll": false,
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
+      }
+    ]
+  },
+  "annotations": {}
+}

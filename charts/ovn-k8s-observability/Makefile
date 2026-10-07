@@ -8,10 +8,10 @@ obs-as-code:
 	go build -C obs-as-code -o ../bin/sdn-obs-as-code ./cmd/sdn-obs-as-code
 
 build-dashboard: obs-as-code
-	mkdir -p output/base/dashboard/json
-	./bin/sdn-obs-as-code build dashboard --json-dir output/base/dashboard/json
-	./bin/sdn-obs-as-code modify dashboard \
-		--dashboard-dir output/base/dashboard/json \
+	mkdir -p files/dashboards
+	./bin/sdn-obs-as-code build dashboard --json-dir files/dashboards
+	./bin/sdn-obs-as-code patch dashboard \
+		--dashboard-dir files/dashboards \
 		--out-dir charts/dashboard/json
 
 VERSION ?=

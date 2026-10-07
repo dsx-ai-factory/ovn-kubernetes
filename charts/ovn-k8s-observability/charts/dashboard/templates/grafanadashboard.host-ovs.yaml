@@ -2,6 +2,7 @@
 SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 */ -}}
+{{- include "dashboard.validateValues" . -}}
 apiVersion: grafana.integreatly.org/v1beta1
 kind: GrafanaDashboard
 metadata:
@@ -20,4 +21,4 @@ spec:
   - inputName: "DS_PROMETHEUS"
     datasourceName: {{ .Values.grafana.datasourceName }}
   json: |-
-{{- .Files.Get "json/sdn-host-ovs.json" | nindent 4 }}
+{{- tpl (.Files.Get "json/sdn-host-ovs.json") . | nindent 4 }}

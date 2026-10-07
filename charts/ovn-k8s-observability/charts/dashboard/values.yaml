@@ -16,3 +16,13 @@ grafana:
   instanceSelector:
     matchLabels:
       grafana.com/selector: grafana
+
+# Prometheus label and PromQL series selector used by the cluster dashboard variable.
+clusterLabel:
+  label: cluster
+  discoveryMetric: up{job="ovnkube-node"}
+
+# Metrics used by the host OVS process CPU and memory panels.
+processMetrics:
+  # Supported values: process_exporter, otel_process_scraper.
+  profile: otel_process_scraper

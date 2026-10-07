@@ -1,12 +1,12 @@
-{
+{{`{
   "__inputs": [
     {
-      "description": "",
-      "label": "prometheus",
       "name": "DS_PROMETHEUS",
+      "label": "prometheus",
+      "description": "",
+      "type": "datasource",
       "pluginId": "prometheus",
-      "pluginName": "Prometheus",
-      "type": "datasource"
+      "pluginName": "Prometheus"
     }
   ],
   "uid": "9ad6c1e913ff02dfc8599fc61903318b",
@@ -41,10 +41,10 @@
       "type": "table",
       "targets": [
         {
-          "expr": "sum by (version) (ovs_build_info{k8s_cluster_name=~\"$cluster\"})",
-          "format": "table",
+          "expr": "sum(ovs_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}) by (version)",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "A"
         }
       ],
@@ -66,17 +66,17 @@
       "type": "table",
       "targets": [
         {
-          "expr": "sum by (bridge, version) (ovs_vswitchd_interface_driver_version{k8s_cluster_name=~\"$cluster\"})",
-          "format": "table",
+          "expr": "sum(ovs_vswitchd_interface_driver_version{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}) by (bridge, version)",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "A"
         },
         {
-          "expr": "sum by (bridge, version) (label_replace(ovs_vswitchd_interface_info{k8s_cluster_name=~\"$cluster\"}, \"version\", \"$1\", \"driver_version\", \"(.*)\"))",
-          "format": "table",
+          "expr": "sum by (bridge,  version) (label_replace(ovs_vswitchd_interface_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}, \"version\", \"$1\", \"driver_version\", \"(.*)\"))",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "B"
         }
       ],
@@ -138,17 +138,17 @@
       "type": "table",
       "targets": [
         {
-          "expr": "sum by (bridge, version) (ovs_vswitchd_interface_firmware_version{k8s_cluster_name=~\"$cluster\"})",
-          "format": "table",
+          "expr": "sum(ovs_vswitchd_interface_firmware_version{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}) by (bridge, version)",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "A"
         },
         {
-          "expr": "sum by (bridge, version) (label_replace(ovs_vswitchd_interface_info{k8s_cluster_name=~\"$cluster\"}, \"version\", \"$1\", \"firmware_version\", \"(.*)\"))",
-          "format": "table",
+          "expr": "sum by (bridge,  version) (label_replace(ovs_vswitchd_interface_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}, \"version\", \"$1\", \"firmware_version\", \"(.*)\"))",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "B"
         }
       ],
@@ -210,17 +210,17 @@
       "type": "table",
       "targets": [
         {
-          "expr": "label_replace(sum by (instance) (ovs_vswitchd_poll_threads_n{k8s_cluster_name=~\"$cluster\"}), \"DP\", \"ovs-doca\", \"\", \".*\")",
-          "format": "table",
+          "expr": "label_replace(sum(ovs_vswitchd_poll_threads_n{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}) by (instance), \"DP\", \"ovs-doca\", \"\", \".*\")",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "A"
         },
         {
-          "expr": "label_replace(sum by (instance) (ovs_vswitchd_dp{k8s_cluster_name=~\"$cluster\"} unless on (instance) ovs_vswitchd_poll_threads_n{k8s_cluster_name=~\"$cluster\"}), \"DP\", \"ovs-kernel\", \"\", \".*\")",
-          "format": "table",
+          "expr": "label_replace(sum(ovs_vswitchd_dp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"} unless on(instance) ovs_vswitchd_poll_threads_n{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}) by (instance), \"DP\", \"ovs-kernel\", \"\", \".*\")",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "B"
         }
       ],
@@ -275,8 +275,8 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (host_name) (rate(process_cpu_time_seconds_total{host_name=~\"$instance\",k8s_cluster_name=~\"$cluster\",process_command=\"ovs-vswitchd\"}[$__rate_interval])) * 100)",
-              "legendFormat": "{{host_name}}",
+              "expr": "`}}{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}{{`topk($topk, sum by (host_name) (rate(process_cpu_time_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\",host_name=~\"$instance\",process_command=\"ovs-vswitchd\"}[$__rate_interval])) * 100)`}}{{ else }}{{`topk($topk, sum(rate(namedprocess_namegroup_cpu_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", groupname=\"ovs-vswitchd\",instance=~\"$instance\"}[$__rate_interval])) by (instance) * 100)`}}{{ end }}{{`",
+              "legendFormat": "`}}{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}{{`{{host_name}}`}}{{ else }}{{`{{instance}}`}}{{ end }}{{`",
               "refId": "A"
             }
           ],
@@ -305,8 +305,8 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, process_memory_usage_bytes{host_name=~\"$instance\",k8s_cluster_name=~\"$cluster\",process_command=\"ovs-vswitchd\"})",
-              "legendFormat": "{{host_name}}",
+              "expr": "`}}{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}{{`topk($topk, process_memory_usage_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\",host_name=~\"$instance\",process_command=\"ovs-vswitchd\"})`}}{{ else }}{{`topk($topk, namedprocess_namegroup_memory_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", job=\"process-exporter\",groupname=\"ovs-vswitchd\",pod=~\"process-exporter-.*\",memtype=\"resident\",instance=~\"$instance\"})`}}{{ end }}{{`",
+              "legendFormat": "`}}{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}{{`{{host_name}}`}}{{ else }}{{`{{instance}}`}}{{ end }}{{`",
               "refId": "A"
             }
           ],
@@ -335,12 +335,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_dp_flows_lookup_lost{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_dp_flows_lookup_lost{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[$__rate_interval])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_datapath_lost_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_datapath_lost_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[$__rate_interval])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "B"
             }
@@ -386,12 +386,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_dp_flows_lookup_missed{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_dp_flows_lookup_missed{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[$__rate_interval])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_datapath_missed_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_datapath_missed_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[$__rate_interval])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "B"
             }
@@ -414,12 +414,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_dp_flows_lookup_hit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_dp_flows_lookup_hit{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[$__rate_interval])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_datapath_hit_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_datapath_hit_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[$__rate_interval])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "B"
             }
@@ -442,7 +442,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance) (ovs_vswitchd_dp_offloaded_flows_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}))",
+              "expr": "topk($topk, sum(ovs_vswitchd_dp_offloaded_flows_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -466,7 +466,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_dpif_port_add{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_port_add{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -490,7 +490,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_dpif_port_del{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_port_del{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -514,7 +514,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_xlate_actions_oversize{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_xlate_actions_oversize{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -538,7 +538,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_get{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_get{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -568,7 +568,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_put{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_put{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -598,7 +598,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_del{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_dpif_flow_del{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -628,12 +628,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "avg(topk($topk, rate(ovs_vswitchd_netlink_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m])))",
+              "expr": "avg(topk($topk, rate(ovs_vswitchd_netlink_sent{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m])))",
               "legendFormat": "Sent",
               "refId": "A"
             },
             {
-              "expr": "avg(topk($topk, rate(ovs_vswitchd_netlink_received{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m])))",
+              "expr": "avg(topk($topk, rate(ovs_vswitchd_netlink_received{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m])))",
               "legendFormat": "Received",
               "refId": "B"
             }
@@ -663,7 +663,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_xlate_actions{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_xlate_actions{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -687,12 +687,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_rconn_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_rconn_sent{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "Sent, {{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_rconn_queued{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_rconn_queued{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "Queued, {{instance}}",
               "refId": "B"
             }
@@ -722,7 +722,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_txn_success{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_txn_success{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -746,22 +746,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "sum(ovs_vswitchd_txn_error{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "sum(ovs_vswitchd_txn_error{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "Error",
               "refId": "D"
             },
             {
-              "expr": "sum(ovs_vswitchd_txn_aborted{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "sum(ovs_vswitchd_txn_aborted{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "Aborted",
               "refId": "A"
             },
             {
-              "expr": "sum(ovs_vswitchd_txn_try_again{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "sum(ovs_vswitchd_txn_try_again{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "Try Again",
               "refId": "B"
             },
             {
-              "expr": "sum(ovs_vswitchd_txn_uncommitted{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "sum(ovs_vswitchd_txn_uncommitted{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "Uncommitted",
               "refId": "C"
             }
@@ -785,12 +785,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_vconn_sent{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_vconn_sent{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "Sent, {{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_vconn_received{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_vconn_received{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "Received, {{instance}}",
               "refId": "B"
             }
@@ -820,12 +820,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "sum(ovs_vswitchd_rconn_discarded{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "sum(ovs_vswitchd_rconn_discarded{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "Discarded",
               "refId": "B"
             },
             {
-              "expr": "sum(ovs_vswitchd_rconn_overflow{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "sum(ovs_vswitchd_rconn_overflow{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "Overflow",
               "refId": "C"
             }
@@ -863,8 +863,8 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (host_name) (rate(process_cpu_time_seconds_total{host_name=~\"$instance\",k8s_cluster_name=~\"$cluster\",process_command=\"ovsdb-server\"}[$__rate_interval])) * 100)",
-              "legendFormat": "{{host_name}}",
+              "expr": "`}}{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}{{`topk($topk, sum by (host_name) (rate(process_cpu_time_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\",host_name=~\"$instance\",process_command=\"ovsdb-server\"}[$__rate_interval])) * 100)`}}{{ else }}{{`topk($topk, sum(rate(namedprocess_namegroup_cpu_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", groupname=\"ovsdb-server\",instance=~\"$instance\"}[$__rate_interval])) by (instance) * 100)`}}{{ end }}{{`",
+              "legendFormat": "`}}{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}{{`{{host_name}}`}}{{ else }}{{`{{instance}}`}}{{ end }}{{`",
               "refId": "A"
             }
           ],
@@ -893,8 +893,8 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, process_memory_usage_bytes{host_name=~\"$instance\",k8s_cluster_name=~\"$cluster\",process_command=\"ovsdb-server\"})",
-              "legendFormat": "{{host_name}}",
+              "expr": "`}}{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}{{`topk($topk, process_memory_usage_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\",host_name=~\"$instance\",process_command=\"ovsdb-server\"})`}}{{ else }}{{`topk($topk, namedprocess_namegroup_memory_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", job=\"process-exporter\",groupname=\"ovsdb-server\",pod=~\"process-exporter-.*\",memtype=\"resident\",instance=~\"$instance\"})`}}{{ end }}{{`",
+              "legendFormat": "`}}{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}{{`{{host_name}}`}}{{ else }}{{`{{instance}}`}}{{ end }}{{`",
               "refId": "A"
             }
           ],
@@ -923,12 +923,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_ovsdb_unixctl_received{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_ovsdb_unixctl_received{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "RX:{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_ovsdb_unixctl_replied{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_ovsdb_unixctl_replied{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "TX:{{instance}}",
               "refId": "B"
             }
@@ -972,12 +972,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_dp_packets_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_dp_packets_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_datapath_packets_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_datapath_packets_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "B"
             }
@@ -1008,7 +1008,7 @@
           "type": "bargauge",
           "targets": [
             {
-              "expr": "topk($topk, ovs_vswitchd_dp_if_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_dp_if_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -1028,30 +1028,30 @@
           },
           "options": {
             "displayMode": "gradient",
+            "valueMode": "color",
+            "namePlacement": "auto",
+            "showUnfilled": true,
+            "sizing": "auto",
+            "minVizWidth": 8,
+            "minVizHeight": 16,
             "legend": {
-              "calcs": [],
               "displayMode": "list",
               "placement": "bottom",
-              "showLegend": true
+              "showLegend": true,
+              "calcs": []
             },
-            "maxVizHeight": 300,
-            "minVizHeight": 16,
-            "minVizWidth": 8,
-            "namePlacement": "auto",
-            "orientation": "",
             "reduceOptions": {
               "calcs": []
             },
-            "showUnfilled": true,
-            "sizing": "auto",
-            "valueMode": "color"
+            "maxVizHeight": 300,
+            "orientation": ""
           }
         },
         {
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovs_vswitchd_dp_masks_hit_ratio{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_dp_masks_hit_ratio{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -1081,12 +1081,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovs_vswitchd_dp_flows_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_dp_flows_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovs_vswitchd_datapath_n_flows{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_datapath_n_flows{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "{{instance}}",
               "refId": "B"
             }
@@ -1116,12 +1116,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovs_vswitchd_dp_masks_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_dp_masks_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovs_vswitchd_datapath_n_masks{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_datapath_n_masks{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "{{instance}}",
               "refId": "B"
             }
@@ -1145,7 +1145,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_rev{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_rev{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -1176,7 +1176,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_no_rev{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_no_rev{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -1206,7 +1206,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_idle_or_limit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_upcall_flow_del_idle_or_limit{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -1236,7 +1236,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_revalidate_missed_dp_flow{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_revalidate_missed_dp_flow{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[5m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -1280,12 +1280,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovs_vswitchd_bridge_flows_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_bridge_flows_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\"})",
               "legendFormat": "{{instance}}/{{bridge}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovs_vswitchd_bridge_n_flows{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$bridge\"})",
+              "expr": "topk($topk, ovs_vswitchd_bridge_n_flows{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", name=~\"$bridge\"})",
               "legendFormat": "{{instance}}/{{name}}",
               "refId": "B"
             }
@@ -1309,12 +1309,12 @@
           "type": "bargauge",
           "targets": [
             {
-              "expr": "topk($topk, ovs_vswitchd_bridge_ports_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_bridge_ports_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\"})",
               "legendFormat": "{{instance}}/{{bridge}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, ovs_vswitchd_bridge_n_ports{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$bridge\"})",
+              "expr": "topk($topk, ovs_vswitchd_bridge_n_ports{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", name=~\"$bridge\"})",
               "legendFormat": "{{instance}}/{{name}}",
               "refId": "B"
             }
@@ -1337,12 +1337,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_bridge_flows_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_bridge_flows_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_bridge_n_flows{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$bridge\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_bridge_n_flows{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", name=~\"$bridge\"}[5m]))",
               "legendFormat": "{{instance}}/{{name}}",
               "refId": "B"
             }
@@ -1386,12 +1386,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_link_resets{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_link_resets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_link_resets_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_link_resets_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
               "refId": "B"
             }
@@ -1415,12 +1415,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_collisions{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
-              "legendFormat": "{{instance}}/{{bridge}}/{interface}}",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_collisions{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
+              "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_collisions_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_collisions_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
               "refId": "B"
             }
@@ -1444,12 +1444,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_over_err{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_over_err{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_over_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_over_errors_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
               "refId": "B"
             }
@@ -1479,12 +1479,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_frame_err{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_frame_err{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_frame_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_frame_errors_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
               "refId": "B"
             }
@@ -1514,12 +1514,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_crc_err{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_crc_err{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_crc_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_crc_errors_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
               "refId": "B"
             }
@@ -1549,22 +1549,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_bytes{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "RX: {{instance}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_bytes{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "TX: {{instance}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_bytes_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
-              "legendFormat": "RX: {{instance}}/{{interface}}",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_bytes_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
+              "legendFormat": "RX: {{instance}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_bytes_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_bytes_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "TX: {{instance}}/{{name}}",
               "refId": "D"
             }
@@ -1594,22 +1594,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_packets{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "RX: {{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_packets{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "TX: {{instance}}/{{bridge}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_packets_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_packets_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "RX: {{instance}}/{{bridge}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_packets_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_packets_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "TX: {{instance}}/{{bridge}}/{{name}}",
               "refId": "D"
             }
@@ -1639,22 +1639,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_errors{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_errors{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "RX: {{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_errors{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_errors{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "TX: {{instance}}/{{bridge}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_errors_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "RX: {{instance}}/{{bridge}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_errors_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_errors_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "TX: {{instance}}/{{bridge}}/{{name}}",
               "refId": "D"
             }
@@ -1684,22 +1684,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_dropped{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_dropped{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "RX: {{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_dropped{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_dropped{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "TX, {{instance}}, {{bridge}}, {{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_dropped_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_dropped_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "RX: {{instance}}/{{bridge}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_dropped_total{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_dropped_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "TX: {{instance}}/{{bridge}}/{{name}}",
               "refId": "D"
             }
@@ -1729,12 +1729,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_misspkts_packets_drops{bridge=~\"$bridge\",instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_misspkts_packets_drops {`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", interface=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_misspkts_packets_drops{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_misspkts_packets_drops {`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\", name=~\"$interface\"}[5m]))",
               "legendFormat": "{{instance}}/{{bridge}}/{{name}}",
               "refId": "B"
             }
@@ -1772,22 +1772,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "RX: {{instance}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "TX: {{instance}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "RX: {{instance}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "TX: {{instance}}/{{name}}",
               "refId": "D"
             }
@@ -1816,22 +1816,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "RX: {{instance}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "TX: {{instance}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_total_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_rx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "RX: {{instance}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_total_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]) - rate(ovs_vswitchd_interface_tx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "TX: {{instance}}/{{name}}",
               "refId": "D"
             }
@@ -1860,22 +1860,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "RX: {{instance}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "TX: {{instance}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "RX: {{instance}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "TX: {{instance}}/{{name}}",
               "refId": "D"
             }
@@ -1904,22 +1904,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "RX: {{instance}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "TX: {{instance}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "RX: {{instance}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[$__rate_interval]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[$__rate_interval]))",
               "legendFormat": "TX: {{instance}}/{{name}}",
               "refId": "D"
             }
@@ -1948,22 +1948,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]) \u003e 100000)",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[5m])\u003e100000)",
               "legendFormat": "RX: {{instance}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]) \u003e 100000)",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[5m])\u003e100000)",
               "legendFormat": "TX: {{instance}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]) \u003e 100000)",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[5m])\u003e100000)",
               "legendFormat": "RX: {{instance}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]) \u003e 100000)",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[5m])\u003e100000)",
               "legendFormat": "TX: {{instance}}/{{name}}",
               "refId": "D"
             }
@@ -1993,22 +1993,22 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]) \u003e 1000)",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[5m])\u003e1000)",
               "legendFormat": "RX: {{instance}}/{{interface}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",interface=~\"$interface\",k8s_cluster_name=~\"$cluster\"}[5m]) \u003e 1000)",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",interface=~\"$interface\"}[5m])\u003e1000)",
               "legendFormat": "TX: {{instance}}/{{interface}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]) \u003e 1000)",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_rx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[5m])\u003e1000)",
               "legendFormat": "RX: {{instance}}/{{name}}",
               "refId": "C"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\",name=~\"$interface\"}[5m]) \u003e 1000)",
+              "expr": "topk($topk, rate(ovs_vswitchd_interface_tx_sw_packets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\",name=~\"$interface\"}[5m])\u003e1000)",
               "legendFormat": "TX: {{instance}}/{{name}}",
               "refId": "D"
             }
@@ -2052,7 +2052,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_poll_threads_lost_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_poll_threads_lost_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -2082,7 +2082,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_poll_threads_missed_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_poll_threads_missed_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -2112,7 +2112,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance) (rate(ovs_vswitchd_poll_threads_hit_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_poll_threads_hit_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m])) by (instance))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -2142,7 +2142,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance, core) (rate(ovs_vswitchd_poll_threads_packets_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_poll_threads_packets_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m])) by (instance, core))",
               "legendFormat": "{{instance}}: {{core}}",
               "refId": "A"
             }
@@ -2172,7 +2172,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance, core) (rate(ovs_vswitchd_poll_threads_packets_total{instance=~\"$topPMDNode\",k8s_cluster_name=~\"$cluster\"}[2m])))",
+              "expr": "topk($topk, sum(rate(ovs_vswitchd_poll_threads_packets_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topPMDNode\"}[2m])) by (instance, core))",
               "legendFormat": "core: {{core}}",
               "refId": "A"
             }
@@ -2202,7 +2202,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, sum by (instance, core) (ovs_vswitchd_poll_threads_busy_cycles{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}))",
+              "expr": "topk($topk, sum by (instance, core) (ovs_vswitchd_poll_threads_busy_cycles{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}))",
               "legendFormat": "{{instance}}: {{core}}",
               "refId": "A"
             }
@@ -2232,7 +2232,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_doca_queue_none_processed{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_queue_none_processed{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -2256,19 +2256,19 @@
           "type": "barchart",
           "targets": [
             {
-              "expr": "sum by (core) (ovs_vswitchd_poll_threads_busy_cycles{instance=~\"$topPMDNode\",k8s_cluster_name=~\"$cluster\"})",
-              "format": "table",
+              "expr": "sum by (core) (ovs_vswitchd_poll_threads_busy_cycles{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topPMDNode\"})",
               "instant": true,
-              "legendFormat": "busy: {{core}}",
               "range": false,
+              "format": "table",
+              "legendFormat": "busy: {{core}}",
               "refId": "A"
             },
             {
-              "expr": "sum by (core) (ovs_vswitchd_poll_threads_idle_cycles{instance=~\"$topPMDNode\",k8s_cluster_name=~\"$cluster\"})",
-              "format": "table",
+              "expr": "sum by (core) (ovs_vswitchd_poll_threads_idle_cycles{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topPMDNode\"})",
               "instant": true,
-              "legendFormat": "idle: {{core}}",
               "range": false,
+              "format": "table",
+              "legendFormat": "idle: {{core}}",
               "refId": "B"
             }
           ],
@@ -2286,34 +2286,34 @@
             "y": 298
           },
           "options": {
+            "xField": "core",
+            "orientation": "auto",
             "barRadius": 0,
+            "xTickLabelRotation": 0,
+            "xTickLabelMaxLength": 0,
+            "xTickLabelSpacing": 0,
+            "stacking": "normal",
+            "showValue": "never",
             "barWidth": 0.8,
-            "fullHighlight": false,
             "groupWidth": 0.52,
             "legend": {
-              "calcs": [],
               "displayMode": "list",
               "placement": "right",
-              "showLegend": true
+              "showLegend": true,
+              "calcs": []
             },
-            "orientation": "auto",
-            "showValue": "never",
-            "stacking": "normal",
             "tooltip": {
               "mode": "",
               "sort": ""
             },
-            "xField": "core",
-            "xTickLabelMaxLength": 0,
-            "xTickLabelRotation": 0,
-            "xTickLabelSpacing": 0
+            "fullHighlight": false
           }
         },
         {
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_doca_invalid_classify_port{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_invalid_classify_port{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -2343,7 +2343,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_doca_no_mark{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_no_mark{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m]))",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -2373,17 +2373,17 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_doca_pipe_resize{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_pipe_resize{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m]))",
               "legendFormat": "resize: {{instance}}",
               "refId": "A"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_doca_pipe_resize_over_10_ms{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_pipe_resize_over_10_ms{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m]))",
               "legendFormat": "slow: {{instance}}",
               "refId": "B"
             },
             {
-              "expr": "topk($topk, rate(ovs_vswitchd_doca_resize_block{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))",
+              "expr": "topk($topk, rate(ovs_vswitchd_doca_resize_block{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m]))",
               "legendFormat": "blocked: {{instance}}",
               "refId": "C"
             }
@@ -2407,12 +2407,12 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovs_vswitchd_conntrack_n_connections{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_conntrack_n_connections{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "min(ovs_vswitchd_conntrack_connection_limit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "min(ovs_vswitchd_conntrack_connection_limit{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "LIMIT",
               "refId": "B"
             }
@@ -2436,7 +2436,7 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, ovs_vswitchd_conntrack_n_connections{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"} / ovs_vswitchd_conntrack_connection_limit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"})",
+              "expr": "topk($topk, ovs_vswitchd_conntrack_n_connections{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"} / ovs_vswitchd_conntrack_connection_limit{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"})",
               "legendFormat": "{{instance}}",
               "refId": "A"
             }
@@ -2460,57 +2460,57 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "ovs_vswitchd_conntrack_connection_limit{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_connection_limit{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "LIMIT",
               "refId": "A"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_connections{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_connections{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "total",
               "refId": "B"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_tcp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_tcp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "tcp",
               "refId": "C"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_udp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_udp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "udp",
               "refId": "D"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_udplite{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_udplite{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "udplite",
               "refId": "E"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_icmp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_icmp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "icmp",
               "refId": "F"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_icmp6{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_icmp6{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "icmp6",
               "refId": "G"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_igmp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_igmp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "igmp",
               "refId": "H"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_sctp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_sctp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "sctp",
               "refId": "I"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_dccp{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_dccp{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "dccp",
               "refId": "J"
             },
             {
-              "expr": "ovs_vswitchd_conntrack_n_other{instance=~\"$topConntrackNode\",k8s_cluster_name=~\"$cluster\"}",
+              "expr": "ovs_vswitchd_conntrack_n_other{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$topConntrackNode\"}",
               "legendFormat": "other",
               "refId": "K"
             }
@@ -2539,25 +2539,33 @@
         "type": "query",
         "name": "cluster",
         "label": "Cluster",
+        "skipUrlSync": false,
         "query": {
           "qryType": 1,
-          "query": "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          "query": `}}{{ printf "label_values(%s, %s)" .Values.clusterLabel.discoveryMetric .Values.clusterLabel.label | toJson }}{{`,
+          "refId": "prometheus-cluster-Variable-Query"
         },
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
+        "multi": false,
+        "allowCustomValue": true,
         "refresh": 1,
+        "sort": 0,
         "includeAll": false,
-        "regex": ""
+        "allValue": "\"\"",
+        "regex": "",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
       },
       {
         "type": "query",
         "name": "instance",
         "label": "Instance",
         "skipUrlSync": false,
-        "query": "label_values(ovs_build_info{k8s_cluster_name=~\"$cluster\"}, instance)",
+        "query": "label_values(ovs_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\"}, instance)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -2576,7 +2584,7 @@
         "name": "bridge",
         "label": "Bridge",
         "skipUrlSync": false,
-        "query": "label_values(ovs_vswitchd_bridge{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}, bridge)",
+        "query": "label_values(ovs_vswitchd_bridge{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"},bridge)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -2603,7 +2611,7 @@
         "name": "interface",
         "label": "Interface",
         "skipUrlSync": false,
-        "query": "label_values(ovs_vswitchd_interface_admin_state{bridge=~\"$bridge\",instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}, interface)",
+        "query": "label_values(ovs_vswitchd_interface_admin_state{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\", bridge=~\"$bridge\"},interface)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -2649,7 +2657,7 @@
         "hide": 2,
         "skipUrlSync": false,
         "description": "Top 4 nodes have the highest PMD packets rate.",
-        "query": "query_result(topk(4, sum by (instance) (rate(ovs_vswitchd_poll_threads_packets_total{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}[2m]))))",
+        "query": "query_result(topk(4, sum(rate(ovs_vswitchd_poll_threads_packets_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}[2m])) by (instance)))",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -2678,7 +2686,7 @@
         "hide": 2,
         "skipUrlSync": false,
         "description": "Top 4 nodes have the highest conntrack entries usage.",
-        "query": "query_result(topk(4, ovs_vswitchd_conntrack_n_connections{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"} / ovs_vswitchd_conntrack_connection_limit{instance=~\"$instance\",k8s_cluster_name=~\"$cluster\"}))",
+        "query": "query_result(topk(4, ovs_vswitchd_conntrack_n_connections{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"} / ovs_vswitchd_conntrack_connection_limit{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", instance=~\"$instance\"}))",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -2705,3 +2713,4 @@
   },
   "annotations": {}
 }
+`}}

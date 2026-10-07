@@ -1,12 +1,12 @@
-{
+{{`{
   "__inputs": [
     {
-      "description": "",
-      "label": "prometheus",
       "name": "DS_PROMETHEUS",
+      "label": "prometheus",
+      "description": "",
+      "type": "datasource",
       "pluginId": "prometheus",
-      "pluginName": "Prometheus",
-      "type": "datasource"
+      "pluginName": "Prometheus"
     }
   ],
   "uid": "7ae56dbe010ad8befe6861dcfd23e42b",
@@ -41,10 +41,10 @@
       "type": "table",
       "targets": [
         {
-          "expr": "ovnkube_clustermanager_build_info{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
-          "format": "table",
+          "expr": "ovnkube_clustermanager_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"}",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "A"
         }
       ],
@@ -142,7 +142,7 @@
       "type": "state-timeline",
       "targets": [
         {
-          "expr": "ovnkube_clustermanager_leader{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}",
+          "expr": "ovnkube_clustermanager_leader{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"}",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -161,21 +161,21 @@
         "y": 1
       },
       "options": {
+        "showValue": "auto",
+        "rowHeight": 0.9,
+        "mergeValues": true,
         "alignValue": "center",
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
-        "mergeValues": true,
-        "perPage": 0,
-        "rowHeight": 0.9,
-        "showValue": "auto",
         "tooltip": {
           "mode": "single",
           "sort": ""
-        }
+        },
+        "perPage": 0
       },
       "fieldConfig": {
         "defaults": {
@@ -197,8 +197,8 @@
             }
           ],
           "custom": {
-            "fillOpacity": 70,
-            "lineWidth": 0
+            "lineWidth": 0,
+            "fillOpacity": 70
           }
         },
         "overrides": []
@@ -208,7 +208,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"ovnkube-cluster-manager\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}[5m]))",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-cluster-manager\"}[5m]))",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -229,10 +229,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -243,16 +243,16 @@
         "defaults": {
           "unit": "cores",
           "custom": {
-            "axisBorderShow": false,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
           }
         },
         "overrides": []
@@ -262,7 +262,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (container_memory_working_set_bytes{container=\"ovnkube-cluster-manager\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"$pod\"}) / 1024 ^ 3",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-cluster-manager\"}) / 1024^3",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -283,10 +283,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -297,16 +297,16 @@
         "defaults": {
           "unit": "decgbytes",
           "custom": {
-            "axisBorderShow": false,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
           }
         },
         "overrides": []
@@ -316,31 +316,31 @@
       "type": "table",
       "targets": [
         {
-          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v4_host_subnets{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
-          "format": "table",
+          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v4_host_subnets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "A"
         },
         {
-          "expr": "max by (network_name) (ovnkube_clustermanager_num_v4_host_subnets{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
-          "format": "table",
+          "expr": "max by (network_name) (ovnkube_clustermanager_num_v4_host_subnets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "B"
         },
         {
-          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v6_host_subnets{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
-          "format": "table",
+          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v6_host_subnets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "C"
         },
         {
-          "expr": "max by (network_name) (ovnkube_clustermanager_num_v6_host_subnets{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
-          "format": "table",
+          "expr": "max by (network_name) (ovnkube_clustermanager_num_v6_host_subnets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "instant": true,
           "range": false,
+          "format": "table",
           "refId": "D"
         }
       ],
@@ -390,31 +390,31 @@
             },
             "renameByName": {
               "Value #A": "IPv4 Allocated",
-              "Value #B": "IPv4 Available",
+              "Value #B": "IPv4 Total",
               "Value #C": "IPv6 Allocated",
-              "Value #D": "IPv6 Available",
+              "Value #D": "IPv6 Total",
               "network_name": "Network"
             }
           }
         }
       ],
       "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "reducer": null,
-          "show": false
-        },
         "frameIndex": 0,
         "showHeader": true,
-        "showTypeIcons": false
+        "showTypeIcons": false,
+        "footer": {
+          "show": false,
+          "reducer": null,
+          "countRows": false
+        },
+        "cellHeight": "sm"
       }
     },
     {
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (rate(ovnkube_resource_retry_failures_total{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\",pod=~\"ovnkube-control-plane-.*\"}[5m]))",
+          "expr": "sum by (pod) (rate(ovnkube_resource_retry_failures_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"ovnkube-control-plane-.*\"}[5m]))",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -435,10 +435,10 @@
       "interval": "120s",
       "options": {
         "legend": {
-          "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "calcs": []
         },
         "tooltip": {
           "mode": "multi",
@@ -449,16 +449,16 @@
         "defaults": {
           "unit": "ops",
           "custom": {
-            "axisBorderShow": false,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "showPoints": "never",
-            "spanNulls": false,
             "thresholdsStyle": {
               "mode": "off"
-            }
+            },
+            "lineWidth": 2,
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
           }
         },
         "overrides": []
@@ -468,7 +468,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "max(ovnkube_clustermanager_num_egress_ips{k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"})",
+          "expr": "max(ovnkube_clustermanager_num_egress_ips{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -494,18 +494,26 @@
         "type": "query",
         "name": "cluster",
         "label": "Cluster",
+        "skipUrlSync": false,
         "query": {
           "qryType": 1,
-          "query": "label_values(ovnkube_clustermanager_build_info,k8s_cluster_name)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          "query": `}}{{ printf "label_values(%s, %s)" .Values.clusterLabel.discoveryMetric .Values.clusterLabel.label | toJson }}{{`,
+          "refId": "prometheus-cluster-Variable-Query"
         },
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
+        "multi": false,
+        "allowCustomValue": true,
         "refresh": 1,
+        "sort": 0,
         "includeAll": false,
-        "regex": ""
+        "allValue": "\"\"",
+        "regex": "",
+        "auto": false,
+        "auto_min": "10s",
+        "auto_count": 30
       },
       {
         "type": "query",
@@ -513,7 +521,7 @@
         "label": "Pod",
         "skipUrlSync": false,
         "description": "A list of ovnkube-control-plane Pods.",
-        "query": "label_values(kube_pod_info{created_by_name=~\"ovnkube-control-plane-.*\",k8s_cluster_name=~\"$cluster\",namespace=\"ovn-kubernetes\"}, pod)",
+        "query": "label_values(kube_pod_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", created_by_name=~\"ovnkube-control-plane-.*\"},pod)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
@@ -539,3 +547,4 @@
   },
   "annotations": {}
 }
+`}}

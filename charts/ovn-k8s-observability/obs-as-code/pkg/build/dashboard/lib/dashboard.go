@@ -79,12 +79,7 @@ func GenerateJson(d SdnDashboard) ([]byte, error) {
 		Dashboard: dashboard,
 		Inputs:    baseDashboard.Inputs,
 	}
-	dashboardJson, err := json.MarshalIndent(aux, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-
-	return dashboardJson, nil
+	return json.MarshalIndent(aux, "", "  ")
 }
 
 // Helper to get the base dashboard from any concrete type
@@ -115,12 +110,7 @@ func GenerateManifest(d SdnDashboard) ([]byte, error) {
 	}
 
 	manifest := DashboardManifest("eevq404t7ec5ca", d.GetFilename(), dashboard)
-	manifestJson, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-
-	return manifestJson, nil
+	return json.MarshalIndent(manifest, "", "  ")
 }
 
 func (d *BaseSdnDashboard) GenerateManifest() ([]byte, error) {

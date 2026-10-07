@@ -147,14 +147,14 @@ func ContainerCpuUsageTimeseries(d SdnDashboard, topk bool, container string, la
 	labels = append(labels, fmt.Sprintf(`container="%s"`, container))
 	title := "CPU Usage"
 	description := fmt.Sprintf("CPU usage of container %s.", container)
-	expr := fmt.Sprintf(`sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="ovn-kubernetes", %s}[5m]))`, strings.Join(labels, ","))
+	expr := fmt.Sprintf(`sum by (pod) (rate(container_cpu_usage_seconds_total{cluster="$cluster", namespace="ovn-kubernetes", %s}[5m]))`, strings.Join(labels, ","))
 
 	if topk {
 		title += " (Top K)"
 		description += " Only the $topk pods with the highest average usage over the selected time range are shown."
 		// Rank on the counter directly instead of the default subquery, which is
 		// cheaper and equivalent for a rate.
-		expr = TopKQueryBy(expr, fmt.Sprintf(`sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="ovn-kubernetes", %s}[$__range] @ end()))`, strings.Join(labels, ",")))
+		expr = TopKQueryBy(expr, fmt.Sprintf(`sum by (pod) (rate(container_cpu_usage_seconds_total{cluster="$cluster", namespace="ovn-kubernetes", %s}[$__range] @ end()))`, strings.Join(labels, ",")))
 	}
 
 	return BaseTimeseries_C2(d).
@@ -173,14 +173,14 @@ func ContainerMemoryUsageTimeseries(d SdnDashboard, topk bool, container string,
 	labels = append(labels, fmt.Sprintf(`container="%s"`, container))
 	title := "Memory Usage"
 	description := fmt.Sprintf("Working set memory usage of container %s.", container)
-	expr := fmt.Sprintf(`sum by (pod) (container_memory_working_set_bytes{namespace="ovn-kubernetes", %s}) / 1024^3`, strings.Join(labels, ","))
+	expr := fmt.Sprintf(`sum by (pod) (container_memory_working_set_bytes{cluster="$cluster", namespace="ovn-kubernetes", %s}) / 1024^3`, strings.Join(labels, ","))
 
 	if topk {
 		title += " (Top K)"
 		description += " Only the $topk pods with the highest average usage over the selected time range are shown."
 		// Rank on the raw gauge instead of the default subquery, which is
 		// cheaper and equivalent for a plain sum.
-		expr = TopKQueryBy(expr, fmt.Sprintf(`sum by (pod) (avg_over_time(container_memory_working_set_bytes{namespace="ovn-kubernetes", %s}[$__range] @ end())) / 1024^3`, strings.Join(labels, ",")))
+		expr = TopKQueryBy(expr, fmt.Sprintf(`sum by (pod) (avg_over_time(container_memory_working_set_bytes{cluster="$cluster", namespace="ovn-kubernetes", %s}[$__range] @ end())) / 1024^3`, strings.Join(labels, ",")))
 	}
 
 	return BaseTimeseries_C2(d).
@@ -199,14 +199,14 @@ func ContainerRestartTimeseries(d SdnDashboard, topk bool, container string, lab
 	labels = append(labels, fmt.Sprintf(`container="%s"`, container))
 	title := fmt.Sprintf("%s Container Restart", container)
 	description := "Indicates the occurrence of a container restart."
-	expr := fmt.Sprintf(`sum by (pod) (rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", %s}[5m]))`, strings.Join(labels, ","))
+	expr := fmt.Sprintf(`sum by (pod) (rate(kube_pod_container_status_restarts_total{cluster="$cluster", namespace="ovn-kubernetes", %s}[5m]))`, strings.Join(labels, ","))
 
 	if topk {
 		title += " (Top K)"
 		description += " Only the $topk pods that restarted most over the selected time range are shown."
 		// Rank on the counter directly instead of the default subquery, which is
 		// cheaper and equivalent for a rate.
-		expr = TopKQueryBy(expr, fmt.Sprintf(`sum by (pod) (rate(kube_pod_container_status_restarts_total{namespace="ovn-kubernetes", %s}[$__range] @ end()))`, strings.Join(labels, ",")))
+		expr = TopKQueryBy(expr, fmt.Sprintf(`sum by (pod) (rate(kube_pod_container_status_restarts_total{cluster="$cluster", namespace="ovn-kubernetes", %s}[$__range] @ end()))`, strings.Join(labels, ",")))
 	}
 
 	return BaseTimeseries_C2(d).
@@ -238,14 +238,14 @@ func NotConnectedTimeseries(d SdnDashboard, title, description, metric string) *
 			prometheus.NewDataqueryBuilder().
 				// == bool 0 reports 1 while a pod is disconnected, > 0 then drops
 				// the connected pods.
-				Expr(fmt.Sprintf(`sum by (instance,pod) (%s{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"} == bool 0) > 0`, metric)).
+				Expr(fmt.Sprintf(`sum by (instance,pod) (%s{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"} == bool 0) > 0`, metric)).
 				LegendFormat("{{instance}}/{{pod}}").
 				RefId("A"),
 		)
 }
 
 func ContainerReadinessBarGauge(d SdnDashboard, container string) *bargauge.PanelBuilder {
-	readyExpr := fmt.Sprintf(`sum(kube_pod_container_status_ready{namespace="ovn-kubernetes", container="%s"})`, container)
+	readyExpr := fmt.Sprintf(`sum(kube_pod_container_status_ready{cluster="$cluster", namespace="ovn-kubernetes", container="%s"})`, container)
 	return NewSdnBarGaugePanelBuilder(d,
 		fmt.Sprintf("Container %s Readiness", container),
 		fmt.Sprintf("The summary of ready and not ready %s containers.", container),
@@ -260,7 +260,7 @@ func ContainerReadinessBarGauge(d SdnDashboard, container string) *bargauge.Pane
 			// count() - sum() instead of sum(... == 0), which returns an empty
 			// vector and hides the bar when every container is ready.
 			prometheus.NewDataqueryBuilder().
-				Expr(fmt.Sprintf(`count(kube_pod_container_status_ready{namespace="ovn-kubernetes", container="%s"}) - %s`, container, readyExpr)).
+				Expr(fmt.Sprintf(`count(kube_pod_container_status_ready{cluster="$cluster", namespace="ovn-kubernetes", container="%s"}) - %s`, container, readyExpr)).
 				LegendFormat("NOT READY").
 				RefId("B"),
 		).
@@ -446,7 +446,7 @@ func PerformanceCounterPanels(d SdnDashboard, title, desc string, component, sta
 			Min(0).
 			WithTarget(
 				prometheus.NewDataqueryBuilder().
-					Expr(fmt.Sprintf(`topk($topk, rate(%s_%s_total_samples{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[5m]))`, component, stat)).
+					Expr(fmt.Sprintf(`topk($topk, rate(%s_%s_total_samples{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"}[5m]))`, component, stat)).
 					LegendFormat("{{instance}}/{{pod}}").
 					RefId("A"),
 			),
@@ -460,19 +460,19 @@ func PerformanceCounterPanels(d SdnDashboard, title, desc string, component, sta
 			Min(0).
 			WithTarget(
 				prometheus.NewDataqueryBuilder().
-					Expr(fmt.Sprintf(`topk($topk, %s_%s_minimum{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
+					Expr(fmt.Sprintf(`topk($topk, %s_%s_minimum{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
 					LegendFormat("MIN: {{instance}}/{{pod}}").
 					RefId("A"),
 			).
 			WithTarget(
 				prometheus.NewDataqueryBuilder().
-					Expr(fmt.Sprintf(`topk($topk, %s_%s_maximum{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
+					Expr(fmt.Sprintf(`topk($topk, %s_%s_maximum{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
 					LegendFormat("MAX: {{instance}}/{{pod}}").
 					RefId("B"),
 			).
 			WithTarget(
 				prometheus.NewDataqueryBuilder().
-					Expr(fmt.Sprintf(`topk($topk, %s_%s_95th_percentile{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
+					Expr(fmt.Sprintf(`topk($topk, %s_%s_95th_percentile{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
 					LegendFormat("P95: {{instance}}/{{pod}}").
 					RefId("C"),
 			),
@@ -486,13 +486,13 @@ func PerformanceCounterPanels(d SdnDashboard, title, desc string, component, sta
 			Min(0).
 			WithTarget(
 				prometheus.NewDataqueryBuilder().
-					Expr(fmt.Sprintf(`topk($topk, %s_%s_short_term_avg{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
+					Expr(fmt.Sprintf(`topk($topk, %s_%s_short_term_avg{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
 					LegendFormat("short-term: {{instance}}/{{pod}}").
 					RefId("A"),
 			).
 			WithTarget(
 				prometheus.NewDataqueryBuilder().
-					Expr(fmt.Sprintf(`topk($topk, %s_%s_long_term_avg{instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
+					Expr(fmt.Sprintf(`topk($topk, %s_%s_long_term_avg{cluster="$cluster", instance=~"$instance", pod=~"$pod", namespace="ovn-kubernetes"})`, component, stat)).
 					LegendFormat("long-term: {{instance}}/{{pod}}").
 					RefId("B"),
 			),
