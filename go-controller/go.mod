@@ -27,6 +27,7 @@ require (
 	github.com/k8snetworkplumbingwg/sriovnet v1.3.0
 	github.com/mdlayher/arp v0.0.0-20220512170110-6706a2966875
 	github.com/mdlayher/ndp v1.0.1
+	github.com/mdlayher/packet v1.1.2
 	github.com/mdlayher/socket v0.5.1
 	github.com/metallb/frr-k8s v0.0.0-20260603082256-b43efcb206be
 	github.com/miekg/dns v1.1.31
@@ -121,7 +122,6 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mdlayher/ethernet v0.0.0-20220221185849-529eae5b6118 // indirect
-	github.com/mdlayher/packet v1.1.2 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/moby/spdystream v0.5.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
