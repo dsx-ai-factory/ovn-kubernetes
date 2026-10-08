@@ -837,7 +837,8 @@ if [ "$KIND_CREATE" == false ] && [ "$KIND_LOCAL_REGISTRY" == false ]; then
   refresh_ovn_pods
 fi
 
-install_online_ovn_kubernetes_crds
+# The NVIDIA chart already installs the ANP and BANP CRDs.
+# install_online_ovn_kubernetes_crds
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
 fi

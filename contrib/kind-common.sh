@@ -1301,7 +1301,8 @@ enable_multi_net() {
   else
     echo "Skipping multus-cni installation; DPU simulator mode expects Multus to be installed by dpu-simulator"
   fi
-  install_mpolicy_crd
+  # The NVIDIA chart already installs the MultiNetworkPolicy CRD.
+  # install_mpolicy_crd
   install_ipamclaim_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
 }
