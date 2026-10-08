@@ -84,7 +84,8 @@ of the package.
 
 | Chart | Version | Path |
 | --- | --- | --- |
-| `alert-rule` | `1.0.0` | `charts/alert-rule` |
-| `dashboard` | `1.0.0` | `charts/dashboard` |
+{{- range .Dependencies }}
+| `{{ .Name }}` | `{{ .Version }}` | `charts/{{ .Name }}` |
+{{- end }}
 
 {{ template "chart.valuesSection" . }}
