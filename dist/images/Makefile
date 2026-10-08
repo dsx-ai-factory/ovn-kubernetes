@@ -67,12 +67,24 @@ endif
 endif
 
 ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= artifactory.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb
+ubuntu-nv-image: OVS_SOURCE ?= artifactory
+ubuntu-nv-image: OVN_SOURCE ?= artifactory
+ubuntu-nv-image: CLOUD_ARCHIVE ?= gazpacho
+ubuntu-nv-image: UCA_OVN_VER ?= 26.03.0-2~cloud0
+ubuntu-nv-image: DOCA_RELEASE ?= latest
+ubuntu-nv-image: NV_ARTIFACTORY_SECRET_ARG = --secret id=artifactory_cert,env=NV_ARTIFACTORY_CERT
 
+# For public DOCA OVS with OVN 26.03: OVS_SOURCE=doca OVN_SOURCE=uca.
 ubuntu-nv-image:
 	cd $(abspath $(CURDIR)/../..) && ${OCI_BIN} build \
 		-t ovn-kube-ubuntu$(IMAGE_ARCH) \
-		--secret id=artifactory_cert,env=NV_ARTIFACTORY_CERT \
+		$(if $(filter artifactory,$(OVS_SOURCE) $(OVN_SOURCE)),$(NV_ARTIFACTORY_SECRET_ARG)) \
 		-f dist/images/Dockerfile.ubuntu.nv \
+		--build-arg OVS_SOURCE=${OVS_SOURCE} \
+		--build-arg OVN_SOURCE=${OVN_SOURCE} \
+		--build-arg CLOUD_ARCHIVE=${CLOUD_ARCHIVE} \
+		--build-arg UCA_OVN_VER=${UCA_OVN_VER} \
+		--build-arg DOCA_RELEASE=${DOCA_RELEASE} \
 		--build-arg OVN_VER=${OVN_VER} \
 		--build-arg OVS_VER=${OVS_VER} \
 		--build-arg BASE_IMAGE=${NV_UBUNTU_BASE_IMAGE} .
