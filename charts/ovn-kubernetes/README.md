@@ -2,7 +2,7 @@
 
 -----------------------
 
-![Version: 1.5.18](https://img.shields.io/badge/Version-1.5.18-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2026-05.18](https://img.shields.io/badge/AppVersion-2026--05.18-informational?style=flat-square)
+![Version: 1.5.19](https://img.shields.io/badge/Version-1.5.19-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2026-05.19](https://img.shields.io/badge/AppVersion-2026--05.19-informational?style=flat-square)
 
 **Homepage:** <https://github.com/dsx-ai-factory/ovn-kubernetes>
 

@@ -196,69 +196,69 @@ ovs-node:
 ovnkube-node-dpu-host:
   image:
     repository: ovnkube
-    tag: cbcda82f-71385617-7852734
-    sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+    tag: 42489318-72551891-fcbd199
+    sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
 ovnkube-identity:
   ovnkubeIdentity:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
 ovnkube-control-plane:
   ovnkubeControlPlane:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
 ovnkube-single-node-zone:
   ovnkubeSingleNodeZone:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
   ovnkubeSingleNodeZoneNbdb:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
   ovnkubeSingleNodeZoneSbdb:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
   ovnkubeSingleNodeZoneNorthd:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
   ovnkubeSingleNodeZoneOvnHost:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
 ovnkube-single-node-zone-dpu:
   ovnkubeSingleNodeZone:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
   ovnkubeSingleNodeZoneNbdb:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
   ovnkubeSingleNodeZoneSbdb:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
   ovnkubeSingleNodeZoneNorthd:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
   ovnkubeSingleNodeZoneOvnHost:
     image:
       repository: ovnkube
-      tag: cbcda82f-71385617-7852734
-      sha256: 84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3
+      tag: 42489318-72551891-fcbd199
+      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0

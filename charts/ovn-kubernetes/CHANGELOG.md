@@ -1,3 +1,12 @@
+# 1.5.19
+OVNK8s-Interconnect
+- add opt-in OpenTelemetry tracing for pod network lifecycle and DPU connection annotation updates.
+- restore the VTEP CRD for EVPN tunnel endpoint configuration.
+- improve UDN NAD creation and annotation reconciliation by narrowing lock scope and using server-side apply.
+- speed up route import by streaming BGP route dumps and batching missing static route creation.
+- preserve informer initial-list add events and clean deleted queue mappings.
+- add a separate observability Helm chart with configurable Grafana dashboards.
+
 # 1.5.18
 OVNK8s-Interconnect
 - declare the DPU token volume before DaemonSet validation when SPIFFE-derived tokens are enabled.
