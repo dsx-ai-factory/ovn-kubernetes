@@ -72,6 +72,18 @@ followed by OVN, and finally OVN K8s CNI at the top. Each layer has several
 K8s components - deployments, daemonsets, and statefulsets. Each component at
 every layer is a subchart by itself.
 
+## Sub-charts
+
+| Chart | Version | Path |
+| --- | --- | --- |
+| `ovnkube-control-plane` | `1.5.18` | `charts/ovnkube-control-plane` |
+| `ovnkube-crds` | `1.5.17` | `charts/ovnkube-crds` |
+| `ovnkube-identity` | `1.5.18` | `charts/ovnkube-identity` |
+| `ovnkube-node-dpu-host` | `1.5.18` | `charts/ovnkube-node-dpu-host` |
+| `ovnkube-single-node-zone` | `1.5.18` | `charts/ovnkube-single-node-zone` |
+| `ovnkube-single-node-zone-dpu` | `1.5.18` | `charts/ovnkube-single-node-zone-dpu` |
+| `ovs-node` | `1.5.0` | `charts/ovs-node` |
+
 Install/upgrade the helm chart. `k8sAPIServer` and `podNetwork` have no
 defaults and the install fails without them, so replace the placeholders
 below with the API server endpoint and the pod CIDR of your cluster:
