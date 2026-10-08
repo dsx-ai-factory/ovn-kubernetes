@@ -121,7 +121,14 @@ Generate full container image string by combining repository, tag and possible s
 */}}
 
 {{- define "ovn-kubernetes.generateContainerImageString" -}}
-  {{- $repository := .image.repository }}
+  {{- $image := .image }}
+  {{- with .Values.global.image }}
+    {{- if not (and .repository .tag) }}
+      {{- fail "global.image requires repository and tag" }}
+    {{- end }}
+    {{- $image = . }}
+  {{- end }}
+  {{- $repository := $image.repository }}
   {{- /* A first path segment carrying a "." or a ":" (or spelled "localhost") is a
          registry host, so the repository is already fully qualified and callers
          passing one must not have the prefix prepended on top of it. */}}
@@ -130,12 +137,12 @@ Generate full container image string by combining repository, tag and possible s
     {{- $prefix := required "global.imageRepositoryPrefix is required unless image.repository includes a registry host" .Values.global.imageRepositoryPrefix | trimSuffix "/" }}
     {{- $repository = printf "%s/%s" $prefix $repository }}
   {{- end }}
-  {{- $imageString := printf "%s:%s" $repository .image.tag }}
+  {{- $imageString := printf "%s:%s" $repository $image.tag }}
   {{- if .Values.global.useImageDigest | default false }}
-    {{- if empty .image.sha256 }}
+    {{- if empty $image.sha256 }}
       {{ fail "sha256 signature is required for ngn clusters" }}
     {{- else }}
-      {{- $imageString = printf "%s@sha256:%s" $imageString .image.sha256 }}
+      {{- $imageString = printf "%s@sha256:%s" $imageString $image.sha256 }}
     {{- end }}
   {{- end }}
   {{- trim $imageString }}

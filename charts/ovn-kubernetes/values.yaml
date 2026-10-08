@@ -49,6 +49,8 @@ global:
   # fully qualified, e.g. myregistry.example.com/sdn. Required unless every
   # image.repository is overridden with a value that includes a registry host.
   imageRepositoryPrefix: ""
+  # -- Optional image for all components. Set repository and tag together for local testing. Also set sha256 when global.useImageDigest is true.
+  image: {}
   # -- name of the cluster wide default net-attach-def, as namespace/name.
   clusterDefaultNad: default/cluster-network
   # -- extra options appended to the ovnkube gateway configuration, e.g. --ephemeral-port-range=40000-60999
@@ -190,13 +192,13 @@ global:
 ovs-node:
   ovsDaemonsContainer:
     image:
-      repository: ovs
+      repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 963f58b0-35519317-af693ae
+      tag: 1d16fb3a-72474635-5236ee3
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: 655a15134866f70f6410dff0578adc8c183eecfa436619e4c179f6f8f267716c
+      sha256: 99589a5cfca98deab6603d94fd9f6b7aa80dafffb1d9e5d7fdbedb98b3483713
 ovnkube-node-dpu-host:
   image:
     repository: ovnkube

@@ -13,6 +13,7 @@ source "${DIR}/kind-common.sh"
 source "${DIR}/kind-dpu-sim-lib.sh"
 
 OVN_HELM_EXTRA_VALUES=()
+declare -a OVN_HELM_EXTRA_ARGS
 
 set_default_params() {
   set_common_default_params
@@ -575,6 +576,14 @@ helm_extra_values_args() {
     printf '%s' "${args}"
 }
 
+helm_extra_args() {
+    local arg
+
+    for arg in "${OVN_HELM_EXTRA_ARGS[@]}"; do
+        printf '%q ' "${arg}"
+    done
+}
+
 skip_ovn_image_build_load() {
     [ "${DPU_MODE}" != "none" ] && [ "${#OVN_HELM_EXTRA_VALUES[@]}" -gt 0 ] && [ "${OVN_IMAGE}" == "local" ]
 }
@@ -622,6 +631,7 @@ create_ovn_kubernetes() {
     fi
     echo "value_file=${value_file}"
     local extra_values_args helm_network_args helm_image_args helm_log_args
+    local helm_kind_args=""
     extra_values_args="$(helm_extra_values_args)"
     # For multi-pod-subnet case, NET_CIDR_IPV4 is a list of CIDRs separated by comma.
     # When Helm encounters a comma within a string value in a --set argument, it attempts to parse the comma as a separator
@@ -638,6 +648,7 @@ create_ovn_kubernetes() {
       fi
       helm_log_args="--set ovnkube-single-node-zone-dpu.ovnkubeNodeLogLevel=${NODE_LOG_LEVEL} --set-string ovnkube-single-node-zone-dpu.nbLogLevel=\"${OVN_LOG_LEVEL_NB}\" --set-string ovnkube-single-node-zone-dpu.sbLogLevel=\"${OVN_LOG_LEVEL_SB}\" --set-string ovnkube-single-node-zone-dpu.northdLogLevel=\"${OVN_LOG_LEVEL_NORTHD}\" --set-string ovnkube-single-node-zone-dpu.ovnControllerLogLevel=\"${OVN_LOG_LEVEL_CONTROLLER}\""
     else
+      helm_kind_args="$(helm_extra_args)"
       helm_network_args="--set k8sAPIServer=${API_URL} --set podNetwork=\"${ESCAPED_NET_CIDR}\" --set serviceNetwork=\"${ESCAPED_SVC_CIDR}\" --set mtu=${OVN_MTU}"
       if skip_ovn_image_build_load; then
         helm_image_args=""
@@ -648,6 +659,7 @@ create_ovn_kubernetes() {
     fi
     cmd=$(cat <<EOF
 helm upgrade --install ovn-kubernetes . -f "${value_file}" ${extra_values_args} \
+          ${helm_kind_args} \
           ${helm_network_args} \
           ${helm_image_args} \
           --set-string global.v4JoinSubnet="${JOIN_SUBNET_IPV4}" \

@@ -93,6 +93,11 @@
           "type": "string",
           "description": "registry and path prepended to every image.repository that is not already fully qualified, e.g. myregistry.example.com/sdn. Required unless every image.repository is overridden with a value that includes a registry host."
         },
+        "image": {
+          "type": "object",
+          "properties": {},
+          "description": "Optional image for all components. Set repository and tag together for local testing. Also set sha256 when global.useImageDigest is true."
+        },
         "clusterDefaultNad": {
           "type": "string",
           "description": "name of the cluster wide default net-attach-def, as namespace/name."

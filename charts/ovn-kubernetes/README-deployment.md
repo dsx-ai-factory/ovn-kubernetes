@@ -1031,7 +1031,7 @@ null
 			<td>ovs-node.ovsDaemonsContainer.image.repository</td>
 			<td>string</td>
 			<td><pre lang="json">
-"ovs"
+"ovnkube"
 </pre>
 </td>
 			<td></td>
@@ -1726,4 +1726,3 @@ false
 		</tr>
 	</tbody>
 </table>
-
