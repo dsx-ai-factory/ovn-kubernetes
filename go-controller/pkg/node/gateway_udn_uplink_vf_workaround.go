@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -42,6 +43,8 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
+	nodeutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/util"
 	uplinkutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/uplink"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -87,29 +90,13 @@ func uplinkVFWorkaroundEnabled() bool {
 	return enabled
 }
 
-// ensureUplinkVFUp brings the Uplink VF up from a withdrawn state before the
-// network's VRF is created, so that the VRF is built on host configuration the
-// host has just programmed.
-//
-// A VF the deletion of a previous CUDN VRF left down only needs to be brought
-// up. A VF that is up was left configured because its release could not take
-// it down, and the host reprograms only what it has withdrawn, so it is taken
-// down and waited on first.
-//
-// A VF that is already enslaved is left untouched: it belongs to a VRF that
-// this or another network is using, such as after an ovnkube-node restart, and
-// its configuration has already been through the cycle.
-//
-// It runs before Uplink gateway resolution as well, because resolution
-// requires the discovered host addresses that the VF only regains once it is
-// up.
-func (udng *UserDefinedNetworkGateway) ensureUplinkVFUp() error {
+// ensureUplinkVFUp recovers a released VF before gateway resolution requires
+// discovered host data. An UP or enslaved VF is left untouched so retries and
+// ovnkube-node restarts cannot repeatedly withdraw an active configuration.
+func (udng *UserDefinedNetworkGateway) ensureUplinkVFUp(state *uplinkv1alpha1.UplinkState) error {
+	vfName := string(state.Status.HostInterfaceName)
 	if !config.IsModeDPUHost() || udng.Uplink() == "" || !uplinkVFWorkaroundEnabled() {
 		return nil
-	}
-	vfName, err := udng.uplinkHostInterfaceName()
-	if err != nil {
-		return err
 	}
 	if vfName == "" {
 		return nil
@@ -126,9 +113,37 @@ func (udng *UserDefinedNetworkGateway) ensureUplinkVFUp() error {
 		return nil
 	}
 	if link.Attrs().Flags&net.FlagUp != 0 {
-		if err := udng.withdrawUplinkVFConfiguration(link); err != nil {
-			return err
+		// The informer can still contain data from before teardown. Do not
+		// build a VRF until the host has restored the published addresses.
+		if len(state.Status.IPAddresses) == 0 {
+			return nil // Gateway resolution reports incomplete discovery.
 		}
+		addresses, err := nodeutil.GetNetworkInterfaceIPAddresses(vfName, nil)
+		if err != nil {
+			return fmt.Errorf("waiting for Uplink %s host addresses: %w", udng.Uplink(), err)
+		}
+		actual := make([]string, 0, len(addresses))
+		for _, address := range addresses {
+			actual = append(actual, address.String())
+		}
+		published := make([]string, 0, len(state.Status.IPAddresses))
+		for _, address := range state.Status.IPAddresses {
+			published = append(published, string(address))
+		}
+		slices.Sort(actual)
+		slices.Sort(published)
+		// Leave the VF UP while the host restores configuration and discovery
+		// updates UplinkState. Taking it down on a mismatch would restart
+		// withdrawal on each retry and could prevent recovery from completing.
+		if !slices.Equal(actual, published) || link.Attrs().HardwareAddr.String() != string(state.Status.MACAddress) {
+			return fmt.Errorf("waiting for Uplink %s host discovery to match interface %s", udng.Uplink(), vfName)
+		}
+		return nil
+	}
+	// Teardown leaves the VF down while the host withdraws configuration.
+	// Complete that withdrawal before asking the host to reapply it.
+	if err := udng.withdrawUplinkVFConfiguration(link); err != nil {
+		return err
 	}
 	klog.Infof("Setting Uplink %s interface %s up before creating the VRF of network %s",
 		udng.Uplink(), vfName, udng.GetNetworkName())
@@ -136,7 +151,7 @@ func (udng *UserDefinedNetworkGateway) ensureUplinkVFUp() error {
 		return fmt.Errorf("failed to set Uplink %s interface %s up for network %s: %w",
 			udng.Uplink(), vfName, udng.GetNetworkName(), err)
 	}
-	return nil
+	return fmt.Errorf("waiting for Uplink %s host discovery after bringing interface %s up", udng.Uplink(), vfName)
 }
 
 // withdrawUplinkVFConfiguration takes the Uplink VF down and waits for the
