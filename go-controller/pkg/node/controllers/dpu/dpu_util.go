@@ -116,17 +116,14 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 		netInfo util.NetInfo
 	}
 	desiredNADs := make(map[string]desiredNAD)
+	// foreign collects the NADs served by another DPU on this node, identified
+	// by a PfMAC this DPU does not own. Their representors and connection status
+	// belong to that DPU, so the status reconcile below must leave them alone.
+	foreign := sets.New[string]()
 	for nadKey, dpuCD := range allDPUCDs {
-		// Get the pfMAC from the pod annotation, see if this pfMAC belongs to this DPU.
-		belongsToThisDPU := false
-		for _, pfMAC := range c.pfMACs {
-			if pfMAC == dpuCD.PfMAC {
-				belongsToThisDPU = true
-				break
-			}
-		}
-		if !belongsToThisDPU {
+		if !c.ownsPfMAC(dpuCD.PfMAC) {
 			klog.V(5).Infof("Pod %s on NAD %s is not associated with this DPU, skipping it", podKey, nadKey)
+			foreign.Insert(nadKey)
 			continue
 		}
 		netInfo, err := c.getNetInfoForNADKey(nadKey)
@@ -151,7 +148,7 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 		}
 	}
 	if len(desiredNADs) == 0 {
-		return c.handleDeleteDPUPod(podKey, pod)
+		return c.handleDeleteDPUPod(podKey, pod, foreign)
 	}
 
 	ps, _ := c.podStates.LoadOrStore(podKey, &podDPUState{
@@ -213,7 +210,7 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 	// below: the host side waits on this status to plumb a new sandbox, and must
 	// not be told a representor is ready once it has been deleted. NADs added
 	// below get their status from addRepPort instead.
-	if err := c.reconcileDPUConnStatus(pod, podKey, nadsToKeep); err != nil {
+	if err := c.reconcileDPUConnStatus(pod, podKey, nadsToKeep, foreign); err != nil {
 		if len(validPortsToDelete) > 0 {
 			// Nothing is untracked yet, so the next retry finds these ports.
 			return err
@@ -258,10 +255,22 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 	return utilerrors.Join(errs...)
 }
 
+// ownsPfMAC reports whether pfMAC is one of the host PF MAC addresses this DPU
+// serves.
+func (c *Controller) ownsPfMAC(pfMAC string) bool {
+	for _, m := range c.pfMACs {
+		if m == pfMAC {
+			return true
+		}
+	}
+	return false
+}
+
 // reconcileDPUConnStatus makes the pod's connection status annotation match the
 // NADs tracked for it: every tracked NAD whose port is confirmed is reported
-// ready, every other entry is removed.
-func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, tracked map[string]*dpuConnectionState) error {
+// ready, and every other entry is removed, except the NADs in foreign, which a
+// different DPU on the same node serves and whose status is not ours to touch.
+func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, tracked map[string]*dpuConnectionState, foreign sets.Set[string]) error {
 	currentStatus, err := util.UnmarshalPodDPUConnStatusAllNetworks(pod.Annotations)
 	if err != nil {
 		return err
@@ -280,9 +289,12 @@ func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, trac
 		}
 	}
 	for nadKey := range currentStatus {
-		if _, ok := tracked[nadKey]; !ok {
-			statusMap[nadKey] = nil
+		// Skip NADs still tracked here, and NADs served by another DPU whose
+		// status is not ours to clear.
+		if _, ok := tracked[nadKey]; ok || foreign.Has(nadKey) {
+			continue
 		}
+		statusMap[nadKey] = nil
 	}
 	if len(statusMap) == 0 {
 		return nil
@@ -301,14 +313,16 @@ func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, trac
 // still exists, so that the connection status it carries can be cleared; a UID
 // mismatch means the state belongs to an earlier pod of the same name.
 // The state entry is dropped last, so that a retry still finds the ports.
+// foreign holds the NADs served by another DPU, whose status must be preserved;
+// it may be nil on the delete paths that do not reconcile status.
 // The podStates lock for podKey must be held by the caller.
-func (c *Controller) handleDeleteDPUPod(podKey string, pod *corev1.Pod) error {
+func (c *Controller) handleDeleteDPUPod(podKey string, pod *corev1.Pod, foreign sets.Set[string]) error {
 	ps, ok := c.podStates.Load(podKey)
 	if !ok {
 		// Nothing is tracked, but the pod can still carry status that this
 		// controller never got to clean up.
 		if pod != nil {
-			return c.reconcileDPUConnStatus(pod, podKey, nil)
+			return c.reconcileDPUConnStatus(pod, podKey, nil, foreign)
 		}
 		return nil
 	}
@@ -329,7 +343,7 @@ func (c *Controller) handleDeleteDPUPod(podKey string, pod *corev1.Pod) error {
 	// Clear the status before the ports go away, so that the host side is never
 	// told a representor is ready after it has been deleted.
 	if pod != nil && pod.UID == ps.uid {
-		if err := c.reconcileDPUConnStatus(pod, podKey, nil); err != nil {
+		if err := c.reconcileDPUConnStatus(pod, podKey, nil, foreign); err != nil {
 			return err
 		}
 	}

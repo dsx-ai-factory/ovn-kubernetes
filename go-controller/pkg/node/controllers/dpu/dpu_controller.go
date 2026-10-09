@@ -167,12 +167,14 @@ func (c *Controller) reconcileDPUPod(key string) error {
 	return c.podStates.DoWithLock(key, func(key string) error {
 		if pod == nil {
 			c.nadPods.delete(key)
-			return c.handleDeleteDPUPod(key, nil)
+			// nil foreign is safe: pod == nil skips the status reconcile.
+			return c.handleDeleteDPUPod(key, nil, nil)
 		}
 
 		// If the UID changed (pod recreated with same name), clean up the old pod's state first
 		if ps, ok := c.podStates.Load(key); ok && ps.uid != pod.UID {
-			if err := c.handleDeleteDPUPod(key, pod); err != nil {
+			// nil foreign is safe: the UID mismatch skips the status reconcile.
+			if err := c.handleDeleteDPUPod(key, pod, nil); err != nil {
 				return err
 			}
 		}

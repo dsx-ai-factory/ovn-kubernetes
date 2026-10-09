@@ -1434,7 +1434,7 @@ var _ = Describe("Node DPU tests", func() {
 			})
 
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1"}}
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
 		})
 
@@ -1444,7 +1444,7 @@ var _ = Describe("Node DPU tests", func() {
 			tracked := map[string]*dpuConnectionState{
 				"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1", revalidate: true},
 			}
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
 		})
 
@@ -1452,7 +1452,7 @@ var _ = Describe("Node DPU tests", func() {
 			withStatus(livePod, "ns1/nad1")
 			patched := expectStatusPatch(livePod, map[string]*util.DPUConnectionStatus{"ns1/nad1": nil})
 
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", nil)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", nil, nil)).To(Succeed())
 			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
 		})
 
@@ -1460,7 +1460,7 @@ var _ = Describe("Node DPU tests", func() {
 			withStatus(livePod, "ns1/nad1")
 
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1"}}
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
 		})
 	})
