@@ -60,8 +60,9 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement
-directly. Maintainers are identified in the [MAINTAINERS.md](MAINTAINERS.md) file and their contact information is on their GitHub profile page.
+reported to the community leaders responsible for enforcement at
+[Github_Conduct@nvidia.com](mailto:Github_Conduct@nvidia.com), or directly to the maintainers.
+Maintainers are identified in the [MAINTAINERS.md](MAINTAINERS.md) file and their contact information is on their GitHub profile page.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

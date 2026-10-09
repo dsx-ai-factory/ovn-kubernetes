@@ -12,6 +12,8 @@
 
 Welcome! We are glad that you want to contribute to our project! 💖
 
+All contributors are expected to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
+
 As you get started, you are in the best position to give us feedback on areas of
 our project that we need help with including:
 
