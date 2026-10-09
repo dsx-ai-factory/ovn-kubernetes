@@ -812,10 +812,13 @@ set_cluster_cidr_ip_families() {
 }
 
 coredns_patch() {
-  dns_server="8.8.8.8"
+  # Override public DNS where it is blocked. Use real upstreams: Docker's
+  # resolver alias relies on node OUTPUT rules that OVN pod traffic bypasses.
+  dns_server="${KIND_DNS_SERVERS:-8.8.8.8}"
+
   # No need for ipv6 nameserver for dual stack, it will ask for 
   # A and AAAA records
-  if [ "$IP_FAMILY" == "ipv6" ]; then
+  if [ "$IP_FAMILY" == "ipv6" ] && [ -z "${KIND_DNS_SERVERS:-}" ]; then
     dns_server="2001:4860:4860::8888"
   fi
 

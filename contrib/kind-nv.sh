@@ -15,6 +15,22 @@ for arg in "$@"; do
   esac
 done
 
+configure_kubelet_dns() {
+  local node
+
+  # musl discards long search lines. Give kubelet a separate resolver file
+  # without host search suffixes; it still adds the Kubernetes search domains.
+  for node in $(kind_get_nodes); do
+    "${OCI_BIN}" exec "${node}" bash -euc '
+      awk "/^(nameserver|options)[[:space:]]/" /etc/resolv.conf > /etc/kubelet-resolv.conf
+
+      sed -i "/^resolvConf:/d" /var/lib/kubelet/config.yaml
+      printf "resolvConf: /etc/kubelet-resolv.conf\n" >> /var/lib/kubelet/config.yaml
+      systemctl restart kubelet
+    '
+  done
+}
+
 make -C "${SCRIPT_DIR}/../dist/images" ubuntu-nv-image \
   OCI_BIN="${KIND_EXPERIMENTAL_PROVIDER:-docker}" \
   OVNKUBE_NV_IMAGE="${IMAGE}" \
@@ -22,8 +38,8 @@ make -C "${SCRIPT_DIR}/../dist/images" ubuntu-nv-image \
   OVN_SOURCE="${OVN_SOURCE:-uca}" \
   NV_UBUNTU_BASE_IMAGE="${NV_UBUNTU_BASE_IMAGE:-ubuntu:24.04}"
 
-# kind.sh relies on unset optional parameters. Source it so the Helm
-# arguments array remains available to the shared script.
+# kind.sh relies on unset optional parameters. Source it so the Helm arguments
+# and parsed cluster settings remain available for deployment and the DNS guard.
 set +u
 
 OVN_HELM_EXTRA_ARGS=(
@@ -37,3 +53,5 @@ OVN_HELM_EXTRA_ARGS=(
 # The chart always enables multi-network. Force its setup so the persistent IP
 # support enabled by kind.sh has the required IPAMClaim CRD.
 source "${SCRIPT_DIR}/kind.sh" "$@" --ovn-image "${IMAGE}" --multi-network-enable
+
+configure_kubelet_dns
