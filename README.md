@@ -169,6 +169,7 @@ Here are some links to help in your ovn-kubernetes journey:
 - [Architecture of ovn-kubernetes](docs/design/architecture.md)
 - [Deploying OVN-Kubernetes cluster using KIND](docs/installation/launching-ovn-kubernetes-on-kind.md)
 - [Deploying OVN-Kubernetes CNI using Helm](docs/installation/launching-ovn-kubernetes-with-helm.md)
+- [Building and installing OVN-Kubernetes](BUILD.md)
 - [Contributing to OVN-Kubernetes](CONTRIBUTING.md) for how to contribute
   upstream, and why this repository takes no contributions of its own
 - [Code of Conduct](CODE_OF_CONDUCT.md) for the standards expected of everyone
