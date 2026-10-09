@@ -23,14 +23,10 @@ helm-package:
 	fi
 	helm package --version "$(VERSION)" .
 
-EXTRA_ARGS ?= --debug
-
 lint:
-	mkdir -p output
-	helm lint $(EXTRA_ARGS) .
-	helm template $(EXTRA_ARGS) . > output/default-manifests.yaml
+	bash tests/scripts/lint.sh
 
-test-rules:
+test:
 	bash tests/scripts/test-rules.sh
 
 helm-docs:
