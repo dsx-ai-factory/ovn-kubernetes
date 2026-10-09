@@ -36,7 +36,7 @@ make -C "${SCRIPT_DIR}/../dist/images" ubuntu-nv-image \
   OVNKUBE_NV_IMAGE="${IMAGE}" \
   OVS_SOURCE="${OVS_SOURCE:-doca}" \
   OVN_SOURCE="${OVN_SOURCE:-uca}" \
-  NV_UBUNTU_BASE_IMAGE="${NV_UBUNTU_BASE_IMAGE:-ubuntu:24.04}"
+  NV_UBUNTU_BASE_IMAGE="${NV_UBUNTU_BASE_IMAGE:-ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55}"
 
 # kind.sh relies on unset optional parameters. Source it so the Helm arguments
 # and parsed cluster settings remain available for deployment and the DNS guard.

@@ -12,9 +12,9 @@
 # are built locally and included in the image (instead of the rpm)
 #
 ARG OVN_FROM=koji
-ARG BUILDER_IMAGE
+ARG BUILDER_IMAGE=quay.io/projectquay/golang:1.26@sha256:506a668eb4c763a964ffc4d4ad0125d45d75aac899392be7e5d39380f8452564
 ARG OVN_KUBERNETES_DIR=.
-ARG FEDORA_BASE_IMAGE=quay.io/fedora/fedora:43
+ARG FEDORA_BASE_IMAGE=quay.io/fedora/fedora:43@sha256:c45b30a84cf2fb151e3d8f8683707ce42356f674357f10951b4dd71014a502f3
 
 #############################################
 # Stage to build OVN Kubernetes from Source #

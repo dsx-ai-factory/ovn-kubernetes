@@ -31,12 +31,11 @@ else
 OVN_FROM := source
 OVN_GITSHA := $(shell git ls-remote "${OVN_REPO}" "${OVN_GITREF}" | sort -k2  -V  |tail -1 | awk '{ print $$1 }')
 endif
-GO_VERSION ?= 1.26
-GO_IMAGE = quay.io/projectquay/golang:${GO_VERSION}
+GO_IMAGE ?= quay.io/projectquay/golang:1.26@sha256:506a668eb4c763a964ffc4d4ad0125d45d75aac899392be7e5d39380f8452564
 OVN_KUBERNETES_DIR ?= .
 KUBECTL_MINOR ?= $(shell awk '/^[[:space:]]*k8s.io\/kubernetes v/ {gsub(/^v/, "", $$2); split($$2, version, "."); print version[1] "." version[2]; exit}' ../../go-controller/go.mod)
-UBUNTU_BASE_IMAGE ?= ubuntu:26.04
-FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:43
+UBUNTU_BASE_IMAGE ?= ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:43@sha256:c45b30a84cf2fb151e3d8f8683707ce42356f674357f10951b4dd71014a502f3
 
 ifeq ($(strip $(KUBECTL_MINOR)),)
 $(error failed to derive KUBECTL_MINOR from ../../go-controller/go.mod)
@@ -66,7 +65,7 @@ ifneq ($(UBUNTU_IMAGE),$(UBUNTU_IMAGE_LATEST))
 endif
 endif
 
-ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= artifactory.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb
+ubuntu-nv-image: NV_UBUNTU_BASE_IMAGE ?= artifactory.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb@sha256:35955f271108aead7d93eaff2e18bb1a1ae2364b871fd2d1acc752432214c0c9
 ubuntu-nv-image: OVS_SOURCE ?= artifactory
 ubuntu-nv-image: OVN_SOURCE ?= artifactory
 ubuntu-nv-image: CLOUD_ARCHIVE ?= gazpacho
