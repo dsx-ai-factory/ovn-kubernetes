@@ -88,7 +88,7 @@ proposal; go as deep as possible; use diagrams wherever it makes sense)
 * New proposed additions to ovn-kubernetes.io for end users
 to get started with this feature
 * when you open an OKEP PR; you must also edit
-https://github.com/ovn-kubernetes/ovn-kubernetes/blob/13c333afc21e89aec3cfcaa89260f72383497707/mkdocs.yml#L135
+https://github.com/dsx-ai-factory/ovn-kubernetes/blob/13c333afc21e89aec3cfcaa89260f72383497707/mkdocs.yml#L135
 to include the path to your new OKEP (i.e Feature Title: okeps/<filename.md>)
 
 ## Risks, Known Limitations and Mitigations

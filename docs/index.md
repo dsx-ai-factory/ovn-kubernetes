@@ -1,5 +1,3 @@
-![ovn-kubernetes-logo](images/ovn-inside-k8s-stacked.png)
-
 # OVN-Kubernetes: A Robust Kubernetes Networking Provider
 
 OVN-Kubernetes (Open Virtual Networking - Kubernetes) is an open-source project

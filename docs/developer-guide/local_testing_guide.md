@@ -26,9 +26,9 @@ $ PATH=/home/$USER/src/golang/go1-12-1/go/bin:$GOPATH/src/k8s.io/kubernetes/_out
 
 ### Download and Build Kubernetes Components (E2E Tests, ginkgo, kubectl):
 
-Determine which version of Kubernetes is currently used in CI (See
-[ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml))
-and set the environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to
+Check the Kubernetes version used by `make -C test install-kind` in
+[`test/scripts/install-kind.sh`](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/test/scripts/install-kind.sh) and set the
+environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to
 your go directory with `export GOPATH=(...)`.
 
 ```
@@ -59,7 +59,11 @@ Before setting up KIND and before running the actual tests, export essential env
 
 The environment variables and their values depend on the actual test scenario that you want to run.
 
-Look at the `e2e` action (search for `name: e2e`) in [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml). Prior to installing kind, set the following environment variables according to your needs:
+<!--
+TODO: Update reference and uncomment.
+Look at the `e2e` action (search for `name: e2e`) in [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml).
+-->
+Prior to installing kind, set the following environment variables according to your needs:
 ```
 export KIND_CLUSTER_NAME=ovn
 export KIND_INSTALL_INGRESS=[true|false]
@@ -224,7 +228,7 @@ $ popd
 ```
 
 The value of `WHAT=` will be used to modify the `-ginkgo.focus` parameter. Individual tests can be retrieved from this
-repository under [test/e2e](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/master/test/e2e). To see a list of individual
+repository under [test/e2e](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/test/e2e). To see a list of individual
 tests, one could run:
 ~~~
 grep -R ginkgo.It test/

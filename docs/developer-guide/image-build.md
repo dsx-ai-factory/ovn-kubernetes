@@ -4,7 +4,10 @@ This file covers the container images available for OVN-Kubernetes and how to bu
 
 ## Images / Packages
 
+<!--
+TODO: Update reference and uncomment.
 There are Ubuntu and Fedora-based images available in [GitHub's Registry](https://github.com/orgs/ovn-kubernetes/packages?repo_name=ovn-kubernetes). They are automatically generated upon merges via [a workflow](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/docker.yml).
+-->
 Prior to release-1.0, they were called ovn-kube-f (for the Fedora-based image) and ovnkube-u (for the Ubuntu-based image). From release 1.0 and beyond, these have been renamed to ovn-kube-fedora and ovn-kube-ubuntu, respectively.
 
 Therefore, use the following images and tags to obtain these images:
@@ -17,7 +20,7 @@ Therefore, use the following images and tags to obtain these images:
 
 ## Building Images
 
-To build images locally, use the following [Makefile](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/dist/images/Makefile) and their respective Dockerfiles from the [dist/images](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/master/dist/images) folder in this repository.
+To build images locally, use the following [Makefile](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/dist/images/Makefile) and their respective Dockerfiles from the [dist/images](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/dist/images) folder in this repository.
 
 ```bash
 $ cd dist/images

@@ -120,8 +120,8 @@ end
 #### Layer2 User Defined Network API changes
 
 Proposed API change adds `infrastructureSubnets` `reservedSubnets` and `defaultGatewayIPs` fields to the `Layer2Config` which is a part of both
-the [UDN](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/a3d0a2b238bef9b1399b3342228d75504afed18b/go-controller/pkg/crd/userdefinednetwork/v1/udn.go#L47)
-and [cluster UDN](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/a3d0a2b238bef9b1399b3342228d75504afed18b/go-controller/pkg/crd/userdefinednetwork/v1/cudn.go#L63) specs:
+the [UDN](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/a3d0a2b238bef9b1399b3342228d75504afed18b/go-controller/pkg/crd/userdefinednetwork/v1/udn.go#L47)
+and [cluster UDN](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/a3d0a2b238bef9b1399b3342228d75504afed18b/go-controller/pkg/crd/userdefinednetwork/v1/cudn.go#L63) specs:
 
 ```diff
 // +kubebuilder:validation:XValidation:rule="has(self.ipam) && has(self.ipam.mode) && self.ipam.mode != 'Enabled' || has(self.subnets)", message="Subnets is required with ipam.mode is Enabled or unset"
@@ -371,7 +371,7 @@ configurable per pod.
 
 ### Address allocation
 
-OVN-Kubernetes currently [generates](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/3ef29b9a32b04b7917a0afd6b0e9651d17242ed7/go-controller/pkg/util/net.go#L100-L113)
+OVN-Kubernetes currently [generates](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/3ef29b9a32b04b7917a0afd6b0e9651d17242ed7/go-controller/pkg/util/net.go#L100-L113)
 the overlay MAC addresses from the IPs:
 
 * IPv4: It takes the four octets of the address (e.g `AA.BB.CC.DD`) and uses them to

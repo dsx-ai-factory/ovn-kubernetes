@@ -7,7 +7,7 @@ in one or more namespaces has a consistent source IP address for services outsid
 East-West traffic (including pod -> node IP) is excluded from Egress IP.  
 
 For more info, consider looking at the following links:
-- [Egress IP CRD](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/crd/egressip/v1/types.go#L47)
+- [Egress IP CRD](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/crd/egressip/v1/types.go#L47)
 - [Assigning an egress IP address](https://docs.okd.io/latest/networking/ovn_kubernetes_network_provider/assigning-egress-ips-ovn.html)
 - [Managing Egress IP in OpenShift 4 with OVN-Kubernetes](https://rcarrata.com/openshift/egress-ip-ovn/)
 
@@ -213,7 +213,7 @@ following flow on breth0 that will SNAT the traffic to local node IP:
 priority=105,pkt_mark=0x3f0,ip,in_port=2 actions=ct(commit,zone=64000,nat(src=<NodeIP>),exec(load:0x1->NXM_NX_CT_MARK[])),output:1
 ``` 
 This is required to make `pod -> node IP` traffic behave the same regardless of where the pod is hosted.  
-Implementation details: https://github.com/ovn-kubernetes/ovn-kubernetes/commit/e2c981a42a28e6213d9daf3b4489c18dc2b84b19.
+Implementation details: https://github.com/dsx-ai-factory/ovn-kubernetes/commit/e2c981a42a28e6213d9daf3b4489c18dc2b84b19.
 
 For local gateway mode, in which an Egress IP is assigned to a non-primary interface, an IP rule is added to send packets
 to the main routing table at a priority higher than that of EgressIP IP rules, which are set to priority `6000`:
@@ -299,14 +299,14 @@ usable. EgressIPs assigned to a node that is no longer reachable will get revali
 
 Egress nodes normally have multiple IP addresses. For sake of Egress IP reachability, [the management](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2495) (aka internal SDN) addresses of the node are the ones used. In deployments of ovn-kubernetes this is known to be the `ovn-k8s-mp0` interface of a node.
 
-Even though the periodic checking of egress nodes is hard coded to trigger [every 5 seconds](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/egressip.go#L2206), there are attributes that the user can set:
+Even though the periodic checking of egress nodes is hard coded to trigger [every 5 seconds](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/egressip.go#L2206), there are attributes that the user can set:
 
 - egressIPTotalTimeout
 - gRPC vs. DISCARD port
 
 ### egressIPTotalTimeout
 
-This attribute specifies the maximum amount of time, in seconds, that the egressIP operator will wait until it declares the node unreachable. The default value is [1 second](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/config/config.go#L866).
+This attribute specifies the maximum amount of time, in seconds, that the egressIP operator will wait until it declares the node unreachable. The default value is [1 second](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/config/config.go#L866).
 
 This value can be set in the following ways:
 - ovnkube binary flag: `--egressip-reachability-total-timeout=<TIMEOUT>`
@@ -337,5 +337,5 @@ egressip-node-healthcheck-port=9107
 #### Additional details on the implementation of the gRPC probing:
 
 - If configured, the session uses the certificates from the `[egressip-healthcheck-tls]` configuration section. The historical `--nb-client-*` flags and `[ovnnorth]` configuration keys remain accepted for compatibility. An insecure gRPC session is used when no certificates are specified.
-- The [message used for probing](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/health.proto#L6) is the [standard service health](https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto) specified in gRPC.
-- [Special care was taken into consideration](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/egressip_healthcheck.go#L193-L195) to handle cases when the gRPC session bounced for normal reasons. EgressIP implementation will not declare a node unreachable under these circumstances.
+- The [message used for probing](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/health.proto#L6) is the [standard service health](https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto) specified in gRPC.
+- [Special care was taken into consideration](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/egressip_healthcheck.go#L193-L195) to handle cases when the gRPC session bounced for normal reasons. EgressIP implementation will not declare a node unreachable under these circumstances.

@@ -25,8 +25,8 @@ OVN-Kubernetes exposes External IPs and `service.Status.LoadBalancer.Ingress` VI
 In fact, OVN-Kubernetes implements explicit bypass rules for ARP requests to these VIP types on the external bridge (`br-ex` or `breth0` in most deployments). Any ARP request to such an IP that comes in from the physical port will bypass the OVN dataplane and it will be sent to host's networking stack on purpose. If an ARP reponse to a VIP is expeced, make sure the VIP is added to the host's networking stack.
 
 For implementation details, see: 
-* [https://github.com/ovn-kubernetes/ovn-kubernetes/blob/00925a6c64f57f03b2918eb48ff589c3417ddaa9/go-controller/pkg/node/gateway_shared_intf.go#L336](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/00925a6c64f57f03b2918eb48ff589c3417ddaa9/go-controller/pkg/node/gateway_shared_intf.go#L336)
-* [https://github.com/ovn-kubernetes/ovn-kubernetes/blob/00925a6c64f57f03b2918eb48ff589c3417ddaa9/go-controller/pkg/node/gateway_shared_intf.go#L344](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/00925a6c64f57f03b2918eb48ff589c3417ddaa9/go-controller/pkg/node/gateway_shared_intf.go#L344)
+* [https://github.com/dsx-ai-factory/ovn-kubernetes/blob/00925a6c64f57f03b2918eb48ff589c3417ddaa9/go-controller/pkg/node/gateway_shared_intf.go#L336](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/00925a6c64f57f03b2918eb48ff589c3417ddaa9/go-controller/pkg/node/gateway_shared_intf.go#L336)
+* [https://github.com/dsx-ai-factory/ovn-kubernetes/blob/00925a6c64f57f03b2918eb48ff589c3417ddaa9/go-controller/pkg/node/gateway_shared_intf.go#L344](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/00925a6c64f57f03b2918eb48ff589c3417ddaa9/go-controller/pkg/node/gateway_shared_intf.go#L344)
 * [https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2540](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2540)
 * [https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2394](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2394)
 

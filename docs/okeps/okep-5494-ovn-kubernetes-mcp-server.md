@@ -2,7 +2,7 @@
 
 # Problem Statement
 
-Diagnosing an issue in [OVN-Kubernetes](https://ovn-kubernetes.io/) network
+Diagnosing an issue in [OVN-Kubernetes](../index.md) network
 plugin is complex because it has many layers (Kubernetes, OVN-Kubernetes, OVN,
 OpenvSwitch, Kernel - especially Netfilter elements). Usually the person
 troubleshooting an issue has to approach it in a layered fashion and has
@@ -682,7 +682,7 @@ Some examples include:
 ## Documentation Details
 
 OKEP for the MCP Server will be on
-[https://ovn-kubernetes.io/](https://ovn-kubernetes.io/) . All end-user
+[https://ovn-kubernetes.io/](../index.md) . All end-user
 documentation will be on the new repo's docs folder.
 
 * **Getting Started Guide**: MCP client setup and initial configuration

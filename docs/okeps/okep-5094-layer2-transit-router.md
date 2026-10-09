@@ -515,7 +515,7 @@ will be unused, and we could start allocating transit router keys from `2^24-2^1
 as it only relies on the current northd behaviour.
 3. Another option (centralized) is to add ID allocation from the transit tunnel key range. There is no way to migrate existing transit 
 switches to the new tunnel key, because all nodes need to do that at the same time, and rolling upgrade won't help here.
-Since current limit for networkIDs is `4096` https://github.com/ovn-kubernetes/ovn-kubernetes/blob/8f6e3ee9883bb6eb2230cea5c1c138d6098c95b0/go-controller/pkg/networkmanager/api.go#L17
+Since current limit for networkIDs is `4096` https://github.com/dsx-ai-factory/ovn-kubernetes/blob/8f6e3ee9883bb6eb2230cea5c1c138d6098c95b0/go-controller/pkg/networkmanager/api.go#L17
 we can consider [`first-interconnect-key`, `first-interconnect-key`+4095] to be reserved for the legacy transit switch keys,
 and use a new centralized transit keys allocation in the range [`first-interconnect-key`+4095, 2^24-1]. This option
 requires up to 2 new annotations on NADs, and makes the number of supported UDNs dependent on the number of UDN interconnects.
@@ -725,7 +725,7 @@ for all networks until the next upgrade.
 2. Upgrade all nodes, but leave old topology for networks with overlapping subnet. Report an event/warning for the user to fix the issue.
 When the network is upgraded/re-created with non-overlapping subnet, it will get the new topology. Other networks will be
 properly upgraded.
-3. Add a new config field for Layer2 network similar to [JoinSubnets](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/ff3001ba43bf724e477ab45167dc55d929042774/go-controller/pkg/crd/userdefinednetwork/v1/shared.go#L178)
+3. Add a new config field for Layer2 network similar to [JoinSubnets](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/ff3001ba43bf724e477ab45167dc55d929042774/go-controller/pkg/crd/userdefinednetwork/v1/shared.go#L178)
 to allow users to specify a custom transit subnet for the network, in case their Subnet overlaps with the default transit subnet.
 We don't allow UDN spec updates, so the only way to use this option (without introducing UDN spec updates) is to 
 re-create a UDN with the same fields + the new transit subnet and then migrate all the workloads to it.

@@ -9,7 +9,7 @@ All OVN-Kubernetes docs are kept under the `docs/` folder in the main path.
 There are specific folders such as `features` and `developer-guide` where
 you can add your commit against. These simple `.md` files are referred from
 the navigation tile in `mkdocs.yml` file which is what is used to
-build our [website](https://ovn-kubernetes.io/).
+build our [website](../index.md).
 
 As a developer and contributor to this project; it is recommended that you
 include a docs commit in your PR whenever possible and relevant. Some examples
@@ -26,7 +26,7 @@ so that they remain relevant. Open a commit adding it to our `docs/design` folde
 
 * **Feature Docs**: If your enhancement proposal has merged; next step is to
 implement that feature. As part of the main implementation PR we mandate adding a
-feature documentation commit. See [here](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/features/template.md)
+feature documentation commit. See the [feature documentation template](../features/template.md)
 for how a feature documentation should be done. Open a commit adding it to our
 `docs/features` folder.
 
@@ -40,7 +40,7 @@ feel free to write it. If you are unsure where this should be placed; reach out 
 
 * **Blog Posts**: Are you an end-user of OVN-Kubernetes? Is there something you wish to share with
 the community about your awesome use cases and how you used our CNI to solve your problems? We
-welcome blog post contributions from all! See [here](https://ovn-kubernetes.io/blog/) for details.
+welcome blog post contributions from all! See [here](../blog/index.md) for details.
 Open a commit adding your post to `docs/blog/posts/`. Each post must include
 YAML front matter with a `date` and `authors` list, for example:
 ```yaml
@@ -75,9 +75,11 @@ search capabilities.
 The published site is **versioned** with [mike](https://github.com/jimporter/mike).
 Each `release-*` branch and `master` appears in a version dropdown on the docs site.
 Deploy logic lives in
-[`hack/build-docs.sh`](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/hack/build-docs.sh)
+[`hack/build-docs.sh`](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/hack/build-docs.sh)
 and is invoked via `make -C docs build-docs` (see
-[`docs/Makefile`](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/Makefile)).
+[`docs/Makefile`](../Makefile)).
+<!--
+TODO: Update reference and uncomment.
 The
 [Publish Versioned Docs](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/docs-versioning.yml)
 workflow runs that target with `PUSH=1` and updates the `gh-pages` branch.
@@ -86,6 +88,7 @@ The [docs.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.git
 workflow keeps a `test-deploy` job so pull requests still validate that docs build
 cleanly. It does not publish the live site; publishing is owned by the versioning
 workflow so the two do not overwrite each other.
+-->
 
 ### Versioned docs: how publishing works
 
@@ -238,11 +241,14 @@ public site does not update — fix the Source setting above.
 
 ## How to test your documentation changes?
 
+<!--
+TODO: Update reference and uncomment.
 ### Option 1) Build and view docs with a PR
 
 Pushing docs changes to the ovn-kubernetes/ovn-kubernetes project as a pull request will
 run the job name "[Test Docs Build](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/docs.yml)" which has a step to save the
 docs artifacts. You can download those as a .zip file, extract and view them locally.
+-->
 
 ### Option 2) Build and serve a single version locally
 

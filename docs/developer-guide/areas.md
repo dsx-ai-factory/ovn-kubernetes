@@ -2,7 +2,7 @@
 
 ovn-kubernetes organises its codebase into **areas** — focused domains that are
 owned by designated **Area Maintainers**. Each area has a clear scope of files
-defined in [`CODEOWNERS`](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/CODEOWNERS)
+defined in [`CODEOWNERS`](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/CODEOWNERS)
 and a set of maintainers and reviewers responsible for its health.
 
 For the full governance details — roles, responsibilities, appointment and
