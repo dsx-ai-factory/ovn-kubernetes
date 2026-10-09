@@ -1230,9 +1230,11 @@ func TestUDNUplinkStateControllerRetriesUntilSuccess(t *testing.T) {
 	originalNetlinkOps := util.GetNetLinkOps()
 	util.SetNetLinkOpMockInst(netlinkOps)
 	t.Cleanup(func() { util.SetNetLinkOpMockInst(originalNetlinkOps) })
+	// Give the VF a master so ensureUplinkVFUp leaves it untouched. This test
+	// exercises retries caused by an invalid UplinkState MAC, not VF recovery.
 	netlinkOps.On("LinkByName", "eth0").Return(
-		&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth0", Index: 1}}, nil,
-	).Once()
+		&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "eth0", Index: 1, MasterIndex: 42}}, nil,
+	)
 
 	udnGateway, err := NewUserDefinedNetworkGateway(
 		network,

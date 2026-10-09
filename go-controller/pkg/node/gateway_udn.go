@@ -643,13 +643,6 @@ func (udng *UserDefinedNetworkGateway) addNetworkWithResolvedUplink(
 	if (config.IsModeDPU() || config.IsModeFull()) && udng.openflowManager == nil {
 		return fmt.Errorf("openflow manager has not been provided for network: %s", udng.NetInfo.GetNetworkName())
 	}
-	// Temporary workaround: the teardown of a previous CUDN VRF leaves the
-	// Uplink VF down, and the host only reprograms its addresses and routes
-	// once it is up again. Both Uplink gateway resolution and VRF creation
-	// below depend on that configuration being back.
-	if err := udng.ensureUplinkVFUp(); err != nil {
-		return err
-	}
 	udng.updateAdvertisementStatus()
 
 	nodeSubnets, err := udng.getLocalSubnets()
@@ -857,8 +850,14 @@ func (udng *UserDefinedNetworkGateway) replaceUplinkGateway(
 	stateUID k8stypes.UID,
 	fingerprint uplinkGatewayFingerprint,
 ) error {
+	wasConfigured := udng.uplinkGatewayCleanupRequired
 	if err := udng.unconfigureUplinkGateway(); err != nil {
 		return err
+	}
+	if wasConfigured && config.IsModeDPUHost() && uplinkVFWorkaroundEnabled() {
+		// Teardown may have taken the VF down. Do not rebuild using host data
+		// resolved before teardown; re-enter VF recovery and discovery first.
+		return fmt.Errorf("waiting for Uplink %s host configuration after gateway teardown", udng.Uplink())
 	}
 	udng.uplinkGatewayCleanupRequired = true
 	if err := udng.addNetworkWithResolvedUplink(resolved); err != nil {
@@ -892,6 +891,12 @@ func (udng *UserDefinedNetworkGateway) reconcileUplinkConfiguration() (
 		)
 	}
 	observedFingerprint := uplinkGatewayFingerprintFromState(state)
+	// Host discovery can publish the interface name before it has MAC/IP data.
+	// Recover the VF first so discovery can complete on a subsequent retry.
+	if err := udng.ensureUplinkVFUp(state); err != nil {
+		return state.UID, observedFingerprint, newUplinkGatewayError(
+			uplinkv1alpha1.UplinkStateReasonGatewayProgrammingFailed, err)
+	}
 	resolved, err := resolvedUplinkGatewayFromState(
 		state, udng.Uplink(), udng.node.Name,
 		config.IsModeDPU() || config.IsModeFull())
