@@ -66,6 +66,9 @@ spec:
         {{- end }}
       {{- end }}
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

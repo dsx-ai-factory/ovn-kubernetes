@@ -55,6 +55,9 @@ spec:
         nais.nvidia.com/managerRestartedFor: {{ .Values.forceRestartManagerReason | quote }}
       {{- end }}
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
