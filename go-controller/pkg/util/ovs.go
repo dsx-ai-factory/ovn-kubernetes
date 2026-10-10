@@ -266,7 +266,7 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		if err != nil {
 			return err
 		}
-		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		if config.OvnKubeNode.Mode != types.NodeModeDPU && !config.OvnKubeNode.DisableFirewalld {
 			runner.firewallPath, err = exec.LookPath(firewallCommand)
 			if err != nil {
 				return err
