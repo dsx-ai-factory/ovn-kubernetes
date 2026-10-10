@@ -63,13 +63,6 @@ import (
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
-// Special reserved values for k8s.ovn.org/miss-rl-config.
-// Doesn't seem there is any valid reason to configure these values explicitly.
-const (
-	ClampdownDoSRate  uint = 1
-	ClampdownDoSBurst uint = 1
-)
-
 type CommonNodeNetworkControllerInfo struct {
 	client                 clientset.Interface
 	Kube                   kube.Interface
@@ -78,7 +71,6 @@ type CommonNodeNetworkControllerInfo struct {
 	name                   string // Kubernetes node name managed by this controller.
 	apbExternalRouteClient adminpolicybasedrouteclientset.Interface
 	dpuName                string
-	hostType               string
 	pfMACs                 []string
 	// route manager that creates and manages routes
 	routeManager *routemanager.Controller
@@ -105,7 +97,7 @@ type BaseNodeNetworkController struct {
 
 func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface,
 	wf factory.NodeWatchFactory, eventRecorder record.EventRecorder, name string, routeManager *routemanager.Controller,
-	dpuName, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
+	dpuName string, pfMACs []string) *CommonNodeNetworkControllerInfo {
 
 	return &CommonNodeNetworkControllerInfo{
 		client:                 kubeClient,
@@ -116,7 +108,6 @@ func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kub
 		recorder:               eventRecorder,
 		routeManager:           routeManager,
 		dpuName:                dpuName,
-		hostType:               hostType,
 		pfMACs:                 pfMACs,
 	}
 }
@@ -124,8 +115,8 @@ func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kub
 // NewCommonNodeNetworkControllerInfo creates and returns the base node network controller info
 func NewCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface, wf factory.NodeWatchFactory,
 	eventRecorder record.EventRecorder, name string, routeManager *routemanager.Controller,
-	dpuName, hostType string, pfMACs []string) *CommonNodeNetworkControllerInfo {
-	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name, routeManager, dpuName, hostType, pfMACs)
+	dpuName string, pfMACs []string) *CommonNodeNetworkControllerInfo {
+	return newCommonNodeNetworkControllerInfo(kubeClient, &kube.Kube{KClient: kubeClient}, apbExternalRouteClient, wf, eventRecorder, name, routeManager, dpuName, pfMACs)
 }
 
 // DefaultNodeNetworkController is the object holder for utilities meant for node management of default network

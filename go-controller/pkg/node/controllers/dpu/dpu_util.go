@@ -34,6 +34,14 @@ type dpuConnectionState struct {
 	// revalidate is set on a port rebuilt from OVS that the pod does not
 	// already report ready, so it exists but may not be fully configured.
 	revalidate bool
+
+	// miss-rate limiting / DoS state for this NAD.
+	// missRateDoSCheck says the DoS checker watches this representor's miss-drop
+	// counter; missRateLimitDropInitial is the drop count last recorded for it;
+	// connClampedDown says the representor is currently clamped to the minimum rate.
+	missRateDoSCheck         bool
+	missRateLimitDropInitial uint64
+	connClampedDown          bool
 }
 
 // podDPUState holds the per-NAD state of a single pod, along with the UID of the
@@ -219,7 +227,7 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 	}
 
 	if len(validPortsToDelete) > 0 {
-		setRepPortInterfacesDown(validPortsToDelete)
+		c.setRepPortInterfacesDown(validPortsToDelete)
 		if err := libovsdbops.DeleteMultiplePortsWithInterfaces(c.ovsClient, "br-int", validPortsToDelete...); err != nil {
 			return fmt.Errorf("failed to delete stale representor ports %v for pod %s: %w", validPortsToDelete, podKey, err)
 		}
@@ -267,8 +275,8 @@ func (c *Controller) ownsPfMAC(pfMAC string) bool {
 }
 
 // reconcileDPUConnStatus makes the pod's connection status annotation match the
-// NADs tracked for it: every tracked NAD whose port is confirmed is reported
-// ready, and every other entry is removed, except the NADs in foreign, which a
+// NADs tracked for it: confirmed ports are reported ready or clamped down,
+// and every other entry is removed, except the NADs in foreign, which a
 // different DPU on the same node serves and whose status is not ours to touch.
 func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, tracked map[string]*dpuConnectionState, foreign sets.Set[string]) error {
 	currentStatus, err := util.UnmarshalPodDPUConnStatusAllNetworks(pod.Annotations)
@@ -284,8 +292,12 @@ func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, trac
 			// addRepPort reports it ready once the configuration completes.
 			continue
 		}
-		if status, ok := currentStatus[nadKey]; !ok || status.Status != util.DPUConnectionStatusReady {
-			statusMap[nadKey] = &util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady}
+		desiredStatus := util.DPUConnectionStatusReady
+		if state.connClampedDown {
+			desiredStatus = util.DPUConnectionStatusClampedDown
+		}
+		if status, ok := currentStatus[nadKey]; !ok || status.Status != desiredStatus {
+			statusMap[nadKey] = &util.DPUConnectionStatus{Status: desiredStatus}
 		}
 	}
 	for nadKey := range currentStatus {
@@ -349,7 +361,7 @@ func (c *Controller) handleDeleteDPUPod(podKey string, pod *corev1.Pod, foreign 
 	}
 
 	if len(portsToDelete) > 0 {
-		setRepPortInterfacesDown(portsToDelete)
+		c.setRepPortInterfacesDown(portsToDelete)
 		if err := libovsdbops.DeleteMultiplePortsWithInterfaces(c.ovsClient, "br-int", portsToDelete...); err != nil {
 			return fmt.Errorf("failed to delete representor ports %v for pod %s: %w", portsToDelete, podKey, err)
 		}
@@ -400,9 +412,19 @@ func (c *Controller) addRepPort(pod *corev1.Pod, state *dpuConnectionState, ifIn
 			ifInfo.MAC.String(), state.vfRepName, podDesc, err)
 	}
 
+	// Apply the per-NAD miss-rate limit, if configured, and derive the status to
+	// report: Ready, or ClampedDown when the pod is already clamped for this NAD.
+	connStatus, err := c.applyRateLimit(pod, state, nadKey)
+	if err != nil {
+		if !isRevalidation {
+			_ = c.delRepPort(pod, state, nadKey)
+		}
+		return fmt.Errorf("failed to apply miss-rate limiting for %s: %w", podDesc, err)
+	}
+
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
-	statusMap := map[string]*util.DPUConnectionStatus{nadKey: {Status: util.DPUConnectionStatusReady, Reason: ""}}
+	statusMap := map[string]*util.DPUConnectionStatus{nadKey: connStatus}
 	err = util.UpdatePodDPUConnStatusWithRetry(c.podLister, c.kube, pod, statusMap)
 	if err != nil && !util.IsAnnotationAlreadySetError(err) {
 		if !isRevalidation {
@@ -425,7 +447,7 @@ func (c *Controller) delRepPort(pod *corev1.Pod, state *dpuConnectionState, nadK
 	if !valid {
 		return nil
 	}
-	setRepPortInterfacesDown([]string{state.vfRepName})
+	c.setRepPortInterfacesDown([]string{state.vfRepName})
 	if err = libovsdbops.DeleteMultiplePortsWithInterfaces(c.ovsClient, "br-int", state.vfRepName); err != nil {
 		return fmt.Errorf("failed to delete representor port %s from br-int for %s: %w", state.vfRepName, podDesc, err)
 	}
@@ -461,8 +483,17 @@ func validateRepPort(vfRepName, sandboxId, nadKey string) (bool, error) {
 
 // setRepPortInterfacesDown sets the link down for each representor interface.
 // Failures are logged as warnings but do not block deletion.
-func setRepPortInterfacesDown(interfaces []string) {
+func (c *Controller) setRepPortInterfacesDown(interfaces []string) {
+	// Scrub the VF miss-rate limit only once the feature has been active, so a VF
+	// that carried a limit or a clamp does not pass it to its next user, while a
+	// controller that never saw a limit leaves the VF untouched (as without the
+	// feature).
+	scrubRate := c.rateLimitEver()
 	for _, iface := range interfaces {
+		if scrubRate {
+			// Best effort, independent of the link ops below.
+			resetRepPortRateLimit(iface)
+		}
 		link, err := util.GetNetLinkOps().LinkByName(iface)
 		if err != nil {
 			klog.Warningf("Failed to get link device for representor port %s: %v", iface, err)

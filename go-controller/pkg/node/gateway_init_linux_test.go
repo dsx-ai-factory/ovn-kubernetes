@@ -887,7 +887,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		ipnet.IP = ip
 		routeManager := routemanager.NewController()
 		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
-			"", "", []string{})
+			"", []string{})
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 		// must run route manager manually which is usually started with nc.Start()
 		wg.Add(1)

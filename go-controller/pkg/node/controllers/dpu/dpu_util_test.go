@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/stretchr/testify/mock"
 
 	corev1 "k8s.io/api/core/v1"
@@ -21,12 +22,15 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	factorymocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	nadinformermocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	nadlistermocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	linkMock "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	v1mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -454,6 +458,70 @@ var _ = Describe("Node DPU tests", func() {
 			expectOVSPortAndInterfaceAbsent(ovsClient, vfRep)
 		})
 	})
+
+	DescribeTable("Loads existing NAD limits while recovering a ready representor", func(malformedNAD, failRateRestore bool) {
+		const nadKey = "ns1/nad1"
+		ctrl.nodeName = "dpu-host"
+		cleanup := setupOVSHarnessWithInterfaces(ctrl, []ovsInterfaceData{{
+			name: "pf0vf10", sandbox: "sb1", vfNetdevName: "pf0vf10",
+			ifaceID:    util.GetUserDefinedNetworkPrefix(nadKey) + "foo-ns_a-pod",
+			ifaceIDVer: "uid-1", nadKey: nadKey,
+		}})
+		defer cleanup()
+
+		nad := &nettypes.NetworkAttachmentDefinition{ObjectMeta: metav1.ObjectMeta{
+			Name: "nad1", Namespace: "ns1", Annotations: map[string]string{
+				util.MissRateLimitConfigAnnot: `{"maxNewConnPPS":100,"maxNewConnBurst":20}`,
+			},
+		}}
+		nads := []*nettypes.NetworkAttachmentDefinition{nad}
+		if malformedNAD {
+			invalid := nad.DeepCopy()
+			invalid.Name = "invalid"
+			invalid.Annotations[util.MissRateLimitConfigAnnot] = "{"
+			nads = append([]*nettypes.NetworkAttachmentDefinition{invalid}, nads...)
+		}
+		nadLister := &nadlistermocks.NetworkAttachmentDefinitionLister{}
+		nadLister.On("List", mock.Anything).Return(nads, nil)
+		nadInformer := &nadinformermocks.NetworkAttachmentDefinitionInformer{}
+		nadInformer.On("Lister").Return(nadLister)
+		wf := &factorymocks.NodeWatchFactory{}
+		wf.On("NADInformer").Return(nadInformer)
+		ctrl.wf = wf
+
+		existingPod := pod.DeepCopy()
+		existingPod.UID = "uid-1"
+		existingPod.Spec.NodeName = ctrl.nodeName
+		var err error
+		existingPod.Annotations, err = util.MarshalPodDPUConnStatus(existingPod.Annotations,
+			map[string]*util.DPUConnectionStatus{nadKey: {Status: util.DPUConnectionStatusReady}})
+		Expect(err).NotTo(HaveOccurred())
+		podLister.On("List", mock.Anything).Return([]*corev1.Pod{existingPod}, nil)
+		sriovnetOpsMock.On("GetRepresentorVFMissPktDrops", "pf0vf10").Return(uint64(7), nil)
+		var rateErr error
+		if failRateRestore {
+			rateErr = fmt.Errorf("temporary SR-IOV failure")
+		}
+		sriovnetOpsMock.On("SetRepresentorVFMissPktRate", "pf0vf10", uint(100), uint(20)).Return(rateErr)
+
+		Expect(ctrl.initialSync()).To(Succeed())
+		Expect(ctrl.totalMaxNewConnPPS).To(Equal(uint(100)))
+		Expect(ctrl.getNADConfig("ns1/invalid")).To(BeNil())
+		Expect(ctrl.rateLimitingActive()).To(BeTrue())
+		Expect(ctrl.rateLimitEver()).To(BeTrue())
+		Expect(ctrl.dosStopCh).To(BeNil())
+		ps, ok := ctrl.podStates.Load("foo-ns/a-pod")
+		Expect(ok).To(BeTrue())
+		Expect(ps.nadStates[nadKey].revalidate).To(Equal(failRateRestore))
+		Expect(ps.nadStates[nadKey].missRateDoSCheck).To(Equal(!failRateRestore))
+		expectOVSPortAndInterfacePresent(ctrl.ovsClient, "pf0vf10")
+		Expect(ps.nadStates[nadKey].missRateLimitDropInitial).To(Equal(uint64(7)))
+		sriovnetOpsMock.AssertCalled(GinkgoT(), "SetRepresentorVFMissPktRate", "pf0vf10", uint(100), uint(20))
+	},
+		Entry("with a valid NAD", false, false),
+		Entry("skipping a malformed NAD", true, false),
+		Entry("retrying a failed rate-limit restore", false, true),
+	)
 
 	Context("bootstrapDPUPodMapFromOVS", func() {
 		It("No-ops when no representor interfaces exist", func() {
@@ -1446,6 +1514,28 @@ var _ = Describe("Node DPU tests", func() {
 			}
 			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+		})
+
+		It("Preserves the status of an already-clamped NAD", func() {
+			var err error
+			livePod.Annotations, err = util.MarshalPodDPUConnStatus(livePod.Annotations,
+				map[string]*util.DPUConnectionStatus{"ns1/nad1": {Status: util.DPUConnectionStatusClampedDown}})
+			Expect(err).NotTo(HaveOccurred())
+			tracked := map[string]*dpuConnectionState{"ns1/nad1": {connClampedDown: true}}
+
+			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+		})
+
+		It("Repairs Ready status when the representor is clamped", func() {
+			withStatus(livePod, "ns1/nad1")
+			patched := expectStatusPatch(livePod, map[string]*util.DPUConnectionStatus{
+				"ns1/nad1": {Status: util.DPUConnectionStatusClampedDown},
+			})
+			tracked := map[string]*dpuConnectionState{"ns1/nad1": {connClampedDown: true}}
+
+			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
+			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
 		})
 
 		It("Clears the status of a NAD that is no longer tracked", func() {

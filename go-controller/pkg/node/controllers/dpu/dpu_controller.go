@@ -5,6 +5,7 @@ package dpu
 
 import (
 	"fmt"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -47,6 +48,11 @@ type Controller struct {
 	// whose PF is owned by another DPU on a multi-DPU node.
 	pfMACs []string
 
+	// hostType is the representor-metering host class of this node; it selects
+	// which per-NAD miss-rate limit applies here.
+	hostType string
+
+	wf            factory.NodeWatchFactory
 	podController controller.Controller
 	podLister     corelisters.PodLister
 	clientSet     cni.PodInfoGetter
@@ -61,6 +67,21 @@ type Controller struct {
 	// nadPods holds the pods that reference each NAD, so that a NAD event can
 	// requeue them without listing every pod in the cluster.
 	nadPods nadPodIndex
+
+	// Miss-rate limiting / DoS checker state, guarded by dosMu. totalMaxNewConnPPS
+	// is the running sum of every NAD's configured rate; while it is zero the
+	// feature is dormant and the representor lifecycle behaves exactly as it would
+	// without miss-rate limiting.
+	dosMu              sync.Mutex
+	nadConfigs         map[string]*util.NADConfig
+	totalMaxNewConnPPS uint
+	// rateLimitEverActive latches true once totalMaxNewConnPPS first goes above
+	// zero. Teardown scrubs a VF's miss-rate limit only while this is set, so a
+	// VF that carried a limit or a clamp does not pass it to its next user, while
+	// a controller that never saw a limit leaves every VF untouched.
+	rateLimitEverActive bool
+	dosStopCh           chan struct{}
+	dosWg               sync.WaitGroup
 }
 
 func NewController(
@@ -70,6 +91,7 @@ func NewController(
 	networkMgr networkmanager.Interface,
 	ovsClient libovsdbclient.Client,
 	nodeName string,
+	hostType string,
 	pfMACs []string,
 ) *Controller {
 	podLister := corelisters.NewPodLister(wf.PodInformer().GetIndexer())
@@ -78,11 +100,14 @@ func NewController(
 		kube:       kube,
 		networkMgr: networkMgr,
 		ovsClient:  ovsClient,
+		wf:         wf,
 		podLister:  podLister,
 		clientSet:  cni.NewClientSet(kclient, podLister),
 		nodeName:   nodeName,
+		hostType:   hostType,
 		pfMACs:     pfMACs,
 		podStates:  syncmap.NewSyncMap[*podDPUState](),
+		nadConfigs: map[string]*util.NADConfig{},
 	}
 
 	c.podController = controller.NewController("dpu-pod-controller",
@@ -113,16 +138,23 @@ func (c *Controller) Start() error {
 	klog.Info("Starting DPU pod controller")
 
 	c.nadReconcilerID = c.networkMgr.RegisterNADReconciler(c.nadReconciler)
-	return controller.StartWithInitialSync(c.bootstrapDPUPodMapFromOVS, c.podController, c.nadReconciler)
+	if err := controller.StartWithInitialSync(c.initialSync, c.podController, c.nadReconciler); err != nil {
+		return err
+	}
+	c.enableDoSChecker()
+	return nil
 }
 
 func (c *Controller) Stop() {
 	klog.Info("Stopping DPU pod controller")
+	// Stop the reconcilers before the DoS checker: a NAD reconcile can start the
+	// checker, so stopping it first could leave a goroutine running past Stop.
 	if c.nadReconcilerID != 0 {
 		c.networkMgr.DeRegisterNADReconciler(c.nadReconcilerID)
 	}
 	controller.Stop(c.podController)
 	controller.Stop(c.nadReconciler)
+	c.stopDoSChecker()
 }
 
 func (c *Controller) dpuPodNeedsUpdate(oldPod, newPod *corev1.Pod) bool {
@@ -187,6 +219,10 @@ func (c *Controller) reconcileDPUPod(key string) error {
 // deleted. It only requeues the pods that reference the NAD, leaving
 // reconcileDPUPod as the sole writer of representors and annotations.
 func (c *Controller) reconcileNAD(nadName string) error {
+	// Keep the per-NAD miss-rate limit and DoS checker in sync with the NAD's
+	// config, and re-apply the limit to the pods already plumbed for it.
+	c.reconcileNADRateLimit(nadName)
+
 	podKeys := c.nadPods.pods(nadName)
 	if len(podKeys) > 0 {
 		klog.Infof("NAD %s changed, requeueing pods %v", nadName, podKeys)
@@ -196,6 +232,32 @@ func (c *Controller) reconcileNAD(nadName string) error {
 	}
 
 	return nil
+}
+
+// initialSync loads existing NAD configs before recovering representors. No
+// workers or DoS checker run until the recovered state is fully initialized.
+func (c *Controller) initialSync() error {
+	nads, err := c.wf.NADInformer().Lister().List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list NADs during DPU initial sync: %w", err)
+	}
+	configs := make(map[string]*util.NADConfig, len(nads))
+	var totalMaxNewConnPPS uint
+	for _, nad := range nads {
+		nadConf, err := util.GetNADConfig(nad)
+		if err != nil {
+			klog.Errorf("DPU initial sync: cannot parse config of NAD %s/%s: %v", nad.Namespace, nad.Name, err)
+			continue
+		}
+		configs[nad.Namespace+"/"+nad.Name] = nadConf
+		totalMaxNewConnPPS += nadConf.MaxNewConnPPS
+	}
+	c.dosMu.Lock()
+	c.nadConfigs = configs
+	c.totalMaxNewConnPPS = totalMaxNewConnPPS
+	c.rateLimitEverActive = totalMaxNewConnPPS > 0
+	c.dosMu.Unlock()
+	return c.bootstrapDPUPodMapFromOVS()
 }
 
 // bootstrapDPUPodMapFromOVS pre-populates podStates from existing OVS representor
@@ -217,6 +279,7 @@ func (c *Controller) bootstrapDPUPodMapFromOVS() error {
 	// readyNADs holds, per pod on this node, the NADs it already reports ready.
 	// Its keys are also what says a pod still exists.
 	readyNADs := make(map[k8stypes.UID]sets.Set[string])
+	podsByUID := make(map[k8stypes.UID]*corev1.Pod)
 	pods, err := c.podLister.List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("failed to list pods for DPU bootstrap: %w", err)
@@ -237,6 +300,7 @@ func (c *Controller) bootstrapDPUPodMapFromOVS() error {
 			}
 		}
 		readyNADs[pod.UID] = ready
+		podsByUID[pod.UID] = pod
 	}
 
 	var orphanedPorts []string
@@ -278,15 +342,25 @@ func (c *Controller) bootstrapDPUPodMapFromOVS() error {
 		// A pod already reported ready went through a complete ConfigureOVS,
 		// since that is the last thing addRepPort does. Anything else may have
 		// been interrupted part way and has to be configured again.
-		ps.nadStates[nadKey] = &dpuConnectionState{
+		state := &dpuConnectionState{
 			vfRepName:  repName,
 			sandboxId:  sandbox,
 			revalidate: !ready.Has(nadKey),
 		}
+		if !state.revalidate {
+			// A ready port bypasses addRepPort, so restore its rate limit and
+			// DoS tracking here. Other ports are configured by reconciliation.
+			if _, err := c.applyRateLimit(podsByUID[uid], state, nadKey); err != nil {
+				klog.Warningf("DPU bootstrap: failed to restore rate limit for representor %s, retrying through revalidation: %v", repName, err)
+				state.revalidate = true
+				state.missRateDoSCheck = false
+			}
+		}
+		ps.nadStates[nadKey] = state
 	}
 
 	if len(orphanedPorts) > 0 {
-		setRepPortInterfacesDown(orphanedPorts)
+		c.setRepPortInterfacesDown(orphanedPorts)
 		if err := libovsdbops.DeleteMultiplePortsWithInterfaces(c.ovsClient, "br-int", orphanedPorts...); err != nil {
 			errs = append(errs, fmt.Errorf("DPU bootstrap: failed to delete orphaned representor ports %v: %w", orphanedPorts, err))
 		} else {

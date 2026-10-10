@@ -1011,7 +1011,7 @@ var _ = Describe("Node", func() {
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
-						"", "", nil)
+						"", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1123,7 +1123,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
-						"", "", nil)
+						"", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1280,7 +1280,7 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
-						"", "", nil)
+						"", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1391,7 +1391,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
-						"", "", nil)
+						"", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1553,7 +1553,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
-						"", "", nil)
+						"", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -1675,7 +1675,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					routeManager := routemanager.NewController()
 					cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
-						"", "", nil)
+						"", nil)
 					nc = newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 					nc.initRetryFrameworkForNode()
 					err = setupRemoteNodeNFTSets()
@@ -2420,7 +2420,7 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 
 			routeManager := routemanager.NewController()
 			cnnci := NewCommonNodeNetworkControllerInfo(ovnClient.KubeClient, ovnClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager,
-				"", "", nil)
+				"", nil)
 			_, err = NewDefaultNodeNetworkController(cnnci, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -2499,7 +2499,7 @@ var _ = Describe("Node object deletion", func() {
 
 		routeManager := routemanager.NewController()
 		cnnci := NewCommonNodeNetworkControllerInfo(kubeFakeClient, fakeClient.AdminPolicyRouteClient, wf, nil, nodeName,
-			routeManager, "", "", nil)
+			routeManager, "", nil)
 		nc := newDefaultNodeNetworkController(cnnci, stop, wg, routeManager, nil, nil)
 		nc.initRetryFrameworkForNode()
 		Expect(setupRemoteNodeNFTSets()).To(Succeed())

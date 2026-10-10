@@ -271,7 +271,7 @@ func (ncm *NodeControllerManager) CleanupStaleNetworks(validNetworks ...util.Net
 // newCommonNetworkControllerInfo creates and returns the base node network controller info
 func (ncm *NodeControllerManager) newCommonNetworkControllerInfo(wf factory.NodeWatchFactory) *node.CommonNodeNetworkControllerInfo {
 	return node.NewCommonNodeNetworkControllerInfo(ncm.ovnNodeClient.KubeClient, ncm.ovnNodeClient.AdminPolicyRouteClient, wf, ncm.recorder, ncm.name, ncm.routeManager,
-		ncm.dpuName, ncm.hostType, ncm.pfMACs)
+		ncm.dpuName, ncm.pfMACs)
 }
 
 // isNetworkManagerRequiredForNode checks if network manager should be started
@@ -545,7 +545,7 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 
 	if config.IsModeDPU() {
 		ncm.dpuController = dpu.NewController(ncm.watchFactory, ncm.Kube,
-			ncm.ovnNodeClient.KubeClient, ncm.networkManager.Interface(), ncm.ovsClient, ncm.name, ncm.pfMACs)
+			ncm.ovnNodeClient.KubeClient, ncm.networkManager.Interface(), ncm.ovsClient, ncm.name, ncm.hostType, ncm.pfMACs)
 		if err := ncm.dpuController.Start(); err != nil {
 			return fmt.Errorf("failed to start DPU controller: %w", err)
 		}
