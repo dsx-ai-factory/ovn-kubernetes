@@ -95,12 +95,11 @@ reviews:
           tightly-scoped changes (single refactor, codegen, vendor
           update). Flag PRs that mix unrelated changes in a single
           commit.
-        - MR descriptions should follow .gitlab/merge_request_templates/Default.md.
-          The "Summary" section must contain meaningful content and lead with
-          why the change is needed before explaining what it does.
-          Ask for verification details or test/doc omission justifications
-          in "Summary" when relevant. Do not require sections or checkboxes
-          from the GitHub PR template. CI skip checkboxes are optional.
+        - MR descriptions must contain a "Summary" section with meaningful
+          content that leads with why the change is needed before explaining
+          what it does. Ask for verification details or test/doc omission
+          justifications in "Summary" when relevant. CI skip checkboxes are
+          optional.
     - path: "docs/**/*.md"
       instructions: |
         - Flag unclear, inaccurate, or incomplete content.
@@ -640,7 +639,7 @@ reviews:
           modified code. Pass only if the code is clean, comments add
           genuine value, and test changes are proportional to the
           functional changes.
-      # The GitLab MR template does not currently provide a Release Notes section.
+      # The MR template does not currently provide a Release Notes section.
       - name: "Release Notes Section"
         mode: "off"
         instructions: >-
