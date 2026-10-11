@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# .security-triage.yaml
+version: "1.0"
+project: "ovn-kubernetes"
+last_updated: "2026-10-10T00:00:00Z"
+
+repository_exposure_classification:
+  visibility: "Public"
+  basis: "open-source Apache-2.0 project published on GitHub; SECURITY.md written to public-safe detail"
+  confirmed_by: "gmoodalbail"
+  date: "2026-10-10"
+
+service_exposure_classification:
+  tier: "External / Regulated"
+  confidence: "high"
+  basis: "user-confirmed; externally distributed open-source CNI that forms a production security boundary, holds cluster-scoped RBAC, and runs privileged hostNetwork node agents in downstream clusters"
+  confirmed_by: "gmoodalbail"
+  date: "2026-10-10"
+
+false_positives: []
+
+accepted_risks: []
+
+suppressed_cves: []
