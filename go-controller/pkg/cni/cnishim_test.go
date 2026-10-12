@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -335,4 +336,122 @@ func withCNIEnv(t *testing.T, fn func()) {
 			_ = os.Setenv(k, v)
 		}
 	}
+}
+
+func TestReadDeviceInfoFile(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	valid := `{"type":"pci","version":"1.1.0","pci":{"pci-address":"0000:00:00.1"}}`
+
+	good := filepath.Join(base, "cni", "net1-device.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(good), 0o755))
+	require.NoError(t, os.WriteFile(good, []byte(valid), 0o600))
+	secret := filepath.Join(outside, "secret")
+	require.NoError(t, os.WriteFile(secret, []byte("not-json-secret-content"), 0o600))
+	require.NoError(t, os.Symlink(secret, filepath.Join(base, "link")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(base, "dirlink")))
+	badJSON := filepath.Join(base, "bad.json")
+	require.NoError(t, os.WriteFile(badJSON, []byte("not-json-secret-content"), 0o600))
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{name: "file inside base", path: good},
+		{name: "path with dot-dot staying inside", path: filepath.Join(base, "cni", "..", "cni", "net1-device.json")},
+		{name: "absolute path outside base", path: secret, wantErr: "outside"},
+		{name: "dot-dot escaping base", path: filepath.Join(base, "..", filepath.Base(outside), "secret"), wantErr: "outside"},
+		{name: "symlink to file outside base", path: filepath.Join(base, "link"), wantErr: "outside"},
+		{name: "symlinked directory outside base", path: filepath.Join(base, "dirlink", "secret"), wantErr: "outside"},
+		{name: "base directory itself", path: base, wantErr: "outside"},
+		{name: "missing file", path: filepath.Join(base, "missing"), wantErr: "cannot resolve"},
+		{name: "invalid JSON does not leak content", path: badJSON, wantErr: "not valid device info JSON"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			di, err := readDeviceInfoFile(base, tc.path)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.wantErr)
+				require.NotContains(t, err.Error(), "secret-content")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, "0000:00:00.1", di.Pci.PciAddress)
+		})
+	}
+
+	_, err := readDeviceInfoFile(filepath.Join(base, "nonexistent-base"), good)
+	require.Error(t, err)
+}
+
+func TestCmdAdd_DeviceInfoFile(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	oldBase := deviceInfoBaseDir
+	deviceInfoBaseDir = base
+	t.Cleanup(func() { deviceInfoBaseDir = oldBase })
+
+	const validJSON = `{"type":"pci","version":"1.1.0","pci":{"pci-address":"0000:00:00.1"}}`
+	valid := filepath.Join(base, "net1-device.json")
+	require.NoError(t, os.WriteFile(valid, []byte(validJSON), 0o600))
+	badJSON := filepath.Join(base, "bad.json")
+	require.NoError(t, os.WriteFile(badJSON, []byte("secret-not-json"), 0o600))
+	// Valid device info, so only the directory check can reject it.
+	outsideFile := filepath.Join(outside, "device.json")
+	require.NoError(t, os.WriteFile(outsideFile, []byte(validJSON), 0o600))
+
+	body, err := json.Marshal(&Response{Result: &current.Result{}, PodIFInfo: &PodInterfaceInfo{}, KubeAuth: &KubeAPIAuth{}})
+	require.NoError(t, err)
+
+	run := func(t *testing.T, deviceInfoFile string) (req *Request, err error) {
+		t.Helper()
+		p := &Plugin{}
+		p.doCNIFunc = func(_ string, r interface{}) ([]byte, error) {
+			req = r.(*Request)
+			return body, nil
+		}
+		// CmdAdd prints the CNI result to stdout.
+		oldStdout := os.Stdout
+		r, w, pipeErr := os.Pipe()
+		require.NoError(t, pipeErr)
+		os.Stdout = w
+		defer func() {
+			os.Stdout = oldStdout
+			w.Close()
+			r.Close()
+		}()
+		stdin, marshalErr := json.Marshal(map[string]any{
+			"cniVersion":    "1.1.0",
+			"name":          "mynet",
+			"type":          "ovn-k8s-cni-overlay",
+			"runtimeConfig": map[string]string{"CNIDeviceInfoFile": deviceInfoFile},
+		})
+		require.NoError(t, marshalErr)
+		err = p.CmdAdd(&skel.CmdArgs{StdinData: stdin, ContainerID: "cid", Netns: "/var/run/netns/test", IfName: "eth0"})
+		return req, err
+	}
+
+	t.Run("device info file inside the directory is forwarded in the request", func(t *testing.T) {
+		req, err := run(t, valid)
+		require.NoError(t, err)
+		require.NotNil(t, req)
+		require.NotNil(t, req.Pci)
+		require.Equal(t, "0000:00:00.1", req.Pci.PciAddress)
+	})
+
+	t.Run("device info file outside the directory fails ADD before the server call", func(t *testing.T) {
+		req, err := run(t, outsideFile)
+		require.ErrorContains(t, err, "is outside")
+		require.Nil(t, req, "the CNI server must not be called")
+	})
+
+	t.Run("invalid JSON fails ADD without file content in the error", func(t *testing.T) {
+		req, err := run(t, badJSON)
+		require.ErrorContains(t, err, "not valid device info JSON")
+		// A raw json.Unmarshal error would show a character of the file content.
+		require.NotContains(t, err.Error(), "invalid character")
+		require.Nil(t, req, "the CNI server must not be called")
+	})
 }
