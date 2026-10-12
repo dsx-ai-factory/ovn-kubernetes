@@ -72,6 +72,50 @@ extensions, on top of OVN and Open vSwitch:
 - **Virtualization and mixed clusters** — KubeVirt VM live migration with
   persistent IPs, and hybrid overlay for mixed Windows and Linux clusters.
 
+## How it works
+
+OVN-Kubernetes watches the Kubernetes API and translates cluster objects —
+nodes, pods, services, EndpointSlices, network policies and its own CRDs —
+into OVN logical elements. OVN compiles those elements into logical flows,
+`ovn-controller` turns the flows into OpenFlow rules, and Open vSwitch carries
+the packets. Nothing in the datapath parses Kubernetes objects; by the time a
+packet moves, the policy has already been compiled into flows.
+
+That translation runs in *interconnect* mode, where every node is its own OVN
+zone with its own databases. There is no cluster-wide database to scale or to
+lose, and no RAFT cluster to keep in quorum. Only subnet and IP allocation
+remains central; zones exchange traffic over Geneve tunnels.
+
+```mermaid
+flowchart TD
+    API["Kubernetes API"]
+    CM["ovnkube-cluster-manager<br/>pod, join and transit subnet allocation"]
+
+    subgraph zone["Each node is its own OVN zone"]
+        direction TB
+        CTRL["ovnkube-controller<br/>K8s objects into OVN elements, pod IPAM, CNI"]
+        NBDB["NBDB<br/>logical elements"]
+        NORTHD["northd"]
+        SBDB["SBDB<br/>logical flows"]
+        OVNC["ovn-controller"]
+        OVS["Open vSwitch<br/>OpenFlow datapath"]
+        CTRL --> NBDB --> NORTHD --> SBDB --> OVNC --> OVS
+    end
+
+    API --> CM
+    API --> CTRL
+    CM -.->|node annotations| CTRL
+```
+
+How traffic leaves the cluster depends on the gateway mode. *Shared* keeps
+egress inside the OVS datapath, which is what makes it offloadable to a
+SmartNIC or DPU; *local* hands egress to the host network stack instead.
+Shared is the default.
+
+[Architecture of ovn-kubernetes](docs/design/architecture.md) covers the pods
+and containers, the interconnect design, and the control- and data-plane
+topology in full.
+
 ## Quickstart
 
 ### A local cluster with KIND
