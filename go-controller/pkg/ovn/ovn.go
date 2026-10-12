@@ -185,13 +185,6 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(ctx context.Context, oldP
 			oc.recordPodEvent("ErrorAddLogicalPort", failure, pod)
 			return failure
 		}
-	} else {
-		if !util.PodWantsHostNetwork(pod) && util.PortSecurityAnnotationChanged(oldPod, pod) {
-			if err := oc.updatePortSecurity(oldPod, pod, []string{ovntypes.DefaultNetworkName}); err != nil {
-				oc.recordPodEvent("ErrorUpdatingPortSecurity", err, pod)
-				return fmt.Errorf("failed to update port security for %s/%s network %s: %v", pod.Namespace, pod.Name, oc.GetNetworkName(), err)
-			}
-		}
 	}
 
 	nodeNameLabel := map[string]string{util.OvnPodNodeNameLabel: pod.Spec.NodeName}

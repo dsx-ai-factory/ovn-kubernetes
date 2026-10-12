@@ -646,25 +646,8 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(ctx context.Context, p
 	if !skipPortSecurity {
 		// CNI depends on the flows from port security, delay setting it until end
 		if skipIPAM {
-			if portSecInfo, err := util.GetPortSecurityInfo(pod.Annotations); err != nil {
-				return nil, nil, nil, false, err
-			} else {
-				nadName, index, _ := util.GetNadFromIndexedNADKey(nadKey)
-				if allowedIPs := portSecInfo[nadName]; allowedIPs != nil && len(allowedIPs.IPs) > 0 {
-					if index != 0 {
-						return nil, nil, nil, false, fmt.Errorf("port security is not support for port %s with multiple same secondary UDN %s",
-							portName, nadKey)
-					}
-					allowedAddresses := []string{}
-					for _, ip := range allowedIPs.IPs {
-						allowedAddresses = append(allowedAddresses, fmt.Sprintf("%s %s", podAnnotation.MAC.String(), ip))
-						lsp.PortSecurity = allowedAddresses
-					}
-				} else {
-					klog.V(5).Infof("No allowed IPs are specified for skip-ipam port %s, adding mac %s only", portName, podAnnotation.MAC.String())
-					lsp.PortSecurity = []string{podAnnotation.MAC.String()}
-				}
-			}
+			klog.V(5).Infof("No IPs are allocated for skip-ipam port %s, adding mac %s only", portName, podAnnotation.MAC.String())
+			lsp.PortSecurity = []string{podAnnotation.MAC.String()}
 		} else {
 			lsp.PortSecurity = addresses
 		}
@@ -843,89 +826,6 @@ func calculateStaticMAC(podDesc string, mac string) (net.HardwareAddr, error) {
 			mac, podDesc, err)
 	}
 	return podMac, nil
-}
-
-func (bnc *BaseNetworkController) updatePortSecurity(oldPod, newPod *corev1.Pod, nadKeys []string) (err error) {
-	if util.PodWantsHostNetwork(newPod) {
-		return nil
-	}
-	oldPortSecInfoMap, err := util.GetPortSecurityInfo(oldPod.Annotations)
-	if err != nil {
-		return err
-	}
-	newPortSecInfoMap, err := util.GetPortSecurityInfo(newPod.Annotations)
-	if err != nil {
-		return err
-	}
-	for _, nadKey := range nadKeys {
-		nadName, index, _ := util.GetNadFromIndexedNADKey(nadKey)
-		oldPortSecInfo, oldPortSecInfoExists := oldPortSecInfoMap[nadName]
-		newPortSecInfo, newPortSecInfoExists := newPortSecInfoMap[nadName]
-		if !oldPortSecInfoExists && !newPortSecInfoExists {
-			// port security info for this nad doesn't exist before and now
-			continue
-		}
-		// generate port name
-		portName := bnc.GetLogicalPortName(newPod, nadKey)
-		lsp := &nbdb.LogicalSwitchPort{Name: portName}
-		ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-		err = bnc.nbClient.Get(ctx, lsp)
-		if err != nil {
-			cancel()
-			return fmt.Errorf("unable to get lsp %s for updating: %v", portName, err)
-		}
-		cancel()
-		// get allowed mac from port_security
-		allowedMac := getAllowedMacAddress(lsp)
-		if allowedMac == "" {
-			// get mac from addresses
-			if portMac, _, err := libovsdbutil.ExtractPortAddresses(lsp); err != nil {
-				return err
-			} else {
-				allowedMac = portMac.String()
-			}
-		}
-		addresses := []string{}
-		if newPortSecInfo != nil && len(newPortSecInfo.IPs) > 0 {
-			if index != 0 {
-				return fmt.Errorf("port security is not support for port %s with multiple same secondary UDN %s",
-					portName, nadKey)
-			}
-			for _, ip := range newPortSecInfo.IPs {
-				addresses = append(addresses, fmt.Sprintf("%s %s", allowedMac, ip))
-			}
-		} else if oldPortSecInfo != nil && len(oldPortSecInfo.IPs) > 0 {
-			// lsp previously had allowed IPs in port_security but removed now,
-			// remove IPs from port security and retain mac only
-			addresses = append(addresses, allowedMac)
-		}
-		if len(addresses) == 0 {
-			// nothing to change
-			continue
-		}
-		klog.V(4).Infof("Updating lsp %s's port_security to %v", portName, strings.Join(addresses, ","))
-		lsp.PortSecurity = addresses
-		op, err := bnc.nbClient.Where(lsp).Update(lsp, &lsp.PortSecurity)
-		if err != nil {
-			return fmt.Errorf("could not create commands to update lsp %s: %v", portName, err)
-		}
-		if _, err = libovsdbops.TransactAndCheckAndSetUUIDs(bnc.nbClient, lsp, op); err != nil {
-			return fmt.Errorf("failed to update port_security for lsp %s: %v", portName, err)
-		}
-	}
-	return nil
-}
-
-func getAllowedMacAddress(lsp *nbdb.LogicalSwitchPort) string {
-	if len(lsp.PortSecurity) == 0 {
-		return ""
-	}
-	for _, str := range strings.Split(lsp.PortSecurity[0], " ") {
-		if _, err := net.ParseMAC(str); err == nil {
-			return str
-		}
-	}
-	return ""
 }
 
 // allocatePodAnnotation and update the corresponding pod annotation.
