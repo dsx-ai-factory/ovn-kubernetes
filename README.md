@@ -134,9 +134,8 @@ export KUBECONFIG="${HOME}/ovn.conf"
 cd contrib && ./kind.sh
 ```
 
-`make help` lists the other top-level targets — `build`, `test`, `lint`,
-`install` and `clean` — each of which forwards to the component Makefile that
-owns it.
+`make help` lists the other top-level targets — `build`, `test`, `lint` and
+`clean` — each of which forwards to the component Makefile that owns it.
 
 ### An existing cluster with Helm
 

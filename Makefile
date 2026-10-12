@@ -30,15 +30,14 @@ build: ## Build the ovnkube binaries into go-controller/_output
 
 .PHONY: test
 test: ## Run the go-controller unit tests
-	$(MAKE) -C $(GO_CONTROLLER_DIR) check
+# go-controller/Makefile derives the container bind mount from $(PWD), which
+# make takes from the environment and `-C` does not update. Pass it explicitly
+# so the repository root, not its parent, is mounted into the container.
+	$(MAKE) -C $(GO_CONTROLLER_DIR) check PWD=$(CURDIR)/$(GO_CONTROLLER_DIR)
 
 .PHONY: lint
 lint: ## Format and lint the Go code
 	$(MAKE) -C $(GO_CONTROLLER_DIR) lint
-
-.PHONY: install
-install: ## Install the built binaries under DESTDIR
-	$(MAKE) -C $(GO_CONTROLLER_DIR) install
 
 .PHONY: image
 image: ## Build the Fedora node image used by contrib/kind.sh
