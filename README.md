@@ -120,7 +120,7 @@ topology in full.
 
 ### A local cluster with KIND
 
-Prerequisites: Docker or Podman,
+Prerequisites: Docker,
 [KIND](https://github.com/kubernetes-sigs/kind#installation-and-usage),
 `kubectl`, Helm v3, Go 1.23 or newer, Python 3 with `pipx`, `jq`, `openssl`
 and `openvswitch`.
