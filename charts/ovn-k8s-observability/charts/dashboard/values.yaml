@@ -8,7 +8,7 @@ namespace: monitoring
 
 # grafana settings for Grafana Operator
 grafana:
-  # Mapping `DS_PROMETHEUS` to a datasource name in case of Grafana Operator, 
+  # Mapping `DS_PROMETHEUS` to a datasource name in case of Grafana Operator,
   datasourceName: prometheus
   # allow importing dashboards into Grafana instances in other namespaces
   allowCrossNamespaceImport: false
