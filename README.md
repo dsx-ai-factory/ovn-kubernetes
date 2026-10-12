@@ -80,12 +80,16 @@ and `openvswitch`.
 
 ```bash
 # Build the OVN-Kubernetes node image from this tree
-make -C dist/images fedora-image
+make image
 
 # Bring up a KIND cluster running it
 export KUBECONFIG="${HOME}/ovn.conf"
 cd contrib && ./kind.sh
 ```
+
+`make help` lists the other top-level targets — `build`, `test`, `lint`,
+`install` and `clean` — each of which forwards to the component Makefile that
+owns it.
 
 ### An existing cluster with Helm
 
