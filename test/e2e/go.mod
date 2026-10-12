@@ -2,6 +2,8 @@ module github.com/ovn-kubernetes/ovn-kubernetes/test/e2e
 
 go 1.26.0
 
+toolchain go1.26.9
+
 require (
 	github.com/google/go-cmp v0.7.0
 	github.com/k8snetworkplumbingwg/ipamclaims v0.5.1-alpha
@@ -10,7 +12,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
 	github.com/pkg/errors v0.9.1
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v0.36.2
@@ -131,12 +133,12 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
-	golang.org/x/mod v0.40.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260630182238-925bb5da69e7 // indirect
@@ -177,7 +179,7 @@ require (
 	github.com/openshift-kni/k8sreporter v1.0.6
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v0.0.0-20260709033559-a0dcbf382bc1
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
-	golang.org/x/crypto v0.56.0
+	golang.org/x/crypto v0.57.0
 	google.golang.org/grpc v1.83.2
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/klog/v2 v2.140.0

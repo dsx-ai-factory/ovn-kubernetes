@@ -5,6 +5,8 @@ module obs-as-code
 
 go 1.26.0
 
+toolchain go1.26.9
+
 require (
 	github.com/grafana/grafana-foundation-sdk/go v0.0.0-20250501220944-e22983a17bec
 	github.com/prometheus/prometheus v0.300.0
