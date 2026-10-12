@@ -2494,6 +2494,7 @@ ovn-cluster-manager() {
   echo "=============== ovn-cluster-manager ========== control plane node only"
 
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
+    --disable-firewalld \
     ${anp_enabled_flag} \
     ${egressfirewall_enabled_flag} \
     ${egressip_enabled_flag} \
