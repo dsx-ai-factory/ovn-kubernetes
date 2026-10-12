@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -43,6 +44,47 @@ import (
 type Plugin struct {
 	socketPath string
 	doCNIFunc  func(url string, req interface{}) ([]byte, error)
+}
+
+// deviceInfoBaseDir is the only directory the shim accepts device-info files
+// from. It matches the network-attachment-definition-client convention. It is a
+// variable only so tests can point it at a temporary directory.
+var deviceInfoBaseDir = "/var/run/k8s.cni.cncf.io/devinfo"
+
+// readDeviceInfoFile reads a device-info file referenced from the CNI
+// runtimeConfig. The shim runs as root and the path originates from NAD
+// controlled config, so the resolved path (symlinks followed) must be a regular
+// file inside baseDir. Parse errors are logged but not returned, because the
+// error text reaches the pod events and would leak file content.
+func readDeviceInfoFile(baseDir, path string) (nadapi.DeviceInfo, error) {
+	var deviceInfo nadapi.DeviceInfo
+	realBase, err := filepath.EvalSymlinks(baseDir)
+	if err != nil {
+		return deviceInfo, fmt.Errorf("device info directory %q is not usable: %w", baseDir, err)
+	}
+	realPath, err := filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		return deviceInfo, fmt.Errorf("cannot resolve device info file %q: %w", path, err)
+	}
+	if !strings.HasPrefix(realPath, realBase+string(filepath.Separator)) {
+		return deviceInfo, fmt.Errorf("device info file %q is outside %q", path, baseDir)
+	}
+	fi, err := os.Stat(realPath)
+	if err != nil {
+		return deviceInfo, fmt.Errorf("cannot stat device info file %q: %w", path, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return deviceInfo, fmt.Errorf("device info file %q is not a regular file", path)
+	}
+	data, err := os.ReadFile(realPath)
+	if err != nil {
+		return deviceInfo, fmt.Errorf("cannot read device info file %q: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &deviceInfo); err != nil {
+		klog.Errorf("Failed to parse device info file %q: %v", path, err)
+		return nadapi.DeviceInfo{}, fmt.Errorf("device info file %q is not valid device info JSON", path)
+	}
+	return deviceInfo, nil
 }
 
 // NewCNIPlugin creates the internal Plugin object
@@ -208,11 +250,8 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 
 	var deviceInfo = nadapi.DeviceInfo{}
 	if len(conf.RuntimeConfig.CNIDeviceInfoFile) != 0 {
-		bytes, err := os.ReadFile(conf.RuntimeConfig.CNIDeviceInfoFile)
+		deviceInfo, err = readDeviceInfoFile(deviceInfoBaseDir, conf.RuntimeConfig.CNIDeviceInfoFile)
 		if err != nil {
-			return err
-		}
-		if err := json.Unmarshal(bytes, &deviceInfo); err != nil {
 			return err
 		}
 	}
