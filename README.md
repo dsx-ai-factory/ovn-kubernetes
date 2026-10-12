@@ -140,19 +140,24 @@ cd contrib && ./kind.sh
 ### An existing cluster with Helm
 
 The cluster must have **no CNI installed** and **kube-proxy disabled** —
-OVN-Kubernetes provides both. `k8sAPIServer` and `podNetwork` have no defaults,
-so substitute your own API endpoint and pod CIDR for the placeholders below.
+OVN-Kubernetes provides both. `k8sAPIServer`, `podNetwork`, and
+`global.imageRepositoryPrefix` have no defaults, so substitute your own API
+endpoint, pod CIDR, and registry path for the placeholders below. The registry
+path must contain the component images and tags pinned in the chart's
+`values.yaml`.
 
 ```bash
 cd charts/ovn-kubernetes
 helm upgrade --install ovn-kubernetes . \
   -n ovn-kubernetes --create-namespace \
   --set k8sAPIServer=https://10.0.0.1:6443 \
-  --set podNetwork=10.192.0.0/16/26
+  --set podNetwork=10.192.0.0/16/26 \
+  --set global.imageRepositoryPrefix=registry.example.com/sdn
 ```
 
 `podNetwork` carries two masks: the cluster-wide pod CIDR, and the per-node
-subnet carved out of it. See
+subnet carved out of it. If the CoreDNS Service cannot be looked up, also set
+`global.corednsClusterIP` to its cluster IP. See
 [README-deployment.md](charts/ovn-kubernetes/README-deployment.md) for every
 configurable value.
 

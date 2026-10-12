@@ -69,19 +69,22 @@ every layer is a subchart by itself.
 | `{{ .Name }}` | `{{ .Version }}` | `charts/{{ .Name }}` |
 {{- end }}
 
-Install/upgrade the helm chart. `k8sAPIServer` and `podNetwork` have no
-defaults and the install fails without them, so replace the placeholders
-below with the API server endpoint and the pod CIDR of your cluster:
+Install/upgrade the helm chart. `k8sAPIServer`, `podNetwork`, and
+`global.imageRepositoryPrefix` have no defaults, so replace the placeholders
+below with your API server endpoint, pod CIDR, and registry path. The registry
+path must contain the component images and tags pinned in `values.yaml`:
 
 ```bash
 helm upgrade --install ovn-kubernetes . \
   -n ovn-kubernetes --create-namespace \
   --set k8sAPIServer=https://10.0.0.1:6443 \
-  --set podNetwork=10.192.0.0/16/26
+  --set podNetwork=10.192.0.0/16/26 \
+  --set global.imageRepositoryPrefix=registry.example.com/sdn
 ```
 
 `podNetwork` carries two masks: the first is the cluster-wide pod CIDR, the
-second is the per-node subnet carved out of it.
+second is the per-node subnet carved out of it. If the CoreDNS Service cannot
+be looked up, also set `global.corednsClusterIP` to its cluster IP.
 
 See [README-deployment.md](README-deployment.md) for the full list of
 configurable values, including subcharts.
