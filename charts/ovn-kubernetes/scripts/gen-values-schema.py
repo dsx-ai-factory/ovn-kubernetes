@@ -27,6 +27,9 @@ CHARTS_DIR = CHART_ROOT / "charts"
 
 DESC_START_RE = re.compile(r"^(?P<indent>\s*)# -- (?P<text>.+)$")
 DESC_CONT_RE = re.compile(r"^(?P<indent>\s*)# (?P<text>.+)$")
+# helm-docs directives such as `# @default -- ...` affect only the rendered
+# README and must not leak into the schema description.
+ANNOTATION_RE = re.compile(r"^\s*# @\w+")
 KEY_RE = re.compile(r"^(?P<indent>\s*)(?P<key>[^\s:#][^:]*):")
 
 
@@ -37,6 +40,8 @@ def extract_descriptions(path: Path) -> dict:
     stack = []  # list of (indent, key)
     pending = None  # (indent, [text parts])
     for line in path.read_text().splitlines():
+        if ANNOTATION_RE.match(line):
+            continue
         m = DESC_START_RE.match(line)
         if m:
             pending = (len(m.group("indent")), [m.group("text").strip()])

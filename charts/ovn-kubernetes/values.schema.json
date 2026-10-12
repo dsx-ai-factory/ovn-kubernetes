@@ -404,10 +404,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -455,10 +457,12 @@
               "type": "string"
             },
             "tag": {
-              "type": "string"
+              "type": "string",
+              "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
             },
             "sha256": {
-              "type": "string"
+              "type": "string",
+              "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
             }
           }
         }
@@ -508,10 +512,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -543,10 +549,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -632,10 +640,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -659,10 +669,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -686,10 +698,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -713,10 +727,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -740,10 +756,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -867,10 +885,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -894,10 +914,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -921,10 +943,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -948,10 +972,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }
@@ -975,10 +1001,12 @@
                   "type": "string"
                 },
                 "tag": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
                 },
                 "sha256": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
                 }
               }
             }

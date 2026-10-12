@@ -689,19 +689,19 @@ null
 			<td>ovnkube-control-plane.ovnkubeControlPlane.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-control-plane.ovnkubeControlPlane.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-identity.ovnkubeIdentity.image.repository</td>
@@ -716,19 +716,19 @@ null
 			<td>ovnkube-identity.ovnkubeIdentity.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-identity.ovnkubeIdentity.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-node-dpu-host.image.repository</td>
@@ -743,19 +743,19 @@ null
 			<td>ovnkube-node-dpu-host.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-node-dpu-host.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZone.image.repository</td>
@@ -770,19 +770,19 @@ null
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZone.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZone.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneNbdb.image.repository</td>
@@ -797,19 +797,19 @@ null
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneNbdb.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneNbdb.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneNorthd.image.repository</td>
@@ -824,19 +824,19 @@ null
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneNorthd.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneNorthd.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneOvnHost.image.repository</td>
@@ -851,19 +851,19 @@ null
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneOvnHost.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneOvnHost.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneSbdb.image.repository</td>
@@ -878,19 +878,19 @@ null
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneSbdb.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone-dpu.ovnkubeSingleNodeZoneSbdb.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZone.image.repository</td>
@@ -905,19 +905,19 @@ null
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZone.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZone.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNbdb.image.repository</td>
@@ -932,19 +932,19 @@ null
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNbdb.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNbdb.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNorthd.image.repository</td>
@@ -959,19 +959,19 @@ null
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNorthd.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNorthd.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneOvnHost.image.repository</td>
@@ -986,19 +986,19 @@ null
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneOvnHost.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneOvnHost.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneSbdb.image.repository</td>
@@ -1013,19 +1013,19 @@ null
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneSbdb.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"84a0aee9c07693b22a3b8b1e8e4ed917c573c37412d92641081e292046f6b2c3"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneSbdb.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"cbcda82f-71385617-7852734"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovs-node.ovsDaemonsContainer.image.repository</td>
@@ -1040,19 +1040,19 @@ null
 			<td>ovs-node.ovsDaemonsContainer.image.sha256</td>
 			<td>string</td>
 			<td><pre lang="json">
-"655a15134866f70f6410dff0578adc8c183eecfa436619e4c179f6f8f267716c"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.</td>
 		</tr>
 		<tr>
 			<td>ovs-node.ovsDaemonsContainer.image.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"963f58b0-35519317-af693ae"
+""
 </pre>
 </td>
-			<td></td>
+			<td>Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.</td>
 		</tr>
 		<tr>
 			<td>podNetwork</td>
@@ -1440,6 +1440,15 @@ true
 </pre>
 </td>
 			<td></td>
+		</tr>
+		<tr>
+			<td>ovnkube-single-node-zone.podAnnotations</td>
+			<td>object</td>
+			<td><pre lang="json">
+{}
+</pre>
+</td>
+			<td>extra annotations for the ovnkube-node pod template.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.tolerations</td>
