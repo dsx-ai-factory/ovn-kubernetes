@@ -96,7 +96,6 @@ clean:
 	rm -rf ${TEST_REPORT_DIR}
 	rm -f ./pkg/nbdb/ovn-nb.ovsschema
 	rm -f ./pkg/sbdb/ovn-sb.ovsschema
-	rm -f ./pkg/vswitchd/vswitch.ovsschema
 
 .PHONY: lint gofmt verify-go-mod-vendor third-party-licenses verify-third-party-licenses
 
