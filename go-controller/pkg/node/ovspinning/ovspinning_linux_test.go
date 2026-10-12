@@ -148,6 +148,7 @@ func TestAlignCPUAffinity(t *testing.T) {
 
 			var tmpCPUset unix.CPUSet
 			tmpCPUset.Set(0)
+			require.NotEqual(t, expectedUnixCPUSet, tmpCPUset, "temporary affinity must differ from the affinity restored by the controller")
 			assert.NoError(t, unix.SchedSetaffinity(ovsVSwitchdPid, &tmpCPUset))
 			assert.NoError(t, unix.SchedSetaffinity(ovsDBPid, &tmpCPUset))
 
@@ -170,7 +171,10 @@ func TestAlignCPUAffinity(t *testing.T) {
 			// wait for the ovspinning loop to stabilize and stop running
 			time.Sleep(1 * time.Second)
 
+			// Set adds a CPU, so clear CPU 0 to keep this different from a two-CPU affinity.
+			tmpCPUset.Zero()
 			tmpCPUset.Set(1)
+			require.NotEqual(t, expectedUnixCPUSet, tmpCPUset, "temporary affinity must differ from the affinity restored by the controller")
 			assert.NoError(t, unix.SchedSetaffinity(ovsVSwitchdPid, &tmpCPUset))
 			assert.NoError(t, unix.SchedSetaffinity(ovsDBPid, &tmpCPUset))
 
