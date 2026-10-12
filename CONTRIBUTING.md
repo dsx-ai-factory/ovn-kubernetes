@@ -1,5 +1,24 @@
 # Contributing Guide
 
+## This repository does not accept contributions
+
+The code here is published as a point-in-time snapshot. Development happens in
+the upstream project and in an internal tree, so a pull request opened against
+this repository cannot be merged and will be closed.
+
+* To **report a problem** with this snapshot, open an
+  [issue](https://github.com/dsx-ai-factory/ovn-kubernetes/issues/new/choose).
+  Issues are read and triaged, and fixes appear in a later snapshot.
+* To **contribute a change**, send it to the upstream project at
+  [ovn-kubernetes/ovn-kubernetes](https://github.com/ovn-kubernetes/ovn-kubernetes).
+  The rest of this guide describes how to do that.
+* To **report a security vulnerability**, follow [SECURITY.md](./SECURITY.md).
+  Never use a public issue or pull request.
+
+The remainder of this document is the upstream OVN-Kubernetes contributor
+guide, kept here so that the conventions this code was written under travel
+with it. Its instructions apply to the upstream repository.
+
 * [New Contributor Guide](#contributing-guide)
   * [Ways to Contribute](#ways-to-contribute)
   * [Find an Issue](#find-an-issue)
@@ -10,7 +29,8 @@
   * [Pull Request Checklist](#pull-request-checklist)
   * [AI Guidelines](#ai-guidelines)
 
-Welcome! We are glad that you want to contribute to our project! 💖
+Welcome! We are glad that you want to contribute to the OVN-Kubernetes
+project! 💖
 
 All contributors are expected to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
 
