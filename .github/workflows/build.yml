@@ -13,11 +13,15 @@ on:
       - 'docs/**'
       - '**/*.md'
       - 'mkdocs.yml'
+      - 'CODEOWNERS'
+      - 'NOTICE'
   pull_request:
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
       - 'mkdocs.yml'
+      - 'CODEOWNERS'
+      - 'NOTICE'
   workflow_dispatch:
 
 permissions:
