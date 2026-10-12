@@ -1,0 +1,19 @@
+OVN-Kubernetes
+Copyright The OVN-Kubernetes Contributors
+
+This product includes software developed by the OVN-Kubernetes project
+(https://github.com/ovn-kubernetes/ovn-kubernetes), licensed under the
+Apache License, Version 2.0. A copy of the license is in LICENSE.
+
+This distribution is a point-in-time snapshot of OVN-Kubernetes packaged and
+modified by NVIDIA Corporation.
+
+Portions Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+
+Files changed by NVIDIA relative to the upstream baseline carry an NVIDIA
+SPDX-FileCopyrightText header; see the release notes for this version for a
+summary of the changes.
+
+Third-party dependency licenses are collected under LICENSES/.
+See LICENSES/README.md for how that tree is generated and verified.
