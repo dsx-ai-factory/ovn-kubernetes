@@ -49,7 +49,7 @@ guides. Project-specific additions:
   `zz_generated.deepcopy.go` are generated. Run `make codegen` from
   `go-controller/` to regenerate after changing types. This also
   regenerates CRD YAML manifests and copies them to
-  `helm/ovn-kubernetes/crds/` — commit those too.
+  `charts/ovn-kubernetes/charts/ovnkube-crds/crds/` — commit those too.
 - **Markers** — use the correct code-generator markers in `doc.go`
   (`+k8s:deepcopy-gen=package`, `+groupName=k8s.ovn.org`).
 - **Backwards compatibility** — CRD API changes must be backwards
