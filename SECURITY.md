@@ -16,8 +16,9 @@ If you discover a potential security vulnerability, please **do not open a publi
 * **E-Mail:** [psirt@nvidia.com](mailto:psirt@nvidia.com)
   - We encourage you to use the following PGP key for secure email communication:
     [NVIDIA public PGP Key](https://www.nvidia.com/en-us/security/pgp-key)
-* **GitHub:** Use this repository's **Security** tab > **Report a vulnerability**
-  to submit a private report directly.
+
+Please do not use GitHub Security Advisories. NVIDIA coordinates disclosure for
+this project through PSIRT and the NVIDIA Product Security site only.
 
 Please include the following information:
 - Project name and the branch, tag, or commit the issue was found on
