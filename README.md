@@ -1,7 +1,10 @@
 # ovn-kubernetes: A robust Kubernetes networking platform
 
+[![Build][build-badge]][build-url]
 [![License][apache2-badge]][apache2-url]
 
+[build-badge]: https://github.com/dsx-ai-factory/ovn-kubernetes/actions/workflows/build.yml/badge.svg
+[build-url]: https://github.com/dsx-ai-factory/ovn-kubernetes/actions/workflows/build.yml
 [apache2-badge]: https://img.shields.io/badge/License-Apache%202.0-blue.svg
 [apache2-url]: https://opensource.org/licenses/Apache-2.0
 [upstream]: https://github.com/ovn-kubernetes/ovn-kubernetes
