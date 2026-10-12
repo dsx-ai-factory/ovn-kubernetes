@@ -7,10 +7,8 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net"
 	"reflect"
-	"slices"
 	"strings"
 	"time"
 
@@ -87,7 +85,7 @@ func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommo
 			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
 		ctx = tracing.ContextWithOperation(ctx, tracing.OperationAdd)
-		return bsnc.ensurePodForUserDefinedNetwork(ctx, nil, pod, true)
+		return bsnc.ensurePodForUserDefinedNetwork(ctx, pod, true)
 
 	case factory.NamespaceType:
 		ns, ok := obj.(*corev1.Namespace)
@@ -135,7 +133,7 @@ func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCo
 		ctx = tracing.ContextWithOperation(ctx, tracing.OperationUpdate)
 		needsAdd := shouldAddPort(oldPod, newPod, inRetryCache) ||
 			bsnc.dhcpPodNetworkUpdated(oldPod, newPod)
-		return bsnc.ensurePodForUserDefinedNetwork(ctx, oldPod, newPod, needsAdd)
+		return bsnc.ensurePodForUserDefinedNetwork(ctx, newPod, needsAdd)
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*corev1.Namespace), newObj.(*corev1.Namespace)
@@ -228,7 +226,7 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 
 // ensurePodForUserDefinedNetwork tries to set up the User Defined Network for a pod. It returns nil on success and error
 // on failure; failure indicates the pod set up should be retried later.
-func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(ctx context.Context, oldPod, pod *corev1.Pod, addPort bool) (err error) {
+func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(ctx context.Context, pod *corev1.Pod, addPort bool) (err error) {
 	if !bsnc.isPodScheduledOnLocalNode(pod) {
 		ctx = tracing.ContextWithSpansDisabled(ctx)
 	}
@@ -304,11 +302,6 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(ctx
 	}
 
 	if !addPort && !updatePort {
-		if util.PortSecurityAnnotationChanged(oldPod, pod) {
-			if err := bsnc.updatePortSecurity(oldPod, pod, slices.Collect(maps.Keys(networkMap))); err != nil {
-				return fmt.Errorf("failed to update port security for %s/%s network %s: %v", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
-			}
-		}
 		return nil
 	}
 

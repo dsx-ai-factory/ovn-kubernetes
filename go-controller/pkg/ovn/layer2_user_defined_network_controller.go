@@ -143,7 +143,7 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, 
 		ctx := tracing.ContextWithRetryLoop(context.Background(), inRetryCache)
 		ctx = tracing.ContextWithOperation(ctx, tracing.OperationUpdate)
 		needsAdd := shouldAddPort(oldPod, newPod, inRetryCache)
-		if err := h.oc.ensurePodForUserDefinedNetwork(ctx, oldPod, newPod, needsAdd); err != nil {
+		if err := h.oc.ensurePodForUserDefinedNetwork(ctx, newPod, needsAdd); err != nil {
 			return err
 		}
 

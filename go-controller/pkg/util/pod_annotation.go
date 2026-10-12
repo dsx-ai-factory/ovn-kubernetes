@@ -19,7 +19,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/yaml"
 
@@ -68,8 +67,6 @@ const (
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 	// SkipIPOnNetworksAnnotation specifies the NADs that don't require IP allocation
 	SkipIPOnNetworksAnnotation = "k8s.ovn.org/skip-ip-on-networks"
-	// PortSecurityInfoAnnotation specifies custom port security config need to be applied in lsp
-	PortSecurityInfoAnnotation = "k8s.ovn.org/port-security-info"
 	// UDNOpenPortsAnnotationName is the pod annotation to open default network pods on UDN pods.
 	UDNOpenPortsAnnotationName = "k8s.ovn.org/open-default-ports"
 
@@ -700,44 +697,6 @@ func SkipIPAMForNAD(annotations map[string]string, nadKey string) (bool, error) 
 		}
 	}
 	return false, nil
-}
-
-type portSecurityInfo struct {
-	IPs []string `json:"ips"`
-}
-
-// return per-NAD portSecurityInfo map, where nadName is namespace/name of the secondary network NAD
-// and "default" for default network NAD
-func GetPortSecurityInfo(annotations map[string]string) (map[string]*portSecurityInfo, error) {
-	portSecurityInfoMap := make(map[string]*portSecurityInfo)
-	annotPortSecInfo := annotations[PortSecurityInfoAnnotation]
-	if annotPortSecInfo == "" {
-		return portSecurityInfoMap, nil
-	}
-	if err := json.Unmarshal([]byte(annotPortSecInfo), &portSecurityInfoMap); err != nil {
-		return portSecurityInfoMap, fmt.Errorf("failed to unmarshal port security info %q: %v", annotPortSecInfo, err)
-	}
-	// validate IPs
-	for _, psi := range portSecurityInfoMap {
-		validIPs := []string{}
-		for _, strIP := range psi.IPs {
-			if ip := net.ParseIP(strIP); ip == nil {
-				klog.Warningf("The IP address provided in %s annotation is invalid: %s", PortSecurityInfoAnnotation, strIP)
-				continue
-			}
-			validIPs = append(validIPs, strIP)
-		}
-		psi.IPs = validIPs
-	}
-	return portSecurityInfoMap, nil
-}
-
-func PortSecurityAnnotationChanged(oldPod, newPod *corev1.Pod) bool {
-	if oldPod == nil {
-		// not an update event, creation flow will handle port_security
-		return false
-	}
-	return oldPod.Annotations[PortSecurityInfoAnnotation] != newPod.Annotations[PortSecurityInfoAnnotation]
 }
 
 // GetK8sPodNetworkSelection returns the pod's NetworkSelectionElement for the
