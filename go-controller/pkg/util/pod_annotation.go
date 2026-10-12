@@ -60,9 +60,6 @@ import (
 const (
 	// OvnPodNodeNameLabel is the constant label key representing the node on which Pod is scheduled
 	OvnPodNodeNameLabel = "k8s.ovn.org/nodeName"
-	// skipSpoofCheckAnnotationName skips setting Port security on Logical Switch Ports that are
-	// part of the specified networks
-	skipSpoofCheckAnnotationName = "k8s.ovn.org/skip-spoofchk-on-networks"
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide active network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 	// SkipIPOnNetworksAnnotation specifies the NADs that don't require IP allocation
@@ -628,36 +625,6 @@ func GetK8sPodAllNetworkSelections(pod *corev1.Pod) ([]*nadapi.NetworkSelectionE
 		networks = []*nadapi.NetworkSelectionElement{}
 	}
 	return networks, nil
-}
-
-// SkipSpoofCheckForNAD checks whether we should skip spoof check for the given NAD key.
-// nadKey is namespace/name/index of the secondary network NAD and "default" for default network NAD
-// Note that SkipSpoofCheckForNAD does not work with Pod interfaces of multiple same secondary UDN.
-func SkipSpoofCheckForNAD(annotations map[string]string, nadKey string) (bool, error) {
-	var err error
-
-	nadName := nadKey
-	if nadKey != types.DefaultNetworkName {
-		nadName, _, err = GetNadFromIndexedNADKey(nadKey)
-		if err != nil {
-			return false, err
-		}
-	}
-	nads, ok := annotations[skipSpoofCheckAnnotationName]
-	if !ok {
-		return false, nil
-	}
-	for _, nad := range strings.Split(nads, ",") {
-		nad = strings.TrimSpace(nad)
-		if nad == nadName {
-			if nadName != nadKey {
-				return false, fmt.Errorf("%s pod config does not work with multiple same secondary UDN pod interfaces", skipSpoofCheckAnnotationName)
-			} else {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
 }
 
 func IsNadForPodClampedDown(podAnnotation map[string]string, nadName string) bool {
