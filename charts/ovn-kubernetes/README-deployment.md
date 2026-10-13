@@ -1241,15 +1241,6 @@ null
 			<td>tolerations for the ovnkube-identity pods.</td>
 		</tr>
 		<tr>
-			<td>ovnkube-node-dpu-host.disableFirewalld</td>
-			<td>bool</td>
-			<td><pre lang="json">
-true
-</pre>
-</td>
-			<td></td>
-		</tr>
-		<tr>
 			<td>ovnkube-node-dpu-host.gatewayOpts</td>
 			<td>string</td>
 			<td><pre lang="json">
@@ -1308,15 +1299,6 @@ true
 			<td>tolerations for the ovnkube-node-dpu-host pods.</td>
 		</tr>
 		<tr>
-			<td>ovnkube-single-node-zone.adminFirewalldZone</td>
-			<td>string</td>
-			<td><pre lang="json">
-"admin"
-</pre>
-</td>
-			<td></td>
-		</tr>
-		<tr>
 			<td>ovnkube-single-node-zone.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key</td>
 			<td>string</td>
 			<td><pre lang="json">
@@ -1330,15 +1312,6 @@ true
 			<td>string</td>
 			<td><pre lang="json">
 "DoesNotExist"
-</pre>
-</td>
-			<td></td>
-		</tr>
-		<tr>
-			<td>ovnkube-single-node-zone.disableFirewalld</td>
-			<td>bool</td>
-			<td><pre lang="json">
-true
 </pre>
 </td>
 			<td></td>

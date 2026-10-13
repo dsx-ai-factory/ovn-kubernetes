@@ -11,8 +11,6 @@ gatewayOpts: ""
 nodeSelector:
   k8s.ovn.org/dpu-host: ""
 
-disableFirewalld: true
-
 # The netdevice or deviceplugin resourcename that specifies pool of devices
 # that can be used for management ports has to be specified.
 # mgmtPortVFResourceName will override nodeMgmtPortNetdev if both are specified

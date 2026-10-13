@@ -12,10 +12,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	cache "k8s.io/client-go/tools/cache"
-	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -156,34 +154,10 @@ func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}
 // the function was executed from iterateRetryResources, AddResource adds the
 // specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
-func (h *nodeEventHandler) AddResource(_ context.Context, obj interface{}, fromRetryLoop bool) error {
+func (h *nodeEventHandler) AddResource(_ context.Context, obj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.EndpointSliceForStaleConntrackRemovalType:
-		if config.OvnKubeNode.Mode != types.NodeModeDPU {
-			var skipFirewalldChecked bool
-			var svcNamespacedName *k8stypes.NamespacedName
-			var err error
-
-			endpointSlice := obj.(*discovery.EndpointSlice)
-			key := endpointSlice.Namespace + "/" + endpointSlice.Name
-			if fromRetryLoop {
-				// load previous skipFirewalld; it may not exist as previous skipFirewalld check might have failed.
-				val, ok := h.nc.skipFirewalldMap.Load(key)
-				if ok {
-					svcNamespacedName = val.(*k8stypes.NamespacedName)
-					skipFirewalldChecked = true
-				}
-			}
-			if !skipFirewalldChecked {
-				svcNamespacedName, err = h.nc.skipFirewalld(endpointSlice)
-				if err != nil {
-					return err
-				}
-			}
-
-			h.nc.skipFirewalldMap.Store(key, svcNamespacedName)
-			return h.nc.reconcileFirewallZoneForEndpointSlice(nil, endpointSlice, svcNamespacedName)
-		}
+		// no action needed upon add event
 		return nil
 
 	case factory.NodeType:
@@ -235,18 +209,6 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 			if err := h.nc.reconcileConntrackUponEndpointSliceEvents(
 				oldEndpointSlice, newEndpointSlice); err != nil {
 				errors = append(errors, err)
-			}
-		}
-		if config.OvnKubeNode.Mode != types.NodeModeDPU {
-			var svcNamespacedName *k8stypes.NamespacedName
-			if val, ok := h.nc.skipFirewalldMap.Load(newEndpointSlice.Namespace + "/" + newEndpointSlice.Name); ok {
-				svcNamespacedName = val.(*k8stypes.NamespacedName)
-				if err := h.nc.reconcileFirewallZoneForEndpointSlice(oldEndpointSlice, newEndpointSlice, svcNamespacedName); err != nil {
-					errors = append(errors, err)
-				}
-			} else {
-				// if check somehow wasn't done in add handler, log error and return
-				klog.Errorf("Endpoint %s/%s wasn't processed in add handler, skip", newEndpointSlice.Namespace, newEndpointSlice.Name)
 			}
 		}
 		if len(errors) != 0 {
@@ -360,19 +322,6 @@ func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 				errors = append(errors, err)
 			}
 		}
-		if config.OvnKubeNode.Mode != types.NodeModeDPU {
-			var svcNamespacedName *k8stypes.NamespacedName
-			if val, ok := h.nc.skipFirewalldMap.Load(endpointslice.Namespace + "/" + endpointslice.Name); ok {
-				svcNamespacedName = val.(*k8stypes.NamespacedName)
-				endpointSlice := obj.(*discovery.EndpointSlice)
-				if err := h.nc.reconcileFirewallZoneForEndpointSlice(endpointSlice, nil, svcNamespacedName); err != nil {
-					errors = append(errors, err)
-				}
-			} else {
-				// if check somehow wasn't done in add handler, log error and return
-				klog.Errorf("Endpoint %s/%s wasn't processed in add handler, skip", endpointslice.Namespace, endpointslice.Name)
-			}
-		}
 		if len(errors) != 0 {
 			return kerrors.NewAggregate(errors)
 		}
@@ -393,19 +342,6 @@ func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 	}
 }
 
-func (nc *DefaultNodeNetworkController) syncFirewallZoneForEndpointSlices(_ []interface{}) error {
-	if config.OvnKubeNode.DisableFirewalld {
-		klog.V(6).Infof("Firewalld disabled, skip syncFirewallZoneForEndpointSlices")
-		return nil
-	}
-	if err := addInterfaceToFirewallZone(types.K8sMgmtIntfName, ovnFirewallZone); err != nil {
-		return fmt.Errorf("failed to add interface %s to ovn firewall zone: (%v)",
-			types.K8sMgmtIntfName, err)
-	}
-	return nil
-	// TODO(gmoodalbail): we need to clean up any stale ports in ovn and ngn-admin zone
-}
-
 func (h *nodeEventHandler) SyncFunc(objs []interface{}) error {
 	var syncFunc func([]interface{}) error
 
@@ -416,11 +352,8 @@ func (h *nodeEventHandler) SyncFunc(objs []interface{}) error {
 
 		switch h.objType {
 		case factory.EndpointSliceForStaleConntrackRemovalType:
+			// no sync needed
 			syncFunc = nil
-			if config.OvnKubeNode.Mode != types.NodeModeDPU {
-				syncFunc = h.nc.syncFirewallZoneForEndpointSlices
-			}
-
 		case factory.NodeType:
 			syncFunc = h.nc.syncNodes
 

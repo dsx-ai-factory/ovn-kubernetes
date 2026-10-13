@@ -24,7 +24,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
@@ -173,8 +172,6 @@ type DefaultNodeNetworkController struct {
 
 	dpuNodeLeaseManager *dpulease.Manager
 
-	// stores *k8stypes.NamespacedName for each endpointSlice, nil if firewalld configuration needs to be skipped.
-	skipFirewalldMap               sync.Map
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
 	cniServer *cni.Server
@@ -199,8 +196,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			DoSCheckStopChan:                nil,
 			ovsClient:                       ovsClient,
 		},
-		skipFirewalldMap: sync.Map{},
-		routeManager:     routeManager,
+		routeManager: routeManager,
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && (config.IsModeDPUHost() || config.IsModeFull()) {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
@@ -1575,112 +1571,6 @@ func DummyNextHopIPs() []net.IP {
 		nextHops = append(nextHops, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP)
 	}
 	return nextHops
-}
-
-func (nc *DefaultNodeNetworkController) reconcileFirewallZoneForEndpointSlice(oldEndpointSlice,
-	newEndpointSlice *discovery.EndpointSlice, namespacedName *k8stypes.NamespacedName) error {
-	var err error
-	var errors []error
-
-	if namespacedName == nil {
-		// firewalld configuration skipped
-		return nil
-	}
-	svc, err := nc.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("error while retrieving service for endpointslice %s/%s when reconciling conntrack: %v",
-			namespacedName.Namespace, namespacedName.Name, err)
-	}
-
-	if newEndpointSlice != nil {
-		for _, newPort := range newEndpointSlice.Ports {
-			for _, newEndpoint := range newEndpointSlice.Endpoints {
-				for _, newIP := range newEndpoint.Addresses {
-					newIPStr := utilnet.ParseIPSloppy(newIP).String()
-					if newIPStr != nc.nodePrimaryIP {
-						continue
-					}
-					// upon an update event, update firewall zone conntrack entries for IP addresses that are new
-					// in the endpointslice, skip otherwise
-					if oldEndpointSlice != nil && util.DoesEndpointSliceContainEligibleEndpoint(oldEndpointSlice, newIPStr, *newPort.Port, *newPort.Protocol, svc) {
-						continue
-					}
-					klog.V(5).Infof("Adding the endpoint that is not present in old slice %s/%d/%s",
-						newIPStr, *newPort.Port, *newPort.Protocol)
-					err := addPortToFirewallZone(ovnFirewallZone, *newPort.Port, *newPort.Protocol)
-					if err != nil {
-						errors = append(errors, fmt.Errorf("error in adding port %d to ovn firewall zone: (%v)", *newPort.Port, err))
-					}
-					err = addPortToFirewallZone(config.OvnKubeNode.AdminFirewalldZone, *newPort.Port, *newPort.Protocol)
-					if err != nil {
-						errors = append(errors, fmt.Errorf("error in adding port %d to %s firewall zone: (%v)",
-							*newPort.Port, config.OvnKubeNode.AdminFirewalldZone, err))
-					}
-				}
-			}
-		}
-	}
-	if oldEndpointSlice != nil {
-		for _, oldPort := range oldEndpointSlice.Ports {
-			for _, oldEndpoint := range oldEndpointSlice.Endpoints {
-				for _, oldIP := range oldEndpoint.Addresses {
-					oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
-					if oldIPStr != nc.nodePrimaryIP {
-						continue
-					}
-					// upon an update event, update firewall zone conntrack entries for IP addresses that are new
-					// in the endpointslice, skip otherwise
-					if newEndpointSlice != nil && util.DoesEndpointSliceContainEligibleEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol, svc) {
-						continue
-					}
-					klog.Infof("Removing the endpoint %s/%d/%s not present in new slice but present in old slice",
-						oldIPStr, *oldPort.Port, *oldPort.Protocol)
-					err := removePortFromFirewallZone(ovnFirewallZone, *oldPort.Port, *oldPort.Protocol)
-					if err != nil {
-						errors = append(errors, fmt.Errorf("error in removing port %d to ovn firewall zone: (%v)", *oldPort.Port, err))
-					}
-					err = removePortFromFirewallZone(config.OvnKubeNode.AdminFirewalldZone, *oldPort.Port, *oldPort.Protocol)
-					if err != nil {
-						errors = append(errors, fmt.Errorf("error in removing port %d to %s firewall zone: (%v)",
-							*oldPort.Port, config.OvnKubeNode.AdminFirewalldZone, err))
-					}
-				}
-			}
-		}
-	}
-	return utilerrors.Join(errors...)
-}
-
-// skipFirewalld return nil to skip and service's NamespacedName if not to skip:
-// - if --disable-firewalld is set to true, return nil to skip
-// - if corresponding service is not found, return  nil to skip
-// - if service has "k8s.ovn.org/skip-firewalld" annotation and its value is "true", return nil to skip
-// - otherwise return service's NamespacedName so that callbacks can proceed
-func (nc *DefaultNodeNetworkController) skipFirewalld(epSlice *discovery.EndpointSlice) (*k8stypes.NamespacedName, error) {
-	if config.OvnKubeNode.DisableFirewalld {
-		klog.V(6).Infof("Firewalld disabled, skip firewalld")
-		return nil, nil
-	}
-	namespacedName, err := util.ServiceNamespacedNameFromEndpointSlice(epSlice)
-	if err != nil {
-		klog.Errorf("Service name not found for endpoint slice %s/%s: %v", epSlice.Namespace, epSlice.Name, err)
-		return nil, nil
-	}
-	svc, err := nc.watchFactory.GetService(namespacedName.Namespace, namespacedName.Name)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			klog.Errorf("Service %s/%s not found in informers cache :(%v)", namespacedName.Namespace, namespacedName.Name, err)
-		} else {
-			// TODO: retry getting service
-			return nil, fmt.Errorf("failed to get service %s/%s from informer cache: %v", namespacedName.Namespace, namespacedName.Name, err)
-		}
-		return nil, nil
-	}
-	if val, ok := svc.Annotations[util.OvnSkipFirewalldAnnotationName]; ok && val == "true" {
-		klog.Infof("Service %s/%s is annotated to skip firewalld", svc.Namespace, svc.Name)
-		return nil, nil
-	}
-	return &namespacedName, nil
 }
 
 func updateOVSOtherConfig(key string, value interface{}) error {

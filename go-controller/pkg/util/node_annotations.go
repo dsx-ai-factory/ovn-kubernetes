@@ -153,7 +153,6 @@ const (
 	// default network and other layer3 secondary networks by cluster manager.
 	OvnNetworkIDs = "k8s.ovn.org/network-ids"
 
-	OvnSkipFirewalldAnnotationName = "k8s.ovn.org/skip-firewalld"
 	SkipPinnedLSNodeAnnotationName = "k8s.ovn.org/node-skip-pinned-ls-for-networks"
 
 	// ovnNodeHostTypeLabel used by ngn

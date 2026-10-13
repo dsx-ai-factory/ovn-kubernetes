@@ -76,9 +76,6 @@ affinity:
 # -- extra annotations for the ovnkube-node pod template.
 podAnnotations: {}
 
-disableFirewalld: true
-adminFirewalldZone: admin
-
 # To utilize hardware offloading for management ports, a netdevice or a deviceplugin resource name that
 # specifies a pool of devices can be specified.
 # mgmtPortVFResourceName will override nodeMgmtPortNetdev if both are specified

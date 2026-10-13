@@ -436,9 +436,6 @@
             }
           }
         },
-        "disableFirewalld": {
-          "type": "boolean"
-        },
         "nodeMgmtPortNetdev": {
           "type": "string"
         },
@@ -937,12 +934,6 @@
           "type": "object",
           "properties": {},
           "description": "extra annotations for the ovnkube-node pod template."
-        },
-        "disableFirewalld": {
-          "type": "boolean"
-        },
-        "adminFirewalldZone": {
-          "type": "string"
         },
         "nodeMgmtPortNetdev": {
           "type": "string"
