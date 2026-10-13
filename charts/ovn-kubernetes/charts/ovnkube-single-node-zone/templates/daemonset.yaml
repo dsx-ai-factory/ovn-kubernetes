@@ -294,10 +294,6 @@ spec:
           privileged: true
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
-
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
@@ -305,10 +301,6 @@ spec:
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
 
-        # firewall-cmd needs /run/dbus
-        - mountPath: /host/run/dbus
-          name: host-var-run-dbus
-          readOnly: true
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
@@ -594,13 +586,6 @@ spec:
           value: "0"
         - name: OVS_MAX_IDLE
           value: "20000"
-        {{- $disableFirewalld := hasKey .Values "disableFirewalld" | ternary .Values.disableFirewalld false }}
-        - name: OVNKUBE_DISABLE_FIREWALLD
-          value: {{ $disableFirewalld | quote }}
-        {{- if eq $disableFirewalld false }}
-        - name: OVNKUBE_ADMIN_FIREWALLD_ZONE
-          value: {{ default "admin" .Values.adminFirewalldZone | quote }}
-        {{- end }}
         {{- with include "ovn-kubernetes.getClusterDefaultNad" . }}
         - name: OVNKUBE_CLUSTER_DEFAULT_NAD
           value: {{ . }}
@@ -682,10 +667,6 @@ spec:
 
       volumes:
       # Common volumes
-
-      - name: host-var-run-dbus
-        hostPath:
-          path: /var/run/dbus
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch

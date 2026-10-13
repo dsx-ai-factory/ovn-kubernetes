@@ -95,9 +95,6 @@ spec:
         - name: host-modules
           hostPath:
             path: /lib/modules
-        - name: host-var-run-dbus
-          hostPath:
-            path: /var/run/dbus
         - name: host-var-log-ovs
           hostPath:
             path: /var/log/openvswitch

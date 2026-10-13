@@ -101,8 +101,6 @@ fi
 # OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway for ovn-kubernetes
 # OVN_ENABLE_OVNKUBE_IDENTITY - enable per node certificate ovn-kubernetes
 # OVN_CLUSTER_SUBNETS_MAC_BINDING_AGING - MAC binding aging threshold for cluster subnets (in seconds)
-# OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
-# OVNKUBE_ADMIN_FIREWALLD_ZONE - name of admin firewalld zone
 # OVN_METRICS_CONTROLLER_PORT - metrics port exposed by ovnkube-controller (default 9409)
 # OVN_METRICS_MASTER_PORT - deprecated alias for OVN_METRICS_CONTROLLER_PORT
 # OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
@@ -399,10 +397,6 @@ ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
 # default is 0; no backoff delay
 ovn_northd_backoff_interval=${OVN_NORTHD_BACKOFF_INTERVAL:-"0"}
 
-# OVNKUBE_DISABLE_FIREWALLD - skip firewalld calls which open ports for service endpoints
-ovnkube_disable_firewalld=${OVNKUBE_DISABLE_FIREWALLD:-"false"}
-# OVNKUBE_ADMIN_FIREWALLD_ZONE - name of admin firewalld zone
-ovnkube_admin_firewalld_zone=${OVNKUBE_ADMIN_FIREWALLD_ZONE:-"ngn-admin"}
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-false}
 #OVN_NETWORK_QOS_ENABLE - enable network QoS for ovn-kubernetes
@@ -1541,17 +1535,6 @@ ovnkube-controller-with-node() {
     fi
   fi
 
-  ovnkube_firewalld_opts=
-  if [[ ${ovnkube_node_mode} == "dpu" || ${ovnkube_disable_firewalld} == "true" ]]; then
-    ovnkube_firewalld_opts="--disable-firewalld"
-  elif [[ ${ovnkube_disable_firewalld} == "false" ]]; then
-    echo "=============== ovn-node - (check for firewall service status)"
-    check_firewall_state
-    echo "=============== ovn-node - (create ovn firewall zone)"
-    create_ovn_firewall_zone
-    ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
-  fi
-
   # start temp work around
   # remove when https://issues.redhat.com/browse/FDP-1537 is avilable
   if [[ ${ovnkube_node_mode} == "full" && ${ovn_egressip_enable} == "true" ]]; then
@@ -2163,7 +2146,6 @@ ovnkube-controller-with-node() {
     ${ovn_encap_ip_flag} \
     ${ovn_encap_port_flag} \
     ${ovnkube_config_duration_enable_flag} \
-    ${ovnkube_firewalld_opts} \
     ${ovnkube_local_cert_flags} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -2494,7 +2476,6 @@ ovn-cluster-manager() {
   echo "=============== ovn-cluster-manager ========== control plane node only"
 
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
-    --disable-firewalld \
     ${anp_enabled_flag} \
     ${egressfirewall_enabled_flag} \
     ${egressip_enabled_flag} \
@@ -2597,74 +2578,6 @@ ovn-controller() {
   exit 10
 }
 
-# check_firewall_state checks if the firewall is running
-# on the nodes.
-check_firewall_state() {
-  firewall_state=$(firewall-cmd --state 2>/dev/null)
-  if [[ $firewall_state != "running" ]]; then
-      echo "Exiting, firewall service is not running on node."
-      exit 1
-  fi
-}
-
-
-remove_ovn_firewall_zone_db_ports() {
-  # remove ports 6641/tcp and 6642/tcp if present
-  ports=('6641/tcp' '6642/tcp')
-  for port in ${ports[@]}; do
-    port_enabled=$(firewall-cmd --query-port=$port --zone=ovn)
-    if [[ $port_enabled == "yes" ]]; then
-      echo "Removing port $port from ovn zone."
-      status=$(firewall-cmd --remove-port=$port --zone=ovn)
-      if [[ $status != "success" ]]; then
-        echo "Exiting, Could not remove port $port from ovn zone."
-        exit 1
-      fi
-      status=$(firewall-cmd --remove-port=$port --zone=ovn --permanent)
-      if [[ $status != "success" ]]; then
-        echo "Exiting, Could not remove port $port permanently from ovn zone."
-        exit 1
-      fi
-    fi
-  done
-}
-
-create_ovn_firewall_zone() {
-  # if ovn zone is not present, create it and apply it by performing reload
-  firewall-cmd --zone=ovn --list-ports >/dev/null
-  if [[ $? != 0 ]]; then
-    # this should rarely happen now that kubespray creates it for us
-    echo "ovn firewall zone does not exist, so creating it..."
-    firewall-cmd --new-zone=ovn --permanent >/dev/null
-    if [[ $? != 0 ]]; then
-      echo "Exiting, failed to create ovn firewall zone"
-      exit 1
-    fi
-
-    firewall-cmd --reload >/dev/null
-    if [[ $? != 0 ]]; then
-      echo "Exiting, failed to reload the firewalld service"
-      exit 1
-    fi
-  else
-    remove_ovn_firewall_zone_db_ports
-  fi
-
-  # block icmp traffic in ovn zone
-  firewall-cmd --zone=ovn --add-icmp-block-inversion --permanent >/dev/null
-  if [[ $? != 0 ]]; then
-    echo "Exiting, failed to apply block icmp traffic in ovn zone to permanent configuration"
-    exit 1
-  fi
-
-  firewall-cmd --zone=ovn --add-icmp-block-inversion >/dev/null
-  if [[ $? != 0 ]]; then
-    echo "Exiting, failed to apply block icmp traffic in ovn zone to running configuration"
-    exit 1
-  fi
-
-}
-
 # ovn-node - all nodes
 ovn-node() {
   trap 'kill $(jobs -p) ; exit 0' TERM
@@ -2714,17 +2627,6 @@ ovn-node() {
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     wait_for_event attempts=20 files_exist ${ovn_controller_pk} ${ovn_controller_cert} ${ovn_ca_cert}
   }
-
-  ovnkube_firewalld_opts=
-  if [[ ${ovnkube_node_mode} == "dpu" || ${ovnkube_disable_firewalld} == "true" ]]; then
-    ovnkube_firewalld_opts="--disable-firewalld"
-  elif [[ ${ovnkube_disable_firewalld} == "false" ]]; then
-    echo "=============== ovn-node - (check for firewall service status)"
-    check_firewall_state
-    echo "=============== ovn-node - (create ovn firewall zone)"
-    create_ovn_firewall_zone
-    ovnkube_firewalld_opts="--admin-firewalld-zonename=${ovnkube_admin_firewalld_zone}"
-  fi
 
   ovn_routable_mtu_flag=
   if [[ -n "${routable_mtu}" ]]; then
@@ -3157,7 +3059,6 @@ ovn-node() {
         ${OVN_NODE_PORT} \
         ${ovn_conntrack_zone_flag} \
         ${ovnkube_enable_multi_external_gateway_flag} \
-        ${ovnkube_firewalld_opts} \
         ${ovnkube_logfile_flag} \
         ${ovnkube_metrics_tls_opts} \
         ${ovnkube_node_certs_flags} \

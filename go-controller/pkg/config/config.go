@@ -278,7 +278,6 @@ var (
 	OvnKubeNode = OvnKubeNodeConfig{
 		Mode:                      types.NodeModeFull,
 		IsPrimaryDPU:              true,
-		DisableFirewalld:          false,
 		MinRevalidatePPS:          -1,
 		DPUNodeLeaseRenewInterval: 10,
 		DPUNodeLeaseDuration:      40,
@@ -835,10 +834,6 @@ type OvnKubeNodeConfig struct {
 	// RepresentorMeteringNodes is the node label whose value will be used
 	// to determine if representor metering feature will be applied or not
 	RepresentorMeteringNodes string `gcfg:"representor-metering-nodes"`
-	// skip firewalld calls which open ports for service endpoints
-	DisableFirewalld bool `gcfg:"disable-firewalld"`
-	// name of admin firewalld zone
-	AdminFirewalldZone string `gcfg:"admin-firewalld-zonename"`
 	// skip ctmark for tcp/udp ports of host services
 	RawSkipCTMarkHostPorts string `gcfg:"skip-ctmark-hostports"`
 	// list of tcp/udp ports of host services that should not be subjected to CT-Marking
@@ -2138,17 +2133,6 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Name:        "representor-metering-nodes",
 		Usage:       "Specifies a label on nodes whose value will be used to determine if representor metering will be applied or not",
 		Destination: &cliConfig.OvnKubeNode.RepresentorMeteringNodes,
-	},
-	&cli.BoolFlag{
-		Name:        "disable-firewalld",
-		Usage:       "skip firewalld calls which open ports for service endpoints, default to false",
-		Value:       OvnKubeNode.DisableFirewalld,
-		Destination: &cliConfig.OvnKubeNode.DisableFirewalld,
-	},
-	&cli.StringFlag{
-		Name:        "admin-firewalld-zonename",
-		Usage:       "name of admin firewalld zone",
-		Destination: &cliConfig.OvnKubeNode.AdminFirewalldZone,
 	},
 	&cli.StringFlag{
 		Name:        "skip-ctmark-hostports",

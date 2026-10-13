@@ -113,13 +113,6 @@ spec:
             periodSeconds: 30
           terminationMessagePolicy: FallbackToLogsOnError
           volumeMounts:
-            # firewall-cmd needs /run/dbus
-            - mountPath: /host/run/dbus
-              name: host-var-run-dbus
-              readOnly: true
-            - mountPath: /var/run/dbus/
-              name: host-var-run-dbus
-              readOnly: true
             - mountPath: /var/log/ovn-kubernetes/
               name: host-var-log-ovnkube
             # We mount our socket here
@@ -317,19 +310,8 @@ spec:
                   fieldPath: metadata.name
             - name: COREDNS_CLUSTER_IP
               value: {{ include "ovn-kubernetes.corednsClusterIP" (dict "Values" $.Values) }}
-            {{- $disableFirewalld := hasKey .Values "disableFirewalld" | ternary .Values.disableFirewalld false }}
-            - name: OVNKUBE_DISABLE_FIREWALLD
-              value: {{ $disableFirewalld | quote }}
-            {{- if eq $disableFirewalld false }}
-            - name: OVNKUBE_ADMIN_FIREWALLD_ZONE
-              value: {{ default "admin" .Values.adminFirewalldZone | quote }}
-            {{- end }}
         # end of container
       volumes:
-        # Common volumes
-        - name: host-var-run-dbus
-          hostPath:
-            path: /var/run/dbus
         - name: host-var-log-ovnkube
           hostPath:
             path: /var/log/ovn-kubernetes

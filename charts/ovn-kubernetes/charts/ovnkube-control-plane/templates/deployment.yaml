@@ -77,10 +77,6 @@ spec:
           runAsUser: 0
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
-        # Run directories where we need to be able to access sockets
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
@@ -243,9 +239,6 @@ spec:
           periodSeconds: 30
       # end of container
       volumes:
-      - name: host-var-run-dbus
-        hostPath:
-          path: /var/run/dbus
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch

@@ -27,7 +27,7 @@ RUN --mount=type=secret,id=artifactory_cert \
 
 COPY dist/images/install-kubectl.sh /tmp/install-kubectl.sh
 RUN DEBIAN_FRONTEND=noninteractive apt-get update \
-&& apt-get install -y --no-install-recommends gpg netcat-traditional net-tools firewalld nftables iptables iproute2 iputils-arping ncat dnsutils socat \
+&& apt-get install -y --no-install-recommends gpg netcat-traditional net-tools nftables iptables iproute2 iputils-arping ncat dnsutils socat \
 && sh /tmp/install-kubectl.sh && rm /tmp/install-kubectl.sh \
 && apt-get autoremove -y \
 && rm -rf /var/lib/apt/lists/* \

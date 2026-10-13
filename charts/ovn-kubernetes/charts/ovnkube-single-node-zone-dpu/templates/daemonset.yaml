@@ -304,9 +304,6 @@ spec:
           privileged: true
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
@@ -316,10 +313,6 @@ spec:
         # Mounts for DPU host cluster access
         - mountPath: /var/lib/kubelet
           name: host-var-lib-kubelet
-          readOnly: true
-        # firewall-cmd dependencies
-        - mountPath: /host/var/run/dbus/
-          name: host-var-run-dbus
           readOnly: true
         - mountPath: /sys
           name: sysfs
@@ -629,9 +622,6 @@ spec:
       - name: sysfs
         hostPath:
           path: /sys
-      - name: host-var-run-dbus
-        hostPath:
-          path: /var/run/dbus
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch

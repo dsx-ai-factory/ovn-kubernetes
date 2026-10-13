@@ -491,13 +491,13 @@ func TestSetExec(t *testing.T) {
 		{
 			desc:         "positive, test when 'runner' is nil",
 			expectedErr:  nil,
-			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil, "firewall-cmd", nil}, CallTimes: 11},
+			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}, CallTimes: 10},
 			setRunnerNil: true,
 		},
 		{
 			desc:         "positive, test when 'runner' is not nil",
 			expectedErr:  nil,
-			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}, CallTimes: 11},
+			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}, CallTimes: 10},
 			setRunnerNil: false,
 		},
 	}
@@ -519,26 +519,19 @@ func TestSetExec(t *testing.T) {
 func TestSetExecWithoutOVS(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	tests := []struct {
-		desc             string
-		expectedErr      error
-		disableFirewalld bool
-		onRetArgs        *ovntest.TestifyMockHelper
+		desc        string
+		expectedErr error
+		onRetArgs   *ovntest.TestifyMockHelper
 	}{
 		{
-			desc:        "positive, ip, firewall-cmd path found",
+			desc:        "positive, ip path found",
 			expectedErr: nil,
-			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil, "firewall-cmd", nil}, CallTimes: 3},
-		},
-		{
-			desc:             "positive, firewall-cmd lookup skipped when firewalld is disabled",
-			expectedErr:      nil,
-			disableFirewalld: true,
-			onRetArgs:        &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}, CallTimes: 2},
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}, CallTimes: 2},
 		},
 		{
 			desc:        "positive, sysctl path found",
 			expectedErr: nil,
-			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"sysctl", nil}, CallTimes: 3},
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"sysctl", nil}, CallTimes: 2},
 		},
 		{
 			desc:        "negative, ip path not found",
@@ -554,18 +547,10 @@ func TestSetExecWithoutOVS(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			prev := config.OvnKubeNode.DisableFirewalld
-			config.OvnKubeNode.DisableFirewalld = tc.disableFirewalld
-			t.Cleanup(func() {
-				config.OvnKubeNode.DisableFirewalld = prev
-			})
 			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgs)
 
 			e := SetExecWithoutOVS(mockKexecIface)
 			assert.Equal(t, tc.expectedErr, e)
-			if tc.disableFirewalld {
-				assert.Empty(t, runner.firewallPath)
-			}
 			mockKexecIface.AssertExpectations(t)
 		})
 	}
