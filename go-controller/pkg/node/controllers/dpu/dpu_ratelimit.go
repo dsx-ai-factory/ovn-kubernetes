@@ -5,6 +5,7 @@
 package dpu
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -355,7 +357,10 @@ func (c *Controller) setPodNADStatus(podKey, nadKey string, pod **corev1.Pod, st
 		*pod = p
 	}
 	statusMap := map[string]*util.DPUConnectionStatus{nadKey: {Status: status}}
-	if err := util.UpdatePodDPUConnStatusWithRetry(c.podLister, c.kube, *pod, statusMap); err != nil &&
+	// The DoS checker is a background task outside any pod-reconcile trace, so
+	// this status write is not instrumented.
+	ctx := tracing.ContextWithSpansDisabled(context.Background())
+	if err := util.UpdatePodDPUConnStatusWithRetry(ctx, c.podLister, c.kube, *pod, statusMap); err != nil &&
 		!util.IsAnnotationAlreadySetError(err) {
 		klog.Errorf("Failed to update connection status for pod %s NAD %s: %v", podKey, nadKey, err)
 	}

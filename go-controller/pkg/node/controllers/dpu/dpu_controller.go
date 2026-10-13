@@ -4,6 +4,7 @@
 package dpu
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -28,6 +29,7 @@ import (
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -198,20 +200,32 @@ func (c *Controller) reconcileDPUPod(key string) error {
 
 	return c.podStates.DoWithLock(key, func(key string) error {
 		if pod == nil {
+			ctx := tracing.ContextWithOperation(context.Background(), tracing.OperationDelete)
 			c.nadPods.delete(key)
 			// nil foreign is safe: pod == nil skips the status reconcile.
-			return c.handleDeleteDPUPod(key, nil, nil)
+			return c.handleDeleteDPUPod(ctx, key, nil, nil)
 		}
 
-		// If the UID changed (pod recreated with same name), clean up the old pod's state first
-		if ps, ok := c.podStates.Load(key); ok && ps.uid != pod.UID {
+		ps, tracked := c.podStates.Load(key)
+
+		// If the UID changed (pod recreated with same name), clean up the old
+		// pod's state first: for the old pod that is a delete.
+		if tracked && ps.uid != pod.UID {
+			delCtx := tracing.ContextWithOperation(context.Background(), tracing.OperationDelete)
 			// nil foreign is safe: the UID mismatch skips the status reconcile.
-			if err := c.handleDeleteDPUPod(key, pod, nil); err != nil {
+			if err := c.handleDeleteDPUPod(delCtx, key, pod, nil); err != nil {
 				return err
 			}
+			tracked = false
 		}
 
-		return c.handleAddOrUpdateDPUPod(key, pod, c.clientSet)
+		// Level-driven reconcile: a tracked pod is an update, an untracked one an add.
+		op := tracing.OperationAdd
+		if tracked {
+			op = tracing.OperationUpdate
+		}
+		ctx := tracing.ContextWithOperation(context.Background(), op)
+		return c.handleAddOrUpdateDPUPod(ctx, key, pod, c.clientSet)
 	})
 }
 

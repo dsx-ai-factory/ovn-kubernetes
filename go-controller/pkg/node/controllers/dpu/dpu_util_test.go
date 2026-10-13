@@ -226,7 +226,7 @@ var _ = Describe("Node DPU tests", func() {
 			sriovnetOpsMock.On("GetPCIFromDeviceName", vfRep).Return("", fmt.Errorf("could not find PCI Address"))
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
-			err := ctrl.addRepPort(&pod, state, ifInfo, clientset, false)
+			err := ctrl.addRepPort(context.Background(), &pod, state, ifInfo, clientset, false)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("could not find PCI Address"))
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
@@ -256,7 +256,7 @@ var _ = Describe("Node DPU tests", func() {
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
-			err := ctrl.addRepPort(&pod, state, ifInfo, clientset, false)
+			err := ctrl.addRepPort(context.Background(), &pod, state, ifInfo, clientset, false)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to run ovs command"))
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
@@ -291,7 +291,7 @@ var _ = Describe("Node DPU tests", func() {
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
-			err = ctrl.addRepPort(&pod, state, ifInfo, clientset, false)
+			err = ctrl.addRepPort(context.Background(), &pod, state, ifInfo, clientset, false)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("was added for iface-id"))
 			expectOVSPortAndInterfaceAbsent(ctrl.ovsClient, vfRep)
@@ -319,7 +319,7 @@ var _ = Describe("Node DPU tests", func() {
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 
-			err = ctrl.addRepPort(&pod, state, ifInfo, clientset, true)
+			err = ctrl.addRepPort(context.Background(), &pod, state, ifInfo, clientset, true)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("was added for iface-id"))
 			expectOVSPortAndInterfacePresent(ctrl.ovsClient, vfRep)
@@ -376,7 +376,7 @@ var _ = Describe("Node DPU tests", func() {
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 				kubeMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(nil)
 
-				err = ctrl.addRepPort(&pod, state, ifInfo, clientset, false)
+				err = ctrl.addRepPort(context.Background(), &pod, state, ifInfo, clientset, false)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
@@ -396,7 +396,7 @@ var _ = Describe("Node DPU tests", func() {
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
 				kubeMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(fmt.Errorf("failed to set pod annotations"))
 
-				err = ctrl.addRepPort(&pod, state, ifInfo, clientset, false)
+				err = ctrl.addRepPort(context.Background(), &pod, state, ifInfo, clientset, false)
 				Expect(err).To(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
@@ -1502,7 +1502,7 @@ var _ = Describe("Node DPU tests", func() {
 			})
 
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1"}}
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
 		})
 
@@ -1512,7 +1512,7 @@ var _ = Describe("Node DPU tests", func() {
 			tracked := map[string]*dpuConnectionState{
 				"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1", revalidate: true},
 			}
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
 		})
 
@@ -1523,7 +1523,7 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {connClampedDown: true}}
 
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
 		})
 
@@ -1534,7 +1534,7 @@ var _ = Describe("Node DPU tests", func() {
 			})
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {connClampedDown: true}}
 
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
 		})
 
@@ -1542,7 +1542,7 @@ var _ = Describe("Node DPU tests", func() {
 			withStatus(livePod, "ns1/nad1")
 			patched := expectStatusPatch(livePod, map[string]*util.DPUConnectionStatus{"ns1/nad1": nil})
 
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", nil, nil)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", nil, nil)).To(Succeed())
 			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
 		})
 
@@ -1550,7 +1550,7 @@ var _ = Describe("Node DPU tests", func() {
 			withStatus(livePod, "ns1/nad1")
 
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1"}}
-			Expect(ctrl.reconcileDPUConnStatus(livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
+			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
 			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
 		})
 	})
@@ -1579,24 +1579,24 @@ var _ = Describe("Node DPU tests", func() {
 		It("Indexes a pod by every NAD it asks for, under the base key", func() {
 			p := podWithNADs("waiting", "ns1/nad1", "ns1/nad1/1", "ns1/nad2")
 
-			Expect(ctrl.handleAddOrUpdateDPUPod("foo-ns/waiting", p, nil)).To(Succeed())
+			Expect(ctrl.handleAddOrUpdateDPUPod(context.Background(), "foo-ns/waiting", p, nil)).To(Succeed())
 
 			Expect(ctrl.nadPods.pods("ns1/nad1")).To(ConsistOf("foo-ns/waiting"))
 			Expect(ctrl.nadPods.pods("ns1/nad2")).To(ConsistOf("foo-ns/waiting"))
 		})
 
 		It("Indexes only the pods that ask for the NAD", func() {
-			Expect(ctrl.handleAddOrUpdateDPUPod("foo-ns/wants-nad", podWithNADs("wants-nad", "ns1/nad1"), nil)).To(Succeed())
-			Expect(ctrl.handleAddOrUpdateDPUPod("foo-ns/other-nad", podWithNADs("other-nad", "ns1/nad2"), nil)).To(Succeed())
-			Expect(ctrl.handleAddOrUpdateDPUPod("foo-ns/no-nad", podWithNADs("no-nad"), nil)).To(Succeed())
+			Expect(ctrl.handleAddOrUpdateDPUPod(context.Background(), "foo-ns/wants-nad", podWithNADs("wants-nad", "ns1/nad1"), nil)).To(Succeed())
+			Expect(ctrl.handleAddOrUpdateDPUPod(context.Background(), "foo-ns/other-nad", podWithNADs("other-nad", "ns1/nad2"), nil)).To(Succeed())
+			Expect(ctrl.handleAddOrUpdateDPUPod(context.Background(), "foo-ns/no-nad", podWithNADs("no-nad"), nil)).To(Succeed())
 
 			Expect(ctrl.nadPods.pods("ns1/nad1")).To(ConsistOf("foo-ns/wants-nad"))
 		})
 
 		It("Drops a NAD the pod no longer asks for", func() {
-			Expect(ctrl.handleAddOrUpdateDPUPod("foo-ns/a-pod", podWithNADs("a-pod", "ns1/nad1", "ns1/nad2"), nil)).To(Succeed())
+			Expect(ctrl.handleAddOrUpdateDPUPod(context.Background(), "foo-ns/a-pod", podWithNADs("a-pod", "ns1/nad1", "ns1/nad2"), nil)).To(Succeed())
 
-			Expect(ctrl.handleAddOrUpdateDPUPod("foo-ns/a-pod", podWithNADs("a-pod", "ns1/nad2"), nil)).To(Succeed())
+			Expect(ctrl.handleAddOrUpdateDPUPod(context.Background(), "foo-ns/a-pod", podWithNADs("a-pod", "ns1/nad2"), nil)).To(Succeed())
 
 			Expect(ctrl.nadPods.pods("ns1/nad1")).To(BeEmpty())
 			Expect(ctrl.nadPods.pods("ns1/nad2")).To(ConsistOf("foo-ns/a-pod"))
@@ -1613,7 +1613,7 @@ var _ = Describe("Node DPU tests", func() {
 		})
 
 		It("Forgets a pod that is gone", func() {
-			Expect(ctrl.handleAddOrUpdateDPUPod("foo-ns/a-pod", podWithNADs("a-pod", "ns1/nad1"), nil)).To(Succeed())
+			Expect(ctrl.handleAddOrUpdateDPUPod(context.Background(), "foo-ns/a-pod", podWithNADs("a-pod", "ns1/nad1"), nil)).To(Succeed())
 			podNamespaceLister.On("Get", "a-pod").Return(nil, apierrors.NewNotFound(corev1.Resource("pods"), "a-pod"))
 
 			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())

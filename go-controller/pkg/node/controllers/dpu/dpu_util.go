@@ -10,6 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	corev1 "k8s.io/api/core/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -20,6 +24,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tracing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -52,8 +57,33 @@ type podDPUState struct {
 	nadStates map[string]*dpuConnectionState
 }
 
-func (c *Controller) addDPUPodForNAD(pod *corev1.Pod, state *dpuConnectionState,
-	netInfo util.NetInfo, nadKey string, getter cni.PodInfoGetter, isRevalidation bool) error {
+// startTrace starts a new root span for pod reconcile work, linked to the span
+// propagated in the pod's traceparent annotation. Spans are suppressed when no
+// traceparent is present. netInfo and nadKey are optional span attributes.
+func (c *Controller) startTrace(ctx context.Context, pod *corev1.Pod, netInfo util.NetInfo, nadKey string) (context.Context, trace.Span) {
+	ctx = tracing.ContextWithSpanNamePrefix(ctx, tracing.NodeNetworkControllerPodSpanPrefix)
+	ctx, span := tracing.StartTrace(ctx, pod.Annotations)
+	span.SetAttributes(tracing.PodAttrs(pod.Namespace, pod.Name, string(pod.UID))...)
+	if netInfo != nil {
+		span.SetAttributes(util.OvnNetworkSpanAttrs(netInfo)...)
+	}
+	if nadKey != "" {
+		span.SetAttributes(attribute.String(tracing.SpanAttrK8sNADKey, nadKey))
+	}
+	return ctx, span
+}
+
+func (c *Controller) addDPUPodForNAD(ctx context.Context, pod *corev1.Pod, state *dpuConnectionState,
+	netInfo util.NetInfo, nadKey string, getter cni.PodInfoGetter, isRevalidation bool) (err error) {
+	ctx, span := c.startTrace(ctx, pod, netInfo, nadKey)
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
 	klog.Infof("Adding %s on DPU", podDesc)
 	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil,
@@ -61,7 +91,7 @@ func (c *Controller) addDPUPodForNAD(pod *corev1.Pod, state *dpuConnectionState,
 	if err != nil {
 		return fmt.Errorf("failed to get pod interface information of %s: %w", podDesc, err)
 	}
-	err = c.addRepPort(pod, state, podInterfaceInfo, getter, isRevalidation)
+	err = c.addRepPort(ctx, pod, state, podInterfaceInfo, getter, isRevalidation)
 	if err != nil {
 		return fmt.Errorf("failed to add rep port for %s: %w", podDesc, err)
 	}
@@ -97,7 +127,7 @@ func (c *Controller) getNetInfoForNADKey(nadKey string) (util.NetInfo, error) {
 
 // handleAddOrUpdateDPUPod reconciles DPU state for a pod.
 // The podStates lock for podKey must be held by the caller.
-func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, clientSet cni.PodInfoGetter) error {
+func (c *Controller) handleAddOrUpdateDPUPod(ctx context.Context, podKey string, pod *corev1.Pod, clientSet cni.PodInfoGetter) error {
 	allDPUCDs, err := util.UnmarshalPodDPUConnDetailsAllNetworks(pod.Annotations)
 	if err != nil {
 		return err
@@ -156,7 +186,7 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 		}
 	}
 	if len(desiredNADs) == 0 {
-		return c.handleDeleteDPUPod(podKey, pod, foreign)
+		return c.handleDeleteDPUPod(ctx, podKey, pod, foreign)
 	}
 
 	ps, _ := c.podStates.LoadOrStore(podKey, &podDPUState{
@@ -218,7 +248,7 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 	// below: the host side waits on this status to plumb a new sandbox, and must
 	// not be told a representor is ready once it has been deleted. NADs added
 	// below get their status from addRepPort instead.
-	if err := c.reconcileDPUConnStatus(pod, podKey, nadsToKeep, foreign); err != nil {
+	if err := c.reconcileDPUConnStatus(ctx, pod, podKey, nadsToKeep, foreign); err != nil {
 		if len(validPortsToDelete) > 0 {
 			// Nothing is untracked yet, so the next retry finds these ports.
 			return err
@@ -245,7 +275,7 @@ func (c *Controller) handleAddOrUpdateDPUPod(podKey string, pod *corev1.Pod, cli
 			continue
 		}
 		recovered, isRevalidation := revalidating[nadKey]
-		if err := c.addDPUPodForNAD(pod, desired.state, desired.netInfo, nadKey, clientSet,
+		if err := c.addDPUPodForNAD(ctx, pod, desired.state, desired.netInfo, nadKey, clientSet,
 			isRevalidation); err != nil {
 			klog.Errorf("Error adding pod %s NAD %s: %v", podKey, nadKey, err)
 			if isRevalidation {
@@ -278,7 +308,7 @@ func (c *Controller) ownsPfMAC(pfMAC string) bool {
 // NADs tracked for it: confirmed ports are reported ready or clamped down,
 // and every other entry is removed, except the NADs in foreign, which a
 // different DPU on the same node serves and whose status is not ours to touch.
-func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, tracked map[string]*dpuConnectionState, foreign sets.Set[string]) error {
+func (c *Controller) reconcileDPUConnStatus(ctx context.Context, pod *corev1.Pod, podKey string, tracked map[string]*dpuConnectionState, foreign sets.Set[string]) error {
 	currentStatus, err := util.UnmarshalPodDPUConnStatusAllNetworks(pod.Annotations)
 	if err != nil {
 		return err
@@ -312,9 +342,15 @@ func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, trac
 		return nil
 	}
 
+	ctx, span := c.startTrace(ctx, pod, nil, "")
+	span.SetAttributes(attribute.Bool(tracing.SpanAttrK8sPodDeleted, len(tracked) == 0))
+	defer span.End()
+
 	klog.V(5).Infof("Updating DPU connection status of pod %s for %d NADs", podKey, len(statusMap))
-	err = util.UpdatePodDPUConnStatusWithRetry(c.podLister, c.kube, pod, statusMap)
+	err = util.UpdatePodDPUConnStatusWithRetry(ctx, c.podLister, c.kube, pod, statusMap)
 	if err != nil && !util.IsAnnotationAlreadySetError(err) {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("failed to update DPU connection status of pod %s: %w", podKey, err)
 	}
 	return nil
@@ -328,13 +364,13 @@ func (c *Controller) reconcileDPUConnStatus(pod *corev1.Pod, podKey string, trac
 // foreign holds the NADs served by another DPU, whose status must be preserved;
 // it may be nil on the delete paths that do not reconcile status.
 // The podStates lock for podKey must be held by the caller.
-func (c *Controller) handleDeleteDPUPod(podKey string, pod *corev1.Pod, foreign sets.Set[string]) error {
+func (c *Controller) handleDeleteDPUPod(ctx context.Context, podKey string, pod *corev1.Pod, foreign sets.Set[string]) error {
 	ps, ok := c.podStates.Load(podKey)
 	if !ok {
 		// Nothing is tracked, but the pod can still carry status that this
 		// controller never got to clean up.
 		if pod != nil {
-			return c.reconcileDPUConnStatus(pod, podKey, nil, foreign)
+			return c.reconcileDPUConnStatus(ctx, pod, podKey, nil, foreign)
 		}
 		return nil
 	}
@@ -355,7 +391,7 @@ func (c *Controller) handleDeleteDPUPod(podKey string, pod *corev1.Pod, foreign 
 	// Clear the status before the ports go away, so that the host side is never
 	// told a representor is ready after it has been deleted.
 	if pod != nil && pod.UID == ps.uid {
-		if err := c.reconcileDPUConnStatus(pod, podKey, nil, foreign); err != nil {
+		if err := c.reconcileDPUConnStatus(ctx, pod, podKey, nil, foreign); err != nil {
 			return err
 		}
 	}
@@ -375,7 +411,7 @@ func (c *Controller) handleDeleteDPUPod(podKey string, pod *corev1.Pod, foreign 
 // addRepPort adds the representor of the VF to the ovs bridge. isRevalidation
 // says the port was recovered after a restart rather than created here, and is
 // kept rather than deleted again if the configuration fails.
-func (c *Controller) addRepPort(pod *corev1.Pod, state *dpuConnectionState, ifInfo *cni.PodInterfaceInfo,
+func (c *Controller) addRepPort(ctx context.Context, pod *corev1.Pod, state *dpuConnectionState, ifInfo *cni.PodInterfaceInfo,
 	getter cni.PodInfoGetter, isRevalidation bool) error {
 
 	nadKey := ifInfo.NADKey
@@ -389,10 +425,10 @@ func (c *Controller) addRepPort(pod *corev1.Pod, state *dpuConnectionState, ifIn
 		return fmt.Errorf("failed to get PCI address of VF rep %s for pod %s: %w", state.vfRepName, podDesc, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ovsCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	klog.Infof("Adding VF representor %s for %s", state.vfRepName, podDesc)
-	err = cni.ConfigureOVS(ctx, c.ovsClient, pod.Namespace, pod.Name, "", state.vfRepName, ifInfo, state.sandboxId,
+	err = cni.ConfigureOVS(ovsCtx, c.ovsClient, pod.Namespace, pod.Name, "", state.vfRepName, ifInfo, state.sandboxId,
 		deviceID, false, getter)
 	if err != nil {
 		if !isRevalidation {
@@ -425,7 +461,7 @@ func (c *Controller) addRepPort(pod *corev1.Pod, state *dpuConnectionState, ifIn
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	statusMap := map[string]*util.DPUConnectionStatus{nadKey: connStatus}
-	err = util.UpdatePodDPUConnStatusWithRetry(c.podLister, c.kube, pod, statusMap)
+	err = util.UpdatePodDPUConnStatusWithRetry(ctx, c.podLister, c.kube, pod, statusMap)
 	if err != nil && !util.IsAnnotationAlreadySetError(err) {
 		if !isRevalidation {
 			_ = c.delRepPort(pod, state, nadKey)
