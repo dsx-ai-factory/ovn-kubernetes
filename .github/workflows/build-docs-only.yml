@@ -1,0 +1,37 @@
+name: build (docs only)
+
+# Companion to build.yml. That workflow skips documentation-only pull requests
+# via paths-ignore, which means its checks never report — and a check that never
+# reports blocks a pull request once it is marked required. This workflow carries
+# the same job names over the paths build.yml ignores, so the required contexts
+# always resolve.
+#
+# Keep the paths list here identical to the paths-ignore list in build.yml, and
+# keep the job names identical to the job names there.
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '**/*.md'
+      - 'mkdocs.yml'
+      - 'CODEOWNERS'
+      - 'NOTICE'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: No build needed
+        run: echo "No buildable sources changed."
+
+  unit-test:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: No tests needed
+        run: echo "No testable sources changed."

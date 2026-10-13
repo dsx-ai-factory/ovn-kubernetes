@@ -22,6 +22,10 @@ on:
       - 'mkdocs.yml'
       - 'CODEOWNERS'
       - 'NOTICE'
+  # The merge queue builds a candidate branch that no path filter applies to,
+  # so the required checks always run here even when the pull request skipped
+  # them. Without this the queue waits for a check that never reports.
+  merge_group:
   workflow_dispatch:
 
 permissions:
