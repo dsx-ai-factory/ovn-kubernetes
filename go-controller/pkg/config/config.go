@@ -96,6 +96,9 @@ var (
 	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
 	Version = "1.4.0"
+	// NVIDIA distribution version, numbered independently of the upstream
+	// version above, to be changed with every distribution release
+	DistroVersion = "2.4.0-pr"
 	// version of the go runtime used to compile ovn-kubernetes
 	GoVersion = runtime.Version()
 	// os and architecture used to build ovn-kubernetes
@@ -983,7 +986,8 @@ func init() {
 	savedNoOverlay = NoOverlay
 	savedManagedBGP = ManagedBGP
 	cli.VersionPrinter = func(_ *cli.Context) {
-		fmt.Printf("Version: %s\n", Version)
+		fmt.Printf("Version: %s\n", DistroVersion)
+		fmt.Printf("Upstream baseline: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
 		fmt.Printf("Git branch: %s\n", Branch)
 		fmt.Printf("Go version: %s\n", GoVersion)
