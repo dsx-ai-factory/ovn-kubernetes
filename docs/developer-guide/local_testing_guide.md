@@ -27,7 +27,7 @@ $ PATH=/home/$USER/src/golang/go1-12-1/go/bin:$GOPATH/src/k8s.io/kubernetes/_out
 ### Download and Build Kubernetes Components (E2E Tests, ginkgo, kubectl):
 
 Check the Kubernetes version used by `make -C test install-kind` in
-[`test/scripts/install-kind.sh`](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/test/scripts/install-kind.sh) and set the
+[`test/scripts/install-kind.sh`](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/test/scripts/install-kind.sh) and set the
 environmental variable `K8S_VERSION` to the same value. Also make sure to export a GOPATH which points to
 your go directory with `export GOPATH=(...)`.
 
@@ -228,7 +228,7 @@ $ popd
 ```
 
 The value of `WHAT=` will be used to modify the `-ginkgo.focus` parameter. Individual tests can be retrieved from this
-repository under [test/e2e](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/test/e2e). To see a list of individual
+repository under [test/e2e](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/release-2.4/test/e2e). To see a list of individual
 tests, one could run:
 ~~~
 grep -R ginkgo.It test/

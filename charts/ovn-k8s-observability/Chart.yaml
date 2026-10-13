@@ -7,8 +7,8 @@ description: >-
   ServiceMonitors, Prometheus alert rules, and Grafana dashboards for
   ovn-kubernetes interconnect mode.
 type: application
-version: 1.0.0
-appVersion: "1.0.0"
+version: 2.4.0
+appVersion: "2.4.0"
 home: https://github.com/dsx-ai-factory/ovn-kubernetes
 icon: https://www.ovn.org/images/ovn-logo.png
 keywords:
@@ -25,6 +25,6 @@ sources:
   - https://github.com/ovn-kubernetes/ovn-kubernetes
 dependencies:
   - name: alert-rule
-    version: 1.0.0
+    version: 2.4.0
   - name: dashboard
-    version: 1.0.0
+    version: 2.4.0

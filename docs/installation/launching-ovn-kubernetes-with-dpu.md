@@ -29,7 +29,7 @@ k8s.ovn.org/dpu-host=
 ```
 
 ## Launching OVN K8s DPU Host cluster using helm
-OVN-Kubernetes CNI can be deployed using helm charts provided under [OVN-Kubernetes Helm Charts](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/charts/ovn-kubernetes). Refer [Launching OVN-Kubernetes using Helm Charts](launching-ovn-kubernetes-with-helm.md) for general instructions on using helm charts and explanation of common values used in various subcharts.
+OVN-Kubernetes CNI can be deployed using helm charts provided under [OVN-Kubernetes Helm Charts](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/release-2.4/charts/ovn-kubernetes). Refer [Launching OVN-Kubernetes using Helm Charts](launching-ovn-kubernetes-with-helm.md) for general instructions on using helm charts and explanation of common values used in various subcharts.
 
 For DPU Hosts cluster use values-single-node-zone.yaml by setting the following fields as specified. The other fields in the file can be set as needed.
 

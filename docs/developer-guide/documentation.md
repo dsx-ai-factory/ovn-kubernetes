@@ -75,7 +75,7 @@ search capabilities.
 The published site is **versioned** with [mike](https://github.com/jimporter/mike).
 Each `release-*` branch and `master` appears in a version dropdown on the docs site.
 Deploy logic lives in
-[`hack/build-docs.sh`](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/hack/build-docs.sh)
+[`hack/build-docs.sh`](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/hack/build-docs.sh)
 and is invoked via `make -C docs build-docs` (see
 [`docs/Makefile`](../Makefile)).
 <!--

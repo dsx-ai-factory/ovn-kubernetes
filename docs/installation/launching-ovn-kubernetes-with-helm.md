@@ -77,5 +77,5 @@ The chart uses `values-single-node-zone.yaml` by default.
 
 ## Values
 
-See the [helm chart README](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/charts/ovn-kubernetes/README.md)
+See the [helm chart README](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/charts/ovn-kubernetes/README.md)
 for the full list of helm values supported by this chart.

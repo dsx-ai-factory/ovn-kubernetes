@@ -2,7 +2,7 @@
 
 For CI, OVN-Kubernetes runs the
 [Kubernetes E2E tests](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-testing/e2e-tests.md)
-and some [locally defined](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/test/e2e) tests.
+and some [locally defined](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/release-2.4/test/e2e) tests.
 <!--
 TODO: Update reference and uncomment.
 [GitHub Actions](https://help.github.com/en/actions)
@@ -61,7 +61,7 @@ The tests are broken into 2 categories, `shard` tests which execute tests from t
 
 The shard tests are broken into a set of shards, which is just a grouping of tests,
 and each shard is run in a separate job in parallel. Shards execute the `shard-%` target in 
-[ovn-kubernetes/test/Makefile](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/test/Makefile).
+[ovn-kubernetes/test/Makefile](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/test/Makefile).
 The set of shards may change in the future. Below is an example of the shards at time of this writing:
 
 - shard-network
@@ -78,12 +78,12 @@ selecting a specific shard, you modify ginkgo's `--focus` parameter.
 
 The regex expression for determining which E2E test is run in which shard, as
 well as the list of skipped tests is defined in
-[ovn-kubernetes/test/scripts/e2e-kind.sh](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/test/scripts/e2e-kind.sh).
+[ovn-kubernetes/test/scripts/e2e-kind.sh](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/test/scripts/e2e-kind.sh).
 
 ### Control-plane tests
 
 In addition to the `shard-%` tests, there is also a `control-plane` target in 
-[ovn-kubernetes/test/Makefile](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/test/Makefile).
+[ovn-kubernetes/test/Makefile](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/test/Makefile).
 Below is a description of this target:
 
 - control-plane
@@ -92,9 +92,9 @@ Below is a description of this target:
   - See bottom of this document for an example.
 
 All local tests are run by `make control-plane`. The local tests are controlled in
-[ovn-kubernetes/test/scripts/e2e-cp.sh](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/test/scripts/e2e-cp.sh)
+[ovn-kubernetes/test/scripts/e2e-cp.sh](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/test/scripts/e2e-cp.sh)
 and the actual tests are defined in the directory
-[ovn-kubernetes/test/e2e/](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/test/e2e).
+[ovn-kubernetes/test/e2e/](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/release-2.4/test/e2e).
 
 #### Node IP migration tests
 

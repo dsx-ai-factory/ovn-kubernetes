@@ -177,22 +177,43 @@ Here are some links to help in your ovn-kubernetes journey:
 
 ## Versions and releases
 
-**NVIDIA versions this distribution independently of the upstream project.** A
-release number here does not correspond to an upstream release number, and an
-upstream release carrying the same number may not exist at all. Do not infer
-which upstream code a snapshot contains from its version — read [NOTICE](NOTICE)
-and the release notes for that snapshot instead.
+**NVIDIA releases are numbered `2.MINOR.PATCH`.** The major is always `2`, which
+keeps this distribution clear of upstream's version namespace — upstream has
+been on major `1` since v1.0.0. `MINOR` names the upstream minor release this
+snapshot is built from, so 2.4.0 is built from upstream 1.4. `PATCH` counts
+NVIDIA drops against that same upstream baseline.
 
-Three numbers in this tree increment independently:
+Numbering therefore starts at 2.4.0 rather than 2.0.0, because the minor is
+inherited from upstream rather than counted from zero. This tree was tracking
+upstream 1.4 when it was first published, so its first release is 2.4.0, and no
+2.0, 2.1, 2.2, or 2.3 release exists. The minor next moves when the tree is
+rebased onto upstream 1.5, which makes the release after that 2.5.0.
+
+The minor is a baseline pointer, not a compatibility boundary: two releases
+sharing a minor come from the same upstream branch, but NVIDIA may add, change,
+or remove behaviour between them. **Pin an exact version, or at most a `~2.4.0`
+range — never `^2.4.0`**, which would admit a different upstream baseline.
+[CHANGELOG.md](CHANGELOG.md) records the exact upstream branch, tag, and commit
+behind each release.
+
+Release branches are named for the minor, matching upstream's own `release-1.4`,
+so `release-2.4` carries the whole 2.4.x series. `main` is the development line
+and carries a `-pr` prerelease suffix: it sorts below the release it leads to,
+and Helm keeps it out of ordinary version-range resolution unless a caller asks
+for it with `--devel` or pins the exact string.
+
+Three numbers appear in this tree:
 
 | Number | Where it lives | What it tracks |
 |---|---|---|
-| Distribution release | `release-*` branches and `v*` tags | this snapshot of the source tree |
-| Helm chart version | `version` in `charts/*/Chart.yaml` | the chart packaging |
+| Distribution release | `release-*` branches, `v*` tags, `DistroVersion` in [`config.go`](go-controller/pkg/config/config.go), and `version` in `charts/*/Chart.yaml` | this snapshot of the source tree |
+| Upstream baseline | `Version` in [`config.go`](go-controller/pkg/config/config.go) | the upstream release this tree is built from |
 | Container image version | `appVersion` in `charts/*/Chart.yaml`, dated `YYYY-MM.N` | the image build |
 
-Pin a tag rather than a branch: a tag names one exact tree, while `release-*`
-branches keep receiving security backports after the initial drop.
+`ovnkube --version` prints the first two, as `Version` and `Upstream baseline`.
+
+Pin a tag rather than a branch: a tag names one exact tree, while a release
+branch keeps receiving drops and backports after the initial cut.
 
 ### Building against the Go code
 

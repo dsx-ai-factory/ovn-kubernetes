@@ -10,7 +10,7 @@
 
 ## **1 Overview**
 
-Differentiated Services Code Point (DSCP) marking and egress bandwidth metering let you prioritize or police specific traffic flows. The new **NetworkQoS** Custom Resource Definition (CRD) in [ovn-kubernetes](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/charts/ovn-kubernetes/charts/ovnkube-crds/crds/k8s.ovn.org_networkqoses.yaml) makes both features available to Kubernetes users on **all** pod interfaces—primary or secondary—without touching pod manifests.
+Differentiated Services Code Point (DSCP) marking and egress bandwidth metering let you prioritize or police specific traffic flows. The new **NetworkQoS** Custom Resource Definition (CRD) in [ovn-kubernetes](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/charts/ovn-kubernetes/charts/ovnkube-crds/crds/k8s.ovn.org_networkqoses.yaml) makes both features available to Kubernetes users on **all** pod interfaces—primary or secondary—without touching pod manifests.
 
 This guide provides a step-by-step example of how to use this feature. Before you begin, ensure that you have a Kubernetes cluster configured with the ovn-kubernetes CNI. Since the examples use network attachments, you must run the cluster with multiple network support enabled. In a kind cluster, you would use the following flags:
 
@@ -84,7 +84,7 @@ spec:
           - 172.16.0.0/12
           - 192.168.0.0/16
 ```
-A full CRD template lives [here](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/charts/ovn-kubernetes/charts/ovnkube-crds/crds/k8s.ovn.org_networkqoses.yaml).
+A full CRD template lives [here](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/charts/ovn-kubernetes/charts/ovnkube-crds/crds/k8s.ovn.org_networkqoses.yaml).
 
 The `egress` field is a list, allowing you to define multiple markings and bandwidth limits based on different classifiers.
 

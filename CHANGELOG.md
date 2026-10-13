@@ -4,11 +4,12 @@ This changelog summarizes major changes in this repository compared with
 [upstream OVN-Kubernetes](https://github.com/ovn-kubernetes/ovn-kubernetes).
 Each release identifies the upstream branch, release tag, and commit used as
 its comparison baseline. Small fixes and internal refactoring are omitted.
-Downstream and upstream release numbers are independent.
+Downstream releases are numbered `2.MINOR.PATCH`, where `MINOR` tracks the
+upstream minor release the drop is based on.
 
-## [Unreleased]
+## [2.4.0]
 
-Changes in downstream `main` compared with upstream `release-1.4` at
+Changes in downstream `release-2.4` compared with upstream `release-1.4` at
 tag `v1.4.0`, commit
 [`d6a3812d1bc1c36bf24c7eda0e86e9b13d84907d`](https://github.com/ovn-kubernetes/ovn-kubernetes/commit/d6a3812d1bc1c36bf24c7eda0e86e9b13d84907d).
 

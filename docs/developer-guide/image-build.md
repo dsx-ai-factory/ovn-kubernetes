@@ -20,7 +20,7 @@ Therefore, use the following images and tags to obtain these images:
 
 ## Building Images
 
-To build images locally, use the following [Makefile](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/main/dist/images/Makefile) and their respective Dockerfiles from the [dist/images](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/dist/images) folder in this repository.
+To build images locally, use the following [Makefile](https://github.com/dsx-ai-factory/ovn-kubernetes/blob/release-2.4/dist/images/Makefile) and their respective Dockerfiles from the [dist/images](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/release-2.4/dist/images) folder in this repository.
 
 ```bash
 $ cd dist/images
