@@ -2,7 +2,7 @@
 
 -----------------------
 
-![Version: 1.5.19](https://img.shields.io/badge/Version-1.5.19-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2026-05.19](https://img.shields.io/badge/AppVersion-2026--05.19-informational?style=flat-square)
+![Version: 2.5.0-pr](https://img.shields.io/badge/Version-2.5.0--pr-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2026-10.latest](https://img.shields.io/badge/AppVersion-2026--10.latest-informational?style=flat-square)
 
 **Homepage:** <https://github.com/dsx-ai-factory/ovn-kubernetes>
 
@@ -76,13 +76,13 @@ every layer is a subchart by itself.
 
 | Chart | Version | Path |
 | --- | --- | --- |
-| `ovnkube-control-plane` | `1.5.19` | `charts/ovnkube-control-plane` |
-| `ovnkube-crds` | `1.5.19` | `charts/ovnkube-crds` |
-| `ovnkube-identity` | `1.5.19` | `charts/ovnkube-identity` |
-| `ovnkube-node-dpu-host` | `1.5.19` | `charts/ovnkube-node-dpu-host` |
-| `ovnkube-single-node-zone` | `1.5.19` | `charts/ovnkube-single-node-zone` |
-| `ovnkube-single-node-zone-dpu` | `1.5.19` | `charts/ovnkube-single-node-zone-dpu` |
-| `ovs-node` | `1.5.19` | `charts/ovs-node` |
+| `ovnkube-control-plane` | `2.5.0-pr` | `charts/ovnkube-control-plane` |
+| `ovnkube-crds` | `2.5.0-pr` | `charts/ovnkube-crds` |
+| `ovnkube-identity` | `2.5.0-pr` | `charts/ovnkube-identity` |
+| `ovnkube-node-dpu-host` | `2.5.0-pr` | `charts/ovnkube-node-dpu-host` |
+| `ovnkube-single-node-zone` | `2.5.0-pr` | `charts/ovnkube-single-node-zone` |
+| `ovnkube-single-node-zone-dpu` | `2.5.0-pr` | `charts/ovnkube-single-node-zone-dpu` |
+| `ovs-node` | `2.5.0-pr` | `charts/ovs-node` |
 
 Install/upgrade the helm chart. `k8sAPIServer`, `podNetwork`, and
 `global.imageRepositoryPrefix` have no defaults, so replace the placeholders
