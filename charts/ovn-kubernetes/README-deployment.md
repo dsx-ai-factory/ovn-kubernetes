@@ -362,6 +362,15 @@ false
 			<td></td>
 		</tr>
 		<tr>
+			<td>global.hybridOverlaySubnetWriters</td>
+			<td>list</td>
+			<td><pre lang="json">
+[]
+</pre>
+</td>
+			<td>Users other than ovnkube-cluster-manager allowed to write the hybrid overlay node subnet annotation</td>
+		</tr>
+		<tr>
 			<td>global.imagePullSecretName</td>
 			<td>string</td>
 			<td><pre lang="json">
