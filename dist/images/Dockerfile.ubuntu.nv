@@ -48,6 +48,9 @@ COPY --chmod=755  --from=builder /ovn-kubernetes/dist/images/git_info /ovn-kuber
 COPY  --from=builder /ovn-kubernetes/dist/images/ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 COPY --chmod=755  --from=builder /ovn-kubernetes/dist/images/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
+# include checked-in third-party license files in the final image
+COPY LICENSES/ /usr/share/licenses/ovn-kubernetes/
+
 LABEL io.k8s.display-name="ovnk8s" \
       io.k8s.description="ovn k8s ubuntu image"
 
