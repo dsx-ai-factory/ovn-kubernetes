@@ -252,23 +252,23 @@ var _ = Describe("Persistent IP allocator operations", func() {
 
 				netInfo, err := util.NewNetInfo(netConf, nil)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(
-					NewIPAMClaimReconciler(nil, netInfo, lister).FindIPAMClaim(
-						network.IPAMClaimReference,
-						network.Namespace,
-					),
-				).To(Equal(expectedClaim))
+				actualClaim, err := NewIPAMClaimReconciler(nil, netInfo, lister).FindIPAMClaim(
+					network.IPAMClaimReference,
+					network.Namespace,
+				)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(actualClaim).To(Equal(expectedClaim))
 			},
 			Entry(
 				"when the claim we're looking for is actually passed in layer2 topology",
-				&ovncnitypes.NetConf{Topology: ovnktypes.Layer2Topology, Subnets: "192.10.10.0/24"},
+				&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: networkName}, Topology: ovnktypes.Layer2Topology, Subnets: "192.10.10.0/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 			),
 			Entry(
 				"when the claim we're looking for is actually passed in localnet topology",
-				&ovncnitypes.NetConf{Topology: ovnktypes.LocalnetTopology, Subnets: "192.10.10.0/24"},
+				&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: networkName}, Topology: ovnktypes.LocalnetTopology, Subnets: "192.10.10.0/24"},
 				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
@@ -361,7 +361,40 @@ var _ = Describe("Persistent IP allocator operations", func() {
 				ipamClaimWithIPs(namespace, claimName, networkName, "192.10.10.10/24"),
 				ErrPersistentIPsNotAvailableOnNetwork,
 			),
+			Entry(
+				"when the claim belongs to another network in layer2 topology",
+				&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: networkName}, Topology: ovnktypes.Layer2Topology, Subnets: "192.10.10.0/24"},
+				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
+				ipamClaimWithIPs(namespace, claimName, "other-network", "192.10.10.10/24"),
+				ErrIgnoredIPAMClaim,
+			),
+			Entry(
+				"when the claim belongs to another network in localnet topology",
+				&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: networkName}, Topology: ovnktypes.LocalnetTopology, Subnets: "192.10.10.0/24"},
+				&nadapi.NetworkSelectionElement{IPAMClaimReference: claimName, Namespace: namespace},
+				ipamClaimWithIPs(namespace, claimName, "other-network", "192.10.10.10/24"),
+				ErrIgnoredIPAMClaim,
+			),
 		)
+
+		It("does not leak network names in the error returned for a claim on another network", func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			lister, listerTeardown := generateIPAMClaimsListerAndTeardownFunc(
+				ctx.Done(),
+				ipamClaimWithIPs(namespace, claimName, "other-network", "192.10.10.10/24"),
+			)
+			defer func() {
+				cancel()
+				listerTeardown()
+			}()
+
+			netInfo, err := util.NewNetInfo(dummyNetconf(networkName), nil)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = NewIPAMClaimReconciler(nil, netInfo, lister).FindIPAMClaim(claimName, namespace)
+			Expect(err).To(MatchError(ErrIgnoredIPAMClaim))
+			Expect(err.Error()).NotTo(ContainSubstring("other-network"))
+			Expect(err.Error()).NotTo(ContainSubstring(networkName))
+		})
 	})
 })
 

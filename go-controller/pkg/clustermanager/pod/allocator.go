@@ -368,11 +368,14 @@ func (a *PodAllocator) releasePodOnNAD(ctx context.Context, pod *corev1.Pod, nad
 		hasIPAMClaim = false
 	}
 	if hasIPAMClaim {
-		var err error
 		ipamClaim, err := a.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
 		hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
-		if apierrors.IsNotFound(err) {
-			klog.Errorf("Failed to retrieve IPAMClaim %q but will release IPs: %v", network.IPAMClaimReference, err)
+		if apierrors.IsNotFound(err) || errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
+			// the claim is gone or not ours to honor: the IPs this pod holds on
+			// this network are only tracked by this network's allocator, so
+			// they must still be released.
+			klog.Errorf("Not honoring IPAMClaim %q referenced by pod %s/%s but will release IPs: %v",
+				network.IPAMClaimReference, pod.Namespace, pod.Name, err)
 		} else if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
@@ -496,7 +499,8 @@ func (a *PodAllocator) allocatePodOnNAD(ctx context.Context, pod *corev1.Pod, na
 		if errors.Is(err, ipallocator.ErrFull) ||
 			errors.Is(err, ipallocator.ErrAllocated) ||
 			errors.Is(err, mac.ErrReserveMACConflict) ||
-			errors.Is(err, podallocator.ErrIPFamilyMismatch) {
+			errors.Is(err, podallocator.ErrIPFamilyMismatch) ||
+			errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
 			a.recordPodErrorEvent(pod, err)
 		}
 		return err
