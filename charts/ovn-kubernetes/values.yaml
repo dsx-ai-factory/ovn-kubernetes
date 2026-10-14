@@ -74,6 +74,8 @@ global:
 
   # -- Whether or not enable ovnkube identity webhook
   enableOvnKubeIdentity: false
+  # -- Users other than ovnkube-cluster-manager allowed to write the hybrid overlay node subnet annotation
+  hybridOverlaySubnetWriters: []
   # -- Whether or not enable network segmentation, aka UDN
   enableNetworkSegmentation: true
   # -- Enables network QoS support from/to pods

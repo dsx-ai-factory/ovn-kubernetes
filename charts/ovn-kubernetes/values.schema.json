@@ -152,6 +152,13 @@
           "type": "boolean",
           "description": "Whether or not enable ovnkube identity webhook"
         },
+        "hybridOverlaySubnetWriters": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "Users other than ovnkube-cluster-manager allowed to write the hybrid overlay node subnet annotation"
+        },
         "enableNetworkSegmentation": {
           "type": "boolean",
           "description": "Whether or not enable network segmentation, aka UDN"
