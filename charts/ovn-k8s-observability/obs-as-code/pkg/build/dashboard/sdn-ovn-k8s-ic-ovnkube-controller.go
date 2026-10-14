@@ -184,7 +184,8 @@ func ovnkubeControllerNodeAgentReadiness(d lib.SdnDashboard) *bargauge.PanelBuil
 				Expr(`kube_daemonset_status_number_available{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"} + kube_daemonset_status_number_unavailable{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"} - kube_daemonset_status_number_ready{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
 				LegendFormat("NOT READY").
 				RefId("B"),
-		)
+		).
+		OverrideByName("NOT READY", lib.RedWhenNonZero())
 }
 
 func ovnkubeControllerNodeAgentAvailability(d lib.SdnDashboard) *bargauge.PanelBuilder {
@@ -200,7 +201,8 @@ func ovnkubeControllerNodeAgentAvailability(d lib.SdnDashboard) *bargauge.PanelB
 				Expr(`kube_daemonset_status_number_unavailable{cluster="$cluster", namespace="ovn-kubernetes",daemonset="ovnkube-node"}`).
 				LegendFormat("UNAVAILABLE").
 				RefId("B"),
-		)
+		).
+		OverrideByName("UNAVAILABLE", lib.RedWhenNonZero())
 }
 
 func ovnkubeControllerContainerRestartOverview(d lib.SdnDashboard) *timeseries.PanelBuilder {

@@ -839,7 +839,7 @@ func hostOvsDbCpuUtilizationRate(d lib.SdnDashboard) *timeseries.PanelBuilder {
 		Datasource(d.DataSourceRef()).
 		Height(6).
 		Span(12).
-		Unit("percentunit").
+		Unit("percent").
 		WithTarget(
 			prometheus.NewDataqueryBuilder().
 				Expr(`topk($topk, sum(rate(namedprocess_namegroup_cpu_seconds_total{cluster="$cluster", groupname="ovsdb-server",instance=~"$instance"}[$__rate_interval])) by (instance) * 100)`).

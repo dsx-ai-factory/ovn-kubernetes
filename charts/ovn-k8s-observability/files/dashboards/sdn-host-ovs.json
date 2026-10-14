@@ -884,7 +884,7 @@
           "interval": "120s",
           "fieldConfig": {
             "defaults": {
-              "unit": "percentunit"
+              "unit": "percent"
             },
             "overrides": []
           }
