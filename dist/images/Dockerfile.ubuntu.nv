@@ -25,22 +25,10 @@ COPY dist/images/install-ovn-ovs.sh /tmp/install-ovn-ovs.sh
 RUN --mount=type=secret,id=artifactory_cert \
     sh /tmp/install-ovn-ovs.sh && rm /tmp/install-ovn-ovs.sh
 
+COPY dist/images/install-kubectl.sh /tmp/install-kubectl.sh
 RUN DEBIAN_FRONTEND=noninteractive apt-get update \
 && apt-get install -y --no-install-recommends gpg netcat-traditional net-tools firewalld nftables iptables iproute2 iputils-arping ncat dnsutils socat \
-&& mkdir -p -m 755 /etc/apt/keyrings \
-&& kubectl_apt_signing_fingerprint=DE15B14486CD377B9E876E1A234654DA9A296436 \
-&& kubectl_key=/tmp/kubernetes-apt-keyring.asc \
-&& curl -fsSL "https://pkgs.k8s.io/core:/stable:/${K8S_VER}/deb/Release.key" -o "${kubectl_key}" \
-&& test "$(gpg --show-keys --with-colons "${kubectl_key}" | awk -F: '/^fpr:/ {print $10; exit}')" = "${kubectl_apt_signing_fingerprint}" \
-&& gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg "${kubectl_key}" \
-&& rm -f "${kubectl_key}" \
-&& chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
-&& echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${K8S_VER}/deb/ /" \
-  > /etc/apt/sources.list.d/kubernetes.list \
-&& chmod 644 /etc/apt/sources.list.d/kubernetes.list \
-&& DEBIAN_FRONTEND=noninteractive apt-get update \
-&& apt-get install -y --no-install-recommends kubectl \
-&& rm -f /etc/apt/sources.list.d/kubernetes.list /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
+&& sh /tmp/install-kubectl.sh && rm /tmp/install-kubectl.sh \
 && apt-get autoremove -y \
 && rm -rf /var/lib/apt/lists/* \
 && rm -rf /tmp/* /var/tmp/* \
