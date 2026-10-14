@@ -17,7 +17,7 @@ ARG OVS_SOURCE=artifactory
 ARG OVN_SOURCE=artifactory
 ARG CLOUD_ARCHIVE=gazpacho
 ARG UCA_OVN_VER=26.03.0-2~cloud0
-ARG DOCA_RELEASE=latest
+ARG DOCA_RELEASE=3.5.0
 ARG TARGETARCH
 
 # Each package source is selected independently. Only Artifactory needs a secret.

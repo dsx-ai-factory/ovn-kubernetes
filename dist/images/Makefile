@@ -70,7 +70,7 @@ ubuntu-nv-image: OVS_SOURCE ?= artifactory
 ubuntu-nv-image: OVN_SOURCE ?= artifactory
 ubuntu-nv-image: CLOUD_ARCHIVE ?= gazpacho
 ubuntu-nv-image: UCA_OVN_VER ?= 26.03.0-2~cloud0
-ubuntu-nv-image: DOCA_RELEASE ?= latest
+ubuntu-nv-image: DOCA_RELEASE ?= 3.5.0
 ubuntu-nv-image: NV_ARTIFACTORY_SECRET_ARG = --secret id=artifactory_cert,env=NV_ARTIFACTORY_CERT
 
 # For public DOCA OVS with OVN 26.03: OVS_SOURCE=doca OVN_SOURCE=uca.
