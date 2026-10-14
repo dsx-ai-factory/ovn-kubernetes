@@ -7,12 +7,14 @@ package networkqos
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
 	nadv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -141,7 +143,14 @@ func (c *Controller) ensureNetworkQos(nqos *networkqosapi.NetworkQoS) error {
 				return fmt.Errorf("specifying both ipBlock and podSelector/namespaceSelector is not allowed")
 			}
 			destState := &Destination{}
-			destState.IpBlock = destSpec.IPBlock.DeepCopy()
+			if destSpec.IPBlock != nil {
+				ipBlock, err := canonicalizeIPBlock(destSpec.IPBlock)
+				if err != nil {
+					c.updateNQOSStatusToNotReady(nqos.Namespace, nqos.Name, "failed to parse destination ipBlock", err)
+					return nil
+				}
+				destState.IpBlock = ipBlock
+			}
 			if destSpec.NamespaceSelector != nil && (len(destSpec.NamespaceSelector.MatchLabels) > 0 || len(destSpec.NamespaceSelector.MatchExpressions) > 0) {
 				if selector, err := metav1.LabelSelectorAsSelector(destSpec.NamespaceSelector); err != nil {
 					return fmt.Errorf("error parsing destination namespace selector: %v", err)
@@ -180,6 +189,37 @@ func (c *Controller) ensureNetworkQos(nqos *networkqosapi.NetworkQoS) error {
 		return fmt.Errorf("successfully reconciled NetworkQoS %s/%s, but failed to patch status: %v", nqos.Namespace, nqos.Name, e)
 	}
 	return nil
+}
+
+// canonicalizeIPBlock rebuilds cidr and except from parsed addresses because both are spliced into the OVN QoS match.
+func canonicalizeIPBlock(ipBlock *networkingv1.IPBlock) (*networkingv1.IPBlock, error) {
+	canonical := &networkingv1.IPBlock{}
+	// an empty cidr matches any destination and except is ignored
+	if ipBlock.CIDR == "" {
+		return canonical, nil
+	}
+	var err error
+	if canonical.CIDR, err = canonicalIPOrCIDR(ipBlock.CIDR); err != nil {
+		return nil, fmt.Errorf("invalid cidr: %w", err)
+	}
+	for _, except := range ipBlock.Except {
+		canonicalExcept, err := canonicalIPOrCIDR(except)
+		if err != nil {
+			return nil, fmt.Errorf("invalid except entry: %w", err)
+		}
+		canonical.Except = append(canonical.Except, canonicalExcept)
+	}
+	return canonical, nil
+}
+
+func canonicalIPOrCIDR(s string) (string, error) {
+	if _, ipNet, err := net.ParseCIDR(s); err == nil {
+		return ipNet.String(), nil
+	}
+	if ip := net.ParseIP(s); ip != nil {
+		return ip.String(), nil
+	}
+	return "", fmt.Errorf("%q is not an IP address or CIDR", s)
 }
 
 // clearNetworkQos will handle the logic for deleting all db objects related
