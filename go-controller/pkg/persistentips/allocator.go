@@ -140,6 +140,10 @@ func (icr *IPAMClaimReconciler) Reconcile(
 	return nil
 }
 
+// FindIPAMClaim returns the IPAMClaim named claimName in namespace, provided it
+// belongs to the network this reconciler acts upon. It returns
+// ErrPersistentIPsNotAvailableOnNetwork if the network does not honor
+// IPAMClaims, and ErrIgnoredIPAMClaim if the claim belongs to another network.
 func (icr *IPAMClaimReconciler) FindIPAMClaim(claimName string, namespace string) (*ipamclaimsapi.IPAMClaim, error) {
 	if icr.lister == nil ||
 		!util.DoesNetworkRequireIPAM(icr.netInfo) ||
@@ -150,6 +154,18 @@ func (icr *IPAMClaimReconciler) FindIPAMClaim(claimName string, namespace string
 	claim, err := icr.lister.IPAMClaims(namespace).Get(claimName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get IPAMClaim %q: %w", claimName, err)
+	}
+	if claim.Spec.Network != icr.netInfo.GetNetworkName() {
+		klog.Errorf(
+			"IPAMClaim %s/%s belongs to network %q but was referenced on network %q",
+			claim.Namespace,
+			claim.Name,
+			claim.Spec.Network,
+			icr.netInfo.GetNetworkName(),
+		)
+		// avoid leaking the network names, this error may surface as a pod
+		// event, which is visible to non-admins.
+		return nil, fmt.Errorf("%w: %s/%s", ErrIgnoredIPAMClaim, claim.Namespace, claim.Name)
 	}
 	return claim, nil
 }
