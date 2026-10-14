@@ -11,6 +11,14 @@ replicas: 1
 ovnkubeControlPlane:
   logging:
     level: "5"
+  # -- resource requests and limits for the ovnkube-cluster-manager container
+  resources:
+    requests:
+      cpu: 100m
+      memory: 300Mi
+    limits:
+      cpu: "2"
+      memory: 3Gi
 
 ## Required to be scheduled on a linux node and only one instance of ovnkube-control-plane pod per node
 affinity:

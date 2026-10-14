@@ -87,9 +87,7 @@ spec:
           name: ovnkube-config
           readOnly: true
         resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
+          {{- toYaml .Values.ovnkubeControlPlane.resources | nindent 10 }}
         env:
         {{- if .Values.global.enableCoredumps }}
         - name: GOTRACEBACK
