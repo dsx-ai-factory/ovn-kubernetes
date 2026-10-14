@@ -1,5 +1,7 @@
 # ovn-kubernetes Community Meetings
 
+These are the upstream OVN-Kubernetes community meetings.
+
 ## Information
 
 All are welcome to join our meetings! If you want to discuss something with the wider community, please add your items to the agenda. If you are starting to contribute but unsure of the first steps, please feel free to reach out to us during the meetings and introduce yourself!

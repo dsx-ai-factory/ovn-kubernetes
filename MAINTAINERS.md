@@ -1,5 +1,8 @@
 # Maintainers
 
+This is the upstream OVN-Kubernetes maintainer list, not a maintainer list for
+this read-only snapshot.
+
 ## Current Maintainers
 
 The current Maintainers Group for the ovn-kubernetes Project consists of:
