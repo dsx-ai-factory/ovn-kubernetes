@@ -47,6 +47,8 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
 && mkdir -p /usr/libexec/cni/ \
 && mkdir -p /var/run/openvswitch/ \
 && mkdir -p /etc/openvswitch/ 
+
+# Hybrid overlay and OVN packet-sampling diagnostics (ovnkube-observ) are unsupported.
 # Copy binaries and assets from builder (grouped by destination to minimize layers)
 COPY --chmod=755  --from=builder /ovn-kubernetes/dist/images/ovnkube /ovn-kubernetes/dist/images/ovnkube-identity /ovn-kubernetes/dist/images/ovn-kube-util /usr/bin/
 COPY --chmod=755  --from=builder /ovn-kubernetes/dist/images/git_info /ovn-kubernetes/dist/images/ovnkube.sh /ovn-kubernetes/dist/images/ovnkube-init.sh /ovn-kubernetes/dist/images/ovnkube-node-readiness-check.sh /ovn-kubernetes/dist/images/ovnkube-node-liveness-check.sh /root/
