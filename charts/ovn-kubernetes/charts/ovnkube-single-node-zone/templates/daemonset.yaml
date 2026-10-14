@@ -112,9 +112,7 @@ spec:
           readOnly: true
 
         resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
+          {{- toYaml .Values.ovnkubeSingleNodeZoneNbdb.resources | nindent 10 }}
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "1.4.0"
@@ -182,9 +180,7 @@ spec:
           readOnly: true
 
         resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
+          {{- toYaml .Values.ovnkubeSingleNodeZoneSbdb.resources | nindent 10 }}
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "1.4.0"
@@ -222,9 +218,7 @@ spec:
         imagePullPolicy: "IfNotPresent"
         command: ["/root/ovnkube.sh", "run-ovn-northd"]
         resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
+          {{- toYaml .Values.ovnkubeSingleNodeZoneNorthd.resources | nindent 10 }}
         securityContext:
           runAsUser: 0
           capabilities:
@@ -280,17 +274,18 @@ spec:
         {{- else }}
         command: ["/root/ovnkube.sh", "ovnkube-controller-with-node"]
         {{- end }}
+        {{- $resources := deepCopy (.Values.ovnkubeSingleNodeZone.resources | default dict) }}
+        {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
+        {{- /*
+        Kubernetes rejects a request for an extended resource unless an equal limit is
+        set, so the management port VFs go into both maps.
+        */}}
+        {{- $mgmtPortVFs := dict .Values.mgmtPortVFResourceName .Values.mgmtPortVFsCount }}
+        {{- $_ := set $resources "requests" (mergeOverwrite ($resources.requests | default dict) $mgmtPortVFs) }}
+        {{- $_ := set $resources "limits" (mergeOverwrite ($resources.limits | default dict) $mgmtPortVFs) }}
+        {{- end }}
         resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
-            {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
-            {{ .Values.mgmtPortVFResourceName }}: {{ .Values.mgmtPortVFsCount }}
-            {{- end }}
-          {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
-          limits:
-            {{ .Values.mgmtPortVFResourceName }}: {{ .Values.mgmtPortVFsCount }}
-          {{- end }}
+          {{- toYaml $resources | nindent 10 }}
         securityContext:
           runAsUser: 0
           privileged: true
@@ -642,9 +637,7 @@ spec:
         imagePullPolicy: "IfNotPresent"
         command: ["/root/ovnkube.sh", "ovn-controller"]
         resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
+          {{- toYaml .Values.ovnkubeSingleNodeZoneOvnHost.resources | nindent 10 }}
         securityContext:
           runAsUser: 0
           capabilities:

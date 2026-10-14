@@ -8,22 +8,62 @@
 ovnkubeSingleNodeZone:
   logging:
     level: "5"
+  # -- resource requests and limits for the ovnkube-controller container
+  resources:
+    requests:
+      cpu: 200m
+      memory: 500Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
 
 ovnkubeSingleNodeZoneNbdb:
   logging:
     level: "-vconsole:info -vfile:info"
+  # -- resource requests and limits for the nb-ovsdb container
+  resources:
+    requests:
+      cpu: 10m
+      memory: 100Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
 
 ovnkubeSingleNodeZoneSbdb:
   logging:
     level: "-vconsole:info -vfile:info"
+  # -- resource requests and limits for the sb-ovsdb container
+  resources:
+    requests:
+      cpu: 10m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 ovnkubeSingleNodeZoneNorthd:
   logging:
     level: "-vconsole:info -vfile:info"
+  # -- resource requests and limits for the ovn-northd container
+  resources:
+    requests:
+      cpu: 20m
+      memory: 200Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 ovnkubeSingleNodeZoneOvnHost:
   logging:
     level: "-vconsole:info"
+  # -- resource requests and limits for the ovn-controller container
+  resources:
+    requests:
+      cpu: 60m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
 
 affinity:
   nodeAffinity:
