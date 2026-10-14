@@ -62,8 +62,9 @@ install_ovs() {
                 -t "noble-updates/${CLOUD_ARCHIVE}" openvswitch-switch openvswitch-common
             ;;
         doca)
+            OVS_VER="${OVS_VER:-3.5.0052-1}"
             apt-get install -y --no-install-recommends \
-                doca-openvswitch-switch doca-openvswitch-common
+                "doca-openvswitch-switch=${OVS_VER}" "doca-openvswitch-common=${OVS_VER}"
             ;;
         *)
             echo "Unknown OVS_SOURCE: ${OVS_SOURCE}" >&2
@@ -130,12 +131,6 @@ fi
 apt-get update
 install_ovs
 install_ovn
-
-# OVN's OVS dependency can also be satisfied by regular OVS. Keep the
-# explicitly selected DOCA package after both installs have resolved.
-if [ "${OVS_SOURCE}" = doca ]; then
-    test "$(dpkg-query -W -f='${Status}' doca-openvswitch-switch)" = 'install ok installed'
-fi
 
 rm -f /etc/apt/sources.list.d/ngn-sdn-ovn.list /usr/share/keyrings/nvidia-artifactory.asc
 rm -rf /var/lib/apt/lists/*
