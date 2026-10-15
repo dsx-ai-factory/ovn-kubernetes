@@ -72,6 +72,14 @@ function testrun {
     if grep -q "ginkgo" ."${path}"/*_test.go; then
 	    prefix=$(echo "${path}" | cut -c 2- | sed 's,/,_,g')
         ginkgoargs="-ginkgo.v ${ginkgo_focus} -ginkgo.junit-report ${TEST_REPORT_DIR}/junit-${prefix}.xml"
+        # Retry a failed spec in place when the caller asks for it, using the
+        # same variable name as the e2e scripts under test/scripts. CI sets this
+        # on runners too small to keep the suites' Eventually budgets under the
+        # race detector. Ginkgo still counts retried specs as flaked in the
+        # summary and the junit report, so they stay visible.
+        if [[ -n "${FLAKE_ATTEMPTS:-}" ]]; then
+            ginkgoargs="${ginkgoargs} -ginkgo.flake-attempts=${FLAKE_ATTEMPTS}"
+        fi
     fi
     args="${args}${otherargs}"
     if [ "$go_test" == "gocmd test -mod=vendor" ]; then
