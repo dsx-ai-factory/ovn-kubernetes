@@ -5,7 +5,7 @@ apiVersion: v2
 name: ovn-kubernetes
 description: A Helm chart for deploying ovn-kubernetes CNI
 type: application
-version: 2.4.0
+version: 2.4.1
 keywords:
 - SDN
 - SDNaaS
@@ -25,33 +25,33 @@ sources:
 - https://github.com/ovn-org/ovn
 - https://github.com/openvswitch/ovs
 - https://github.com/ovn-org/libovsdb
-appVersion: "2026-10.0"
+appVersion: "2026-10.1"
 dependencies:
 - name: ovs-node
-  version: 2.4.0
+  version: 2.4.1
   tags:
   - ovs-node
 - name: ovnkube-identity
-  version: 2.4.0
+  version: 2.4.1
   tags:
     - ovnkube-identity
 - name: ovnkube-node-dpu-host
-  version: 2.4.0
+  version: 2.4.1
   tags:
   - ovnkube-node-dpu-host
 - name: ovnkube-control-plane
-  version: 2.4.0
+  version: 2.4.1
   tags:
   - ovnkube-control-plane
 - name: ovnkube-single-node-zone
-  version: 2.4.0
+  version: 2.4.1
   tags:
   - ovnkube-single-node-zone
 - name: ovnkube-single-node-zone-dpu
-  version: 2.4.0
+  version: 2.4.1
   tags:
   - ovnkube-single-node-zone-dpu
 - name: ovnkube-crds
-  version: 2.4.0
+  version: 2.4.1
   tags:
   - ovnkube-crds

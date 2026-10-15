@@ -1,6 +1,6 @@
 # ovn-k8s-observability
 
-![Version: 2.4.0](https://img.shields.io/badge/Version-2.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.4.0](https://img.shields.io/badge/AppVersion-2.4.0-informational?style=flat-square)
+![Version: 2.4.1](https://img.shields.io/badge/Version-2.4.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.4.1](https://img.shields.io/badge/AppVersion-2.4.1-informational?style=flat-square)
 
 ## Maintainers
 
@@ -84,7 +84,7 @@ Kubernetes container CPU and memory panels are unchanged by this setting.
 helm package charts/ovn-k8s-observability
 ```
 
-That produces `ovn-k8s-observability-2.4.0.tgz`. `obs-as-code/` and the
+That produces `ovn-k8s-observability-2.4.1.tgz`. `obs-as-code/` and the
 raw `files/dashboards/` sources are excluded by `.helmignore` and are not part
 of the package.
 
@@ -92,8 +92,8 @@ of the package.
 
 | Chart | Version | Path |
 | --- | --- | --- |
-| `alert-rule` | `2.4.0` | `charts/alert-rule` |
-| `dashboard` | `2.4.0` | `charts/dashboard` |
+| `alert-rule` | `2.4.1` | `charts/alert-rule` |
+| `dashboard` | `2.4.1` | `charts/dashboard` |
 
 ## Values
 
