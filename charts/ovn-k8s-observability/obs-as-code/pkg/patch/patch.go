@@ -29,7 +29,7 @@ func TransformProcessExporterExprs(expr string) (string, bool, error) {
 		return "", false, err
 	}
 
-	parsed, err := parser.ParseExpr(preprocessed)
+	parsed, err := parser.NewParser(parser.Options{}).ParseExpr(preprocessed)
 	if err != nil {
 		return "", false, err
 	}
