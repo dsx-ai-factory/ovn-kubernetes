@@ -81,4 +81,10 @@ jobs:
         # fails on a runner without a TTY.
         env:
           CONTAINER_RUNNABLE: 1
+          # Retry a failed spec once. The suites run under the race detector
+          # and some of their assertions have timing budgets of a few seconds,
+          # which a small shared runner does not always hold. Ginkgo reports
+          # retried specs as flaked in the summary and the junit report, so
+          # they stay visible.
+          FLAKE_ATTEMPTS: 2
         run: make check
