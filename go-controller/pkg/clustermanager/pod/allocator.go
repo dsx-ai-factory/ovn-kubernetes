@@ -368,7 +368,7 @@ func (a *PodAllocator) releasePodOnNAD(ctx context.Context, pod *corev1.Pod, nad
 		hasIPAMClaim = false
 	}
 	if hasIPAMClaim {
-		ipamClaim, err := a.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, network.Namespace)
+		ipamClaim, err := a.ipamClaimsReconciler.FindIPAMClaim(network.IPAMClaimReference, pod.Namespace)
 		hasIPAMClaim = ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
 		if apierrors.IsNotFound(err) || errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
 			// the claim is gone or not ours to honor: the IPs this pod holds on
@@ -379,7 +379,7 @@ func (a *PodAllocator) releasePodOnNAD(ctx context.Context, pod *corev1.Pod, nad
 		} else if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
-			return fmt.Errorf("failed to get IPAMClaim %s/%s: %w", network.Namespace, network.IPAMClaimReference, err)
+			return fmt.Errorf("failed to get IPAMClaim %s/%s: %w", pod.Namespace, network.IPAMClaimReference, err)
 		}
 	}
 

@@ -98,9 +98,8 @@ func (c *persistentIPsStub) Reconcile(_ *ipamclaimsapi.IPAMClaim, newIPAMClaim *
 	return nil
 }
 
-func (c *persistentIPsStub) FindIPAMClaim(claimName string, namespace string) (*ipamclaimsapi.IPAMClaim, error) {
-	ipamClaimKey := fmt.Sprintf("%s/%s", namespace, claimName)
-	ipamClaim, wasFound := c.datastore[ipamClaimKey]
+func (c *persistentIPsStub) FindIPAMClaim(claimName string, podNamespace string) (*ipamclaimsapi.IPAMClaim, error) {
+	ipamClaim, wasFound := c.datastore[ipamClaimKey(podNamespace, claimName)]
 	if !wasFound {
 		return nil, fmt.Errorf("not found")
 	}
@@ -310,6 +309,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		network     *nadapi.NetworkSelectionElement
 		ipamClaim   *ipamclaimsapi.IPAMClaim
 		reallocate  bool
+		// ipamClaimNamespace overrides the namespace the IPAMClaim is stored
+		// under, which otherwise defaults to the pod's namespace
+		ipamClaimNamespace string
 	}
 	tests := []struct {
 		name                            string
@@ -1057,6 +1059,33 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 		},
 		{
+			// the namespace of the network selection element is attacker
+			// controlled: it must not be used to reach an IPAMClaim owned by a
+			// workload in another namespace
+			name:                   "IPAM persistent IPs, IPAMClaim in another namespace",
+			ipam:                   true,
+			persistentIPAllocation: true,
+			args: args{
+				network: &nadapi.NetworkSelectionElement{
+					Namespace:          "victim-namespace",
+					IPAMClaimReference: "victim-ipam-claim",
+				},
+				ipamClaim: &ipamclaimsapi.IPAMClaim{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "victim-ipam-claim",
+					},
+					Status: ipamclaimsapi.IPAMClaimStatus{
+						IPs: []string{"192.168.0.200/24"},
+					},
+				},
+				ipamClaimNamespace: "victim-namespace",
+				ipAllocator: &ipAllocatorStub{
+					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
+				},
+			},
+			wantErr: true,
+		},
+		{
 			// on networks with IPAM, with persistent IPs *not* allowed, but
 			// the pod requests a claim, new IPs are allocated, and rolled back
 			// on failures.
@@ -1380,7 +1409,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				network = &nadapi.NetworkSelectionElement{}
 			}
 			network.Name = "network"
-			network.Namespace = "namespace"
+			if network.Namespace == "" {
+				network.Namespace = "namespace"
+			}
 
 			config.OVNKubernetesFeature.EnableMultiNetwork = !tt.multiNetworkDisabled
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
@@ -1465,8 +1496,12 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			var claimsReconciler persistentips.PersistentAllocations
 			dummyDatastore := map[string]ipamclaimsapi.IPAMClaim{}
 			if tt.args.ipamClaim != nil {
-				tt.args.ipamClaim.Namespace = network.Namespace
-				dummyDatastore[fmt.Sprintf("%s/%s", tt.args.ipamClaim.Namespace, tt.args.ipamClaim.Name)] = *tt.args.ipamClaim
+				// IPAMClaims live in the namespace of the pod referencing them
+				tt.args.ipamClaim.Namespace = pod.Namespace
+				if tt.args.ipamClaimNamespace != "" {
+					tt.args.ipamClaim.Namespace = tt.args.ipamClaimNamespace
+				}
+				dummyDatastore[ipamClaimKey(tt.args.ipamClaim.Namespace, tt.args.ipamClaim.Name)] = *tt.args.ipamClaim
 			}
 
 			claimsReconciler = &persistentIPsStub{

@@ -38,7 +38,7 @@ type IPAllocator interface {
 }
 
 type PersistentAllocations interface {
-	FindIPAMClaim(claimName string, namespace string) (*ipamclaimsapi.IPAMClaim, error)
+	FindIPAMClaim(claimName string, podNamespace string) (*ipamclaimsapi.IPAMClaim, error)
 
 	Reconcile(oldIPAMClaim *ipamclaimsapi.IPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim, ipReleaser IPReleaser) error
 
@@ -140,18 +140,23 @@ func (icr *IPAMClaimReconciler) Reconcile(
 	return nil
 }
 
-// FindIPAMClaim returns the IPAMClaim named claimName in namespace, provided it
-// belongs to the network this reconciler acts upon. It returns
+// FindIPAMClaim returns the IPAMClaim named claimName, provided it belongs to
+// the network this reconciler acts upon. It returns
 // ErrPersistentIPsNotAvailableOnNetwork if the network does not honor
 // IPAMClaims, and ErrIgnoredIPAMClaim if the claim belongs to another network.
-func (icr *IPAMClaimReconciler) FindIPAMClaim(claimName string, namespace string) (*ipamclaimsapi.IPAMClaim, error) {
+//
+// podNamespace must be the namespace of the pod referencing the claim, never a
+// namespace taken from the pod's network selection elements: those are
+// attacker-controlled and would let a pod claim the persistent IPs of a
+// workload in another namespace.
+func (icr *IPAMClaimReconciler) FindIPAMClaim(claimName string, podNamespace string) (*ipamclaimsapi.IPAMClaim, error) {
 	if icr.lister == nil ||
 		!util.DoesNetworkRequireIPAM(icr.netInfo) ||
 		icr.netInfo.TopologyType() == ovnktypes.Layer3Topology ||
 		claimName == "" {
 		return nil, ErrPersistentIPsNotAvailableOnNetwork
 	}
-	claim, err := icr.lister.IPAMClaims(namespace).Get(claimName)
+	claim, err := icr.lister.IPAMClaims(podNamespace).Get(claimName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get IPAMClaim %q: %w", claimName, err)
 	}
