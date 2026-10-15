@@ -215,6 +215,9 @@ Three numbers appear in this tree:
 Pin a tag rather than a branch: a tag names one exact tree, while a release
 branch keeps receiving drops and backports after the initial cut.
 
+[RELEASE.md](RELEASE.md) describes the release cadence, how a release branch is
+cut, and what each release carries.
+
 ### Building against the Go code
 
 `go-controller` declares the same module path as upstream,
