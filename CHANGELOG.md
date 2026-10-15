@@ -7,6 +7,74 @@ its comparison baseline. Small fixes and internal refactoring are omitted.
 Downstream releases are numbered `2.MINOR.PATCH`, where `MINOR` tracks the
 upstream minor release the drop is based on.
 
+## [2.4.1]
+
+Changes since 2.4.0 on `release-2.4`. The upstream baseline is unchanged —
+`release-1.4` at tag `v1.4.0`, commit
+[`d6a3812d1bc1c36bf24c7eda0e86e9b13d84907d`](https://github.com/ovn-kubernetes/ovn-kubernetes/commit/d6a3812d1bc1c36bf24c7eda0e86e9b13d84907d).
+
+### Removals
+
+- **`k8s.ovn.org/port-security-info` annotation:** Remove the annotation that
+  let a pod write arbitrary extra IPs into the `port_security` column of its
+  own logical switch port, which allowed any workload able to edit its own
+  annotations to widen the source addresses OVN accepted from it. Skip-IPAM
+  ports keep MAC-only port security.
+- **`k8s.ovn.org/skip-spoofchk-on-networks` annotation:** Remove the annotation
+  that let a pod disable port security outright on its own logical switch
+  ports. Port security is now set unconditionally on pod LSPs.
+- **firewalld support:** Stop reconciling endpoint slices to configure host
+  firewall rules through `firewall-cmd`.
+
+### Security and hardening
+
+- **RouteAdvertisements network values:** Validate the route targets, VNIs, and
+  VRF names of selected networks before writing them into generated
+  `FRRConfiguration`s, so a value carrying a newline or extra tokens can no
+  longer inject FRR configuration lines onto nodes.
+- **RouteAdvertisements neighbor keys:** Validate each neighbor address or
+  interface name read from the source `FRRConfiguration`, rejecting the whole
+  RouteAdvertisements when one fails.
+- **RouteAdvertisements target VRF:** Validate the target VRF once before any
+  router is matched, requiring a Linux interface name when set and not `auto`.
+- **Stale FRR config on rejected input:** Delete `FRRConfiguration`s generated
+  before input validation existed when validation now fails, so a rejected
+  value cannot keep advertising networks after an upgrade.
+- **CNI device info file:** Accept `runtimeConfig.CNIDeviceInfoFile` only as a
+  regular file under `/var/run/k8s.cni.cncf.io/devinfo`, and stop returning the
+  JSON parse error, which could surface file content in pod events.
+- **Bearer token redaction:** Redact the Kubernetes token from the parsed
+  config logged at default verbosity, which previously printed a token set
+  inline in the config file verbatim.
+- **Seccomp profile:** Set `RuntimeDefault` at the pod `securityContext` level
+  for `ovnkube-control-plane` and `ovnkube-single-node-zone`.
+- **Kubernetes APT key verification:** Check the downloaded key against the
+  expected fingerprint before creating the trusted keyring in NVIDIA image
+  builds, rejecting mismatched keys before adding the repository.
+- **Dependency CVEs:** Raise `golang.org/x/net` to v0.60.0 and build with Go
+  1.26.9, addressing the HTTP/2 flow-control double refund (CVE-2026-78663)
+  and the `net/http` CONNECT fix (CVE-2026-94439). Bump the observability
+  chart's crypto modules for the same class of finding.
+
+### Networking and IP management
+
+- **NetworkQoS ipBlock:** Build the OVN QoS match from parsed `cidr` and
+  `except` values rather than splicing them in verbatim, and mark the
+  NetworkQoS `NotReady` when a value is not an IP or CIDR.
+
+### Deployment and images
+
+- **Configurable ovnkube-node resources:** Replace the hardcoded 100m CPU and
+  300Mi memory requests on each container of the `ovnkube-single-node-zone`
+  daemonset with per-container `resources` values, defaulted to each
+  container's own footprint. Note that the containers now also carry CPU and
+  memory limits they previously ran without.
+- **DOCA release pinning:** Pin the DOCA repository to 3.5.0 rather than
+  following `latest`, and default the OVS packages to revision 3.5.0052-1
+  while still honouring `OVS_VER`.
+- **Third-party licenses in the NVIDIA image:** Copy the checked-in notices
+  into the final runtime stage, matching the standard Ubuntu image.
+
 ## [2.4.0]
 
 Changes in downstream `release-2.4` compared with upstream `release-1.4` at
