@@ -96,8 +96,9 @@ var (
 	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
 	Version = "1.4.0"
-	// NVIDIA distribution version, numbered independently of the upstream
-	// version above, to be changed with every distribution release
+	// NVIDIA distribution version, numbered 2.MINOR.PATCH where MINOR tracks
+	// the minor of the upstream version above, to be changed with every
+	// distribution release
 	DistroVersion = "2.4.2"
 	// version of the go runtime used to compile ovn-kubernetes
 	GoVersion = runtime.Version()
