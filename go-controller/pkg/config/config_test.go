@@ -376,6 +376,34 @@ var _ = Describe("Config Operations", func() {
 		gomega.Expect(logs.String()).NotTo(gomega.ContainSubstring(token))
 	})
 
+	It("keeps pod hostPort support disabled by default", func() {
+		err := runInit(app, 1, cfgFile)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(OVNKubernetesFeature.EnablePodHostPort).To(gomega.BeFalse())
+	})
+
+	It("enables pod hostPort support from the command line", func() {
+		err := runInit(app, 1, cfgFile, "--enable-pod-host-port")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(OVNKubernetesFeature.EnablePodHostPort).To(gomega.BeTrue())
+	})
+
+	It("enables pod hostPort support from the config file", func() {
+		_, err := cfgFile.WriteString("[ovnkubernetesfeature]\nenable-pod-host-port=true\n")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		err = runInit(app, 1, cfgFile, "--config-file="+cfgFile.Name())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(OVNKubernetesFeature.EnablePodHostPort).To(gomega.BeTrue())
+	})
+
+	It("keeps file-configured pod hostPort enabled when the CLI value matches the default", func() {
+		_, err := cfgFile.WriteString("[ovnkubernetesfeature]\nenable-pod-host-port=true\n")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		err = runInit(app, 1, cfgFile, "--config-file="+cfgFile.Name(), "--enable-pod-host-port=false")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(OVNKubernetesFeature.EnablePodHostPort).To(gomega.BeTrue())
+	})
+
 	It("uses expected defaults", func() {
 		app.Action = func(ctx *cli.Context) error {
 			cfgPath, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)

@@ -576,6 +576,8 @@ spec:
           value: {{ default "false" .Values.global.enableDynamicUDNAllocation | quote }}
         - name: OVN_DYNAMIC_UDN_GRACE_PERIOD
           value: {{ default "" .Values.global.dynamicUDNGracePeriod | quote }}
+        - name: OVNKUBE_POD_HOST_PORT_ENABLE
+          value: {{ .Values.global.enablePodHostPort | default false | quote }}
         - name: OVNKUBE_SKIP_CTMARK_HOSTPORTS
           value: {{ default "" .Values.global.skipCTMarkHostPorts | quote }}
         - name: OVN_ENCAP_TOS

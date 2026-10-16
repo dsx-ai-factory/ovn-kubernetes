@@ -164,6 +164,7 @@ nav:
       - Multihoming: features/multiple-networks/multi-homing.md
       - MultiNetworkPolicies: features/multiple-networks/multi-network-policies.md
       - MultiNetworkRails: features/multiple-networks/multi-vtep.md
+    - Pod hostPort: features/hostport.md
     - Multicast: features/multicast.md
     - NetworkQoS:
       - features/network-qos/index.md
@@ -196,6 +197,7 @@ nav:
   - Enhancement Proposals:
     - okeps/index.md
     # - FeatureName: okeps/<filename.md>
+    - Pod hostPort (draft): okeps/okep-draft-native-hostport.md
     - Localnet API: okeps/okep-5085-localnet-api.md
     - Network QoS: okeps/okep-4380-network-qos.md
     - User Defined Networks: okeps/okep-5193-user-defined-networks.md

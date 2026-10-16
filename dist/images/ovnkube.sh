@@ -369,6 +369,11 @@ fi
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
+# Pod hostPort support is opt-in; runtime/CNI port mapping must be disabled.
+ovnkube_pod_host_port_enable_flag=
+if [[ ${OVNKUBE_POD_HOST_PORT_ENABLE:-"false"} == "true" ]]; then
+  ovnkube_pod_host_port_enable_flag="--enable-pod-host-port"
+fi
 # OVN_SIMULATE_DPU - use simulated DPU operations instead of SR-IOV/switchdev hardware operations
 ovn_simulate_dpu=${OVN_SIMULATE_DPU:-"false"}
 # OVNK8S_INSECURE_SKIP_TLS_VERIFY - do not verify the Kubernetes API server certificate, so that no CA
@@ -2152,6 +2157,7 @@ ovnkube-controller-with-node() {
     ${ovnkube_metrics_tls_opts} \
     ${ovnkube_node_mgmt_port_netdev_flag} \
     ${ovnkube_node_mode_flag} \
+    ${ovnkube_pod_host_port_enable_flag} \
     ${ovnkube_skip_ctmark_hostports_opts} \
     ${OVN_NODE_PORT} \
     ${ovn_enable_dnsnameresolver_flag} \
@@ -3064,6 +3070,7 @@ ovn-node() {
         ${ovnkube_node_certs_flags} \
         ${ovnkube_node_mgmt_port_netdev_flag} \
         ${ovnkube_node_mode_flag} \
+        ${ovnkube_pod_host_port_enable_flag} \
         ${ovnkube_skip_ctmark_hostports_opts} \
         ${ovn_metrics_enable_pprof_flag} \
         ${ovnkube_node_pprof_port_flag} \

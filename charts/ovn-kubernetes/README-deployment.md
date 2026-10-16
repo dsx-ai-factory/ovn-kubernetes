@@ -299,6 +299,15 @@ false
 			<td>If set, enable persistent IPs</td>
 		</tr>
 		<tr>
+			<td>global.enablePodHostPort</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>Enable pod hostPort support (full-mode, shared gateway). Disable CRI-O/CNI port mapping first.</td>
+		</tr>
+		<tr>
 			<td>global.enablePreconfiguredUDNAddresses</td>
 			<td>bool</td>
 			<td><pre lang="json">

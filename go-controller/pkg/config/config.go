@@ -586,6 +586,10 @@ func (c *TLSConfig) ParseCipherSuites() []string {
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
+	// EnablePodHostPort enables pod hostPort support using nftables in ovnkube-node.
+	// The runtime and any chained CNI portmap plugin must not also manage hostPorts.
+	EnablePodHostPort bool `gcfg:"enable-pod-host-port"`
+
 	// Admin Network Policy feature is enabled
 	EnableAdminNetworkPolicy bool `gcfg:"enable-admin-network-policy"`
 	// EgressIP feature is enabled
@@ -1576,6 +1580,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Use OVN sampling with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableObservability,
 		Value:       OVNKubernetesFeature.EnableObservability,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-pod-host-port",
+		Usage:       "Enable pod hostPort support using nftables on full-mode nodes with shared gateways; disable runtime/CNI hostPort management first",
+		Destination: &cliConfig.OVNKubernetesFeature.EnablePodHostPort,
+		Value:       OVNKubernetesFeature.EnablePodHostPort,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-network-qos",
