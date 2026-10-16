@@ -45,6 +45,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/hostport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/nadconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/dpulease"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/linkmanager"
@@ -992,6 +993,10 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	klog.Infof("Starting the default node network controller")
 
+	if config.OVNKubernetesFeature.EnablePodHostPort && (!config.IsModeFull() || config.Gateway.Mode != config.GatewayModeShared) {
+		return fmt.Errorf("enable-pod-host-port requires full-mode nodes and shared gateway mode")
+	}
+
 	var err error
 
 	if nc.mgmtPortController == nil {
@@ -1100,6 +1105,22 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to start management port controller: %w", err)
 	}
+	if config.IsModeFull() {
+		// Management-port routing and SNAT must be ready before hostPort DNAT.
+		nft, err := nodenft.GetNFTablesHelper()
+		if err != nil {
+			return fmt.Errorf("initialize hostPort nftables helper: %w", err)
+		}
+		if config.OVNKubernetesFeature.EnablePodHostPort {
+			hostPortController := hostport.NewController(nc.name, nc.watchFactory.LocalPodInformer(), nft)
+			if err := hostPortController.Start(nc.stopChan, nc.wg); err != nil {
+				return err
+			}
+		} else if err := hostport.Cleanup(nft); err != nil {
+			return err
+		}
+	}
+
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
 		if err := nc.startEgressIPHealthCheckingServer(nc.mgmtPortController); err != nil {

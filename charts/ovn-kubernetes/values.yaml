@@ -80,6 +80,8 @@ global:
   enableNetworkSegmentation: true
   # -- Enables network QoS support from/to pods
   enableNetworkQos: false
+  # -- Enable pod hostPort support (full-mode, shared gateway). Disable CRI-O/CNI port mapping first.
+  enablePodHostPort: false
   # -- Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes
   enableAdminNetworkPolicy: false
   # -- Configure to use AdminPolicyBasedRoute CRD feature with ovn-kubernetes

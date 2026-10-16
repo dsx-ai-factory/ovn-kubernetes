@@ -167,6 +167,10 @@
           "type": "boolean",
           "description": "Enables network QoS support from/to pods"
         },
+        "enablePodHostPort": {
+          "type": "boolean",
+          "description": "Enable pod hostPort support (full-mode, shared gateway). Disable CRI-O/CNI port mapping first."
+        },
         "enableAdminNetworkPolicy": {
           "type": "boolean",
           "description": "Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes"
