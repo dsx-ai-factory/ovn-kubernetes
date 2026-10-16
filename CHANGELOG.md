@@ -7,6 +7,52 @@ its comparison baseline. Small fixes and internal refactoring are omitted.
 Downstream releases are numbered `2.MINOR.PATCH`, where `MINOR` tracks the
 upstream minor release the drop is based on.
 
+## [2.4.2]
+
+Changes since 2.4.1 on `release-2.4`. The upstream baseline is unchanged —
+`release-1.4` at tag `v1.4.0`, commit
+[`d6a3812d1bc1c36bf24c7eda0e86e9b13d84907d`](https://github.com/ovn-kubernetes/ovn-kubernetes/commit/d6a3812d1bc1c36bf24c7eda0e86e9b13d84907d).
+
+### Networking and IP management
+
+- **Opt-in pod `hostPort` support:** Watch local pods in `ovnkube-node` and
+  reconcile native nftables `hostPort` rules for the default primary network,
+  on full nodes running a shared gateway. The feature is disabled by default so
+  that ownership of the rules, between the container runtime and the CNI plugin,
+  stays an explicit operator choice. Includes lifecycle and UDP conntrack
+  cleanup, and is wired through configuration, Helm, and node startup.
+
+### Security and hardening
+
+- **Node subnet annotation ownership:** Ship a `ValidatingAdmissionPolicy` that
+  restricts `k8s.ovn.org/node-subnets` to the `ovnkube-cluster-manager` service
+  account, so a node credential able to write its own annotations can no longer
+  reassign the pod subnet the cluster manager allocated to it.
+- **Hybrid overlay subnet annotation ownership:** Extend that policy to
+  `k8s.ovn.org/hybrid-overlay-node-subnet` when hybrid overlay is enabled.
+  `global.hybridOverlaySubnetWriters` grants additional writers for deployments
+  where another controller owns the annotation.
+- **Restored subnet size validation:** Accept a restored node subnet only when
+  its prefix length matches the fixed size the allocator manages, rather than
+  only checking that the address falls inside the cluster subnet. A subnet
+  annotation carrying a wider or narrower prefix is now ignored instead of
+  being marked allocated.
+- **Cross-network IPAMClaim reuse:** Prevent a pod from using an `IPAMClaim`
+  that belongs to a different network, which could otherwise produce duplicate
+  IP assignments and the connectivity failures that follow.
+- **Cross-namespace IPAMClaim reuse:** Prevent a pod from using another
+  namespace's `IPAMClaim`, even when both namespaces attach to the same
+  network, keeping persistent IP allocations inside a namespace boundary.
+- **Observability dependency CVEs:** Bump the `obs-as-code` Go modules.
+
+### Deployment and images
+
+- **Configurable ovnkube-control-plane resources:** Replace the hardcoded 100m
+  CPU and 300Mi memory requests on the `ovnkube-cluster-manager` container with
+  an `ovnkubeControlPlane.resources` value, defaulted to those same requests.
+  Note that the container now also carries 2 CPU and 3Gi limits it previously
+  ran without.
+
 ## [2.4.1]
 
 Changes since 2.4.0 on `release-2.4`. The upstream baseline is unchanged —
