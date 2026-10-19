@@ -50,9 +50,6 @@ named port.+\[Feature:NetworkPolicy\]
 \[sig-network\].+Service CIDRs
 \[sig-network\].+ServiceCIDR
 
-# Clean up SCTP tests https://github.com/kubernetes/kubernetes/issues/96717
-should create a Pod with SCTP HostPort
-
 # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/1907
 service.kubernetes.io/headless
 
@@ -77,9 +74,6 @@ should set default value on new IngressClass
 
 # RACE CONDITION IN TEST, SEE https://github.com/kubernetes/kubernetes/pull/90254
 should prevent Ingress creation if more than 1 IngressClass marked as default
-
-# TODO: Figure out why the below test is failing and if we need to add support in OVN-K for them
-validates that there is no conflict between pods with same hostPort but different hostIP and protocol
 
 # https://issues.redhat.com/browse/OCPBUGS-61380
 should support named targetPorts that resolve to different ports on different endpoints
