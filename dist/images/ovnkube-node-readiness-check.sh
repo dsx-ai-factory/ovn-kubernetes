@@ -10,22 +10,23 @@ metrics_endpoint_ip=${METRICS_IP:-${OVN_METRICS_ENDPOINT_IP}}
 if [[ -z ${metrics_endpoint_ip} ]]; then
   metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 fi
-metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 metrics_worker_port=${OVN_METRICS_WORKER_PORT}
 if [[ -z ${metrics_worker_port} ]]; then
 	metrics_worker_port=9410
 fi
+# ncat takes a bare IPv6 address, not a bracketed one.
 ncat -zv --ssl $metrics_endpoint_ip $metrics_worker_port >/root/health 2>&1
 return_value=$?
 if [ $return_value != 0 ]; then
-	echo "connectivity check with ssl on metrics endpoint $metrics_endpoint_ip:$metrics_worker_port failed"
+	echo "connectivity check with ssl on metrics endpoint $(bracketify $metrics_endpoint_ip):$metrics_worker_port failed"
 	echo "$(< /root/health)"
 	exit $return_value
 fi
-curl -k https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT/readyz >/root/health 2>&1
+k8s_svc_host=$(bracketify $KUBERNETES_SERVICE_HOST)
+curl -k https://$k8s_svc_host:$KUBERNETES_SERVICE_PORT/readyz >/root/health 2>&1
 return_value=$?
 if [ $return_value != 0 ]; then
-	echo "connectivity check on k8s svc endpoint $KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT failed"
+	echo "connectivity check on k8s svc endpoint $k8s_svc_host:$KUBERNETES_SERVICE_PORT failed"
 	echo "$(< /root/health)"
 	exit $return_value
 fi
@@ -40,7 +41,7 @@ for dns_name in $dns_names; do
 	fi
 done
 if [ $return_value != 0 ]; then
-	echo "connectivity check on cluster endpoint $coredns_cluster_ip:53 failed"
+	echo "connectivity check on cluster endpoint $(bracketify $coredns_cluster_ip):53 failed"
 	echo "$(< /root/health)"
 	exit $return_value
 fi
