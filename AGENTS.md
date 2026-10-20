@@ -188,7 +188,7 @@ test/crd-integration/ # CRD validation tests against a real API server
 dist/          # Container images (Dockerfiles) and deployment YAML manifests
 charts/        # Helm charts — ovn-kubernetes (with its ovnkube-crds sub-chart) and ovn-k8s-observability
 docs/          # mkdocs source for ovn-kubernetes.io — OKEPs, feature docs, design docs, developer, installation guides
-contrib/       # Kind cluster scripts, local deployment helpers (kind.sh), and development tooling
+contrib/       # KinD cluster scripts, local deployment helpers (kind.sh), and development tooling
 hack/          # Repository-level scripts — docs site build and publishing
 debian/        # Debian packaging metadata
 LICENSES/      # License and third-party package licensing information
@@ -217,8 +217,8 @@ has `gofmt`, `lint-fix`, the codegen targets, and the `verify-*` targets.
 must pass, and [Tools and environment](#tools-and-environment) for the
 container, kernel module, and platform caveats.
 
-E2E tests run via CI on Kind clusters. See `test/e2e/` for Ginkgo test suites.
-To run E2E locally, first set up a Kind cluster using `contrib/kind.sh`, then run the tests.
+E2E tests run via CI on KinD clusters. See `test/e2e/` for Ginkgo test suites.
+To run E2E locally, first set up a KinD cluster using `contrib/kind.sh`, then run the tests.
 See `docs/developer-guide/local_testing_guide.md` for more details.
 
 ## Key Conventions

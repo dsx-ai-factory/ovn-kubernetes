@@ -174,7 +174,7 @@ _gateway (10.244.2.1) at 0a:58:a9:fe:01:01 [ether] on eth0
 ### Configuring dns server
 By default the DHCP server at ovn-kuberntes will configure the kubernetes
 default dns service `kube-system/kube-dns` as the name server. This can be
-overriden with the following command line options:
+overridden with the following command line options:
 - dns-service-namespace
 - dns-service-name
 
@@ -254,7 +254,7 @@ The KubeVirt bridge binding adds  a bridge and a tap device and connects the exi
 KubeVirt doesn't replace anything. It adds a bridge and a tap device, and connects the existing pod interface as a port of the aforementioned bridge.
 
 Benefit of the bridge binding is that is able to expose the pod IP to the VM as expected by most users also pod network bridge binding live migration is implemented by ovn-kubernetes by doing the following:
-- Do IP assignemnt with ovn-k but skip the CNI part that configure it at pod's netns veth.
+- Do IP assignment with ovn-kubernetes but skip the CNI part that configures it at the pod's netns veth.
 - Do not expect the IP to be on the pod netns.
 - Add the ability at ovn-k controllers to migrate pod's IP from node to node.
 
@@ -316,7 +316,7 @@ The "arp_proxy" LSP option will include the MAC to answer ARPs with, and the
 link local ipv4 and ipv6 addresses, as well as the cluster wide pod CIDR. This
 allows the proxy to answer ARP requests for the subnet gateway IP when the node
 switch does not have the live migrated IP. The flows from arp_proxy have less
-priority than the ones from the node logical switch so ARP flows are not overriden.
+priority than the ones from the node logical switch so ARP flows are not overridden.
 
 ```text
     ┌────────────────────┐   ┌────────────────────┐

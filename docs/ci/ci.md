@@ -14,9 +14,9 @@ local workflow that controls the test run is located in
 The following tasks are performed:
 
 - Build OVN-Kubernetes
-- Check out the Kubernetes source tree and compiles some dependencies
-- Install KIND
-- Run a matrix of End-To-End Tests using KIND
+- Check out the Kubernetes source tree and compile some dependencies
+- Install KinD
+- Run a matrix of End-To-End Tests using KinD
 - Ensure that documentation builds successfully
 
 <!--
@@ -48,7 +48,7 @@ It may also be useful sometimes to search through the closed issues to see if th
 previously and (not really) fixed, then reopening it with the new job failure.
 
 Only after following these steps ^, you can comment `/retest-failed` on your PR to trigger a retest of the failed tests.
-A rocket emoji reaction on your comment should apper when the retest is triggered.
+A rocket emoji reaction on your comment should appear when the retest is triggered.
 
 Before running this command, please reference existing or newly opened issues to justify the retest request.
 
@@ -120,7 +120,7 @@ using an `exclude:` statement in
 
 # Conformance Tests
 
-We have a conformance test suit that can be invoked using the `make conformance` command.
+We have a conformance test suite that can be invoked using the `make conformance` command.
 Currently we run the `TestNetworkPolicyV2Conformance` tests there. The actual tests are
 defined in https://github.com/kubernetes-sigs/network-policy-api/tree/master/conformance
 and then invoked from this repo. Any changes to the tests first have to be submitted

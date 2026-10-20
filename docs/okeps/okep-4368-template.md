@@ -6,7 +6,7 @@ added to the ovn-kubernetes repo, so please open one if you don't have one
 yet. Then use the Issue number xxxx as the unique number for the OKEP-xxxx
 number as well as use the same file naming convention as used in this template.
 So the OKEP file name must be `okep-xxxx-title.md` - The goal is that that
-github issue will have disucssion details about this feature - using meeting
+github issue will have discussion details about this feature - using meeting
 notes; slack threads for discussions is not desired as preserving history is
 hard)
 

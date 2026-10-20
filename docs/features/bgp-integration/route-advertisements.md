@@ -1029,7 +1029,7 @@ connectivity checks, tcpdump, ovn-trace, ovs-trace, ...
 
 ## Best Practices
 
-TBD
+<!-- TBD -->
 
 ## Future Items
 

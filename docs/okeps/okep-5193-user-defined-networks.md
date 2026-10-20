@@ -848,7 +848,7 @@ When finished, reflect in the status all namespaces where NAD creation failed to
 
 > Note:
 > NAD considered foreign when
-> - Has the same `meta.namesapce` and `meta.name` as the requested NAD.
+> - Has the same `meta.namespace` and `meta.name` as the requested NAD.
 > - Has no owner-reference to the request CR object.
 
 ##### NetworkAttachmentDefinition Rendering

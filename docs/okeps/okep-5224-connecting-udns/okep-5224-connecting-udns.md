@@ -14,7 +14,7 @@ together has been made.
 
 ### User Personas:
 
-* `Admin`: Cluster administrator who has the highest priviledge access to
+* `Admin`: Cluster administrator who has the highest level of privilege in
   the cluster. Admin creates the namespaces for each tenant in the cluster.
 * `Tenant`: A tenant is an end user who owns the resources (workloads,
   policies, services, udns) created in one or more namespaces that are
@@ -57,7 +57,7 @@ the work happening in this enhancement.
 * [Tenant usecase] Connecting and disconnecting UDNs owned by the
   same tenant in same namespace or across different namespaces they
   own, in a self-serve fashion without any admin intervention. A tenant
-  should be able to connnect the secondary networks that belong to them.
+  should be able to connect the secondary networks that belong to them.
   This would most likely be a namespace-scoped API.
 * Tenants being able to request for interconnecting their networks
   with other tenants.
@@ -356,7 +356,7 @@ spec:
   for layer3 network connectivity. So if there are M nodes in your cluster
   and N_L3 networks you should have 2*(N_L3×M) IPs for allocation in this slice.
   The `networkPrefix` contains the prefix length allocated for each
-  connected layer3 network. From this pool each node get's a `/31` or `/127` point to
+  connected layer3 network. From this pool each node gets a `/31` or `/127` point to
   point network for actual topology connectivity.
   To connect layer2 networks we don't need per node-network slices, we just
   need one `/31` or `127` slice per network.
@@ -418,7 +418,7 @@ type ClusterNetworkConnectSpec struct {
     //  any of the service CIDR range used in the cluster.
     //  any of the join subnet of the selected networks to be connected.
     //  any of the masquerade subnet range used in the cluster.
-    //  any of the node subnets for choosen by the platform.
+    //  any of the node subnets chosen by the platform.
     //  any of other connect subnets for other ClusterNetworkConnects that might be selecting same networks.
     //
     // Does not have a default value for the above reason so
@@ -555,7 +555,7 @@ object, we must ensure the following:
   3) service CIDR range used in the cluster
   4) join subnet of the selected networks to be connected
   5) masquerade subnet range used in the cluster
-  6) node subnets for choosen by the platform. This is the responsibility
+  6) node subnets chosen by the platform. This is the responsibility
      of the user and we won't provide validation for node subnets since
      fetching that value could vary from platform to platform. We will
      cover this in the docs.
@@ -571,7 +571,7 @@ object, we must ensure the following:
 
 #### Valid ways of Connecting/Selecting/Disconnecting UDNs
 
-* A network could be selected as part of more than one network connnect, so
+* A network could be selected as part of more than one network connect, so
   what is the expectation when two Connect APIs are designed that select the
   exact same set of networks? How do we control validation of such scenarios?
   Example, ClusterNetworkConnect-A selects blue and green networks and
@@ -1371,7 +1371,7 @@ A new `network-connect-controller` will be created that watches the
 `ClusterNetworkConnect` objects and does the following:
 
 1) It is responsible to allocate a range for each network:
-  * It get's the `connectSubnets` value from the CNC and allocates
+  * It gets the `connectSubnets` value from the CNC and allocates
     a `/networkPrefix` subnet for each layer3 connected network.
     If its a layer2 type network, then allocator gives out a
     `/networkPrefix` subnet and then from that gives out a `/31` or
@@ -1567,7 +1567,7 @@ connect UDNs when overlay is turned off.
   website
 * Blog posts and easy to get started guides will be done on
   ovn-kubernetes.io website
-* Developer docs whereever possible will be added
+* Developer docs wherever possible will be added
 
 ## Risks, Known Limitations and Mitigations
 

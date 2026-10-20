@@ -66,9 +66,9 @@ together.
 | Requires node-network router IP storage design (either annotations OR nodeNetworkCRD)      | YES       | YES       |
 | Requires Centralized IPAM slicing per node   | YES        | NO - here given each node can re-use the same set of IPs, there is no need for centralized slicing - this is a huge advantage |
 | Requires Centralized tunnel-ids allocation   | YES        | NO - this is a huge advantage |
-| Reply is Symmetric | NO - but can be made symmetric with /24 routes if required | NO - replies will be assymmetric |
+| Reply is Symmetric | NO - but can be made symmetric with /24 routes if required | NO - replies will be asymmetric |
 | Scalability of routes | /16 will be 1 route on each router per connected network | /16 will be 1 route on each router per connected network |
-| Scalability of connections | Each router get's 1 additional port and the new switch will get M (number of networks) patch ports - so totally N*M patch ports | Point-to-point connections means all ovn_cluster_router's now have N*M patch ports |
+| Scalability of connections | Each router gets 1 additional port and the new switch will get M (number of networks) patch ports - so totally N*M patch ports | Point-to-point connections means all ovn_cluster_router's now have N*M patch ports |
 | Dataplane churn caused for connect/disconnect | More isolated changes because adding and disconnecting a network is as simple as adding/removing the port only from that network's router and the central switch. | Direct R2R Connection - so disconnecting a network means adding/removing the port from each connected router towards this network. So removing a specific tenant network will involve touching routers of other tenant's networks. |
 | Network being part of more than one connectAPI | Non-transitivity is automatically taken care of because there is no connection between the indirectly connected networks. |  Non-transitivity is taken care of because of the absence of routes on the router for the indirect connection to work. Any lingering stale routes could accidentally cause connectivity. |
 | Extensibility for adding features | Better because adding a transit router or switch opens up adding newer features easily like having hierarchical hubs of connections | Direct Connection might put us in a bind with regards to how much topology change we could do in future |
