@@ -9,6 +9,9 @@ import "time"
 type OvnK8sStatus string
 
 const (
+	// ManagedBGPConfigurationName identifies the shared full-mesh BGP template.
+	ManagedBGPConfigurationName = "ovnk-managed-bgp"
+
 	// Default network name
 	DefaultNetworkName           = "default"
 	DefaultNetworkControllerName = "default-network-controller"
