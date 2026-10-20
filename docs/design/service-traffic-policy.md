@@ -6,7 +6,7 @@
 For [Kubernetes Services](https://kubernetes.io/docs/concepts/services-networking/service/) of type Nodeport or
 Loadbalancer a user can set the `service.spec.externalTrafficPolicy` field to either `cluster` or `local` to denote
 whether or not external traffic is routed to cluster-wide or node-local endpoints. The default value for the
-`externalTrafficPolicy` field is `cluster`. In this configuration in ingress traffic is equally disributed across all
+`externalTrafficPolicy` field is `cluster`. In this configuration, ingress traffic is equally distributed across all
 backends and the original client IP address is lost due to SNAT. If set to `local` then the client
 source IP is preserved throughout the service flow and if service traffic arrives at nodes without
 local endpoints it gets dropped. See [sources](#sources) for more information on ETP=local.
@@ -65,7 +65,7 @@ eth0--->|breth0| -----> 172.18.0.3 OVN GR 100.64.0.4 --> join switch --> ovn_clu
 
 #### **Local Gateway Mode**
 
-The implementation of this case differs for local gateway from that for shared gateway. In local gateway if the above path is used, response traffic would be assymmetric since the default route for pod egress traffic is via `ovn-k8s-mp0`.
+The implementation of this case differs for local gateway from that for shared gateway. In local gateway if the above path is used, response traffic would be asymmetric since the default route for pod egress traffic is via `ovn-k8s-mp0`.
 
 In local gateway mode, rather than sending the traffic from breth0 into OVN via gateway router, we use flows on breth0 to send it into the host.
 
@@ -596,7 +596,7 @@ hello-world-2-5c87676b7-h6rm5   1/1     Running   0          111m   10.244.0.6  
 hello-world-2-5c87676b7-l82w8   1/1     Running   0          111m   10.244.1.3   ovn-worker2   <none>           <none>
 ```
 
-Traffic from pod hits the load balancer on the switch where the non-local endpoints for clusterIPs are filtered out. So traffic will be DNAT-ed to local endpoints if any. Here is how the load balancers will look like on the three KIND worker nodes for the above service.
+Traffic from pod hits the load balancer on the switch where the non-local endpoints for clusterIPs are filtered out. So traffic will be DNAT-ed to local endpoints if any. Here is how the load balancers will look like on the three KinD worker nodes for the above service.
 
 ```
 a7865d9f-43d2-4cf9-a316-fc35e8c357a8    Service_surya/he    tcp        10.96.61.132:80        

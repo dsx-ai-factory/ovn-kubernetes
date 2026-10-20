@@ -346,7 +346,7 @@ The following CEL validation rules are enforced on the `cidrs` list:
 Cross-VTEP CIDR overlap validation is performed by the VTEP controller at runtime (not via CEL) since it
 requires inspecting other VTEP objects. If two VTEP CRs have overlapping CIDRs, both are set to `Accepted=False`
 with reason `CIDROverlap`. This is done so that we don't end up in confusion situations where we have
-two VTEPs with same CIDR ranges or overlapping CIDR ranges where for the first tunnel's nodeA get's an
+two VTEPs with same CIDR ranges or overlapping CIDR ranges where for the first tunnel's nodeA gets an
 IPA from the first VTEP v/s for second tunnel nodeB gets an IPB from the second VTEP and now we advertise
 both of these out.
 

@@ -961,7 +961,7 @@ Some of the scenarios that we care about:
 The same GR MAC address is used on the GR port (`rtotr-GR-node1`) and the transit router port (`trtos-layer2-switch-upgrade`).
 That's fine because they're different L2 domains.
 
-Dummy IP can be resued on all nodes, since it is never used as a source or destination IP, it is only used for the routing decision.
+Dummy IP can be reused on all nodes since it is never used as a source or destination IP; it is only used for the routing decision.
 You may wonder why we need per-joinIP routes if dummyIP should be enough for routing decision based on the connected route.
 It is about longest prefix match algorithm that OVN uses. Without `/32` routes for every joinIP, we have 2 fighting routes for
 pod1->joinIP traffic, one with dummy IP `ip4.dst == 100.65.0.0/16` and another one for pod subnet `ip4.src == <podSubnet>` 

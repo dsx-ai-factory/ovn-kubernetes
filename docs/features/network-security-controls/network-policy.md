@@ -11,7 +11,7 @@ Each NetworkPolicy object consists of four sections:
 1. `podSelector`: a label selector that determines which pods the NetworkPolicy applies to
 2. `policyTypes`: determines which policy types are included, if none are selected then `Ingress` will always be set and `Egress` will be set if any `Egress` rules are applied 
 3. `Ingress rules`: determines the sources that pods selected by the ingress rule can receive traffic from 
-4. `Egress rules`: determines the sinks that pods selected by the egress rule can send trafic to 
+4. `Egress rules`: determines the sinks that pods selected by the egress rule can send traffic to
 
 ## NetworkPolicy features 
 
@@ -62,7 +62,7 @@ spec:
 
 Every new NetworkPolicy creates a port group named `FOO_bar` where `FOO` is the policy's Namespace and `bar` is the policy's name.  All pods that the policy's `podSelector` selects are added to the port group.
 
-Additionally, two global deny PortGroups are also used, specifially: `IngressDefaultDeny` and `EgressDefaultDeny`.  Any pod selected by a NetworkPolicy in any Namespace is added to these PortGroups.
+Additionally, two global deny PortGroups are also used, specifically: `IngressDefaultDeny` and `EgressDefaultDeny`.  Any pod selected by a NetworkPolicy in any Namespace is added to these PortGroups.
 
 subset of `ovn-nbctl find port-group`
 ```
@@ -141,7 +141,7 @@ spec:
 
 ## **Applying Ingress and Egress Rules using `spec.Ingress` and `spec.Egress`** 
 
-In some cases we need to explicilty define what sources and sinks a pod is allowed to communicate with, to handle this feature the `spec.Ingress` and `spec.Egress` fields of a NeworkPolicy can be used 
+In some cases, we need to explicitly define what sources and sinks a pod is allowed to communicate with. The `spec.Ingress` and `spec.Egress` fields of a NetworkPolicy can be used for this.
 
 These sections contain a list of ingress or egress "peers" (the `from` section for `ingress` and the `to` section for `egress`) and a list of IP ports/protocols (the `ports` section) to or from which traffic should be allowed. Each list element of each section is logically OR-ed with other elements.
 
@@ -165,7 +165,7 @@ Rules defined in `spec.Ingress` can match on two main sections, 1.`spec.Ingress.
     - `spec.Ingress.from.ipBlock` 
         
         The ip addresses from which to allow traffic, contains fields `spec.Ingress.from.ipBlock.cidr` to specify which ip address are allowed and 
-        `spec.Ingress.from.ipBlock.except` to specifiy which address's are not allowed 
+        `spec.Ingress.from.ipBlock.except` to specify which addresses are not allowed
     
       - `spec.Ingress.from.namespaceSelector` 
 
@@ -194,7 +194,7 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
     - `spec.Egress.to.ipBlock` 
         
         The ip addresses which a pod can send traffic to, contains fields `spec.Egress.from.ipBlock.cidr` to specify which ip address are allowed and 
-        `spec.Egress.from.ipBlock.except` to specifiy which address's are not allowed
+        `spec.Egress.from.ipBlock.except` to specify which addresses are not allowed
     
     - `spec.Egress.to.namespaceSelector` 
 
@@ -331,7 +331,7 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
 
   Notice that the port corresponding to the pod `server` is included in the `ingressDefaultDeny` port group 
 
-  To bypass the ingress default deny and allow traffic from pod `client1` in Namespace `demo` as specificed in the network policy, an address set is created containing the ip address for the pod `client1`  
+  To bypass the ingress default deny and allow traffic from pod `client1` in Namespace `demo` as specified in the network policy, an address set is created containing the ip address for the pod `client1`
 
   subset of `ovn-nbctl find address_set` 
   ```
@@ -343,7 +343,7 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
 
   ```
 
-  Finally we can see the ingress ACL that allows traffic to the `server` pod by allowing `ip4.src` traffic **FROM** the address's in the address set `a14783882619065065142` **TO** the port group `@a13757631697825269621` which contains the port `c754a19d-1e8c-4415-99b9-66fdcdaed196` (corresponding to the `server`'s logical port)
+  Finally we can see the ingress ACL that allows traffic to the `server` pod by allowing `ip4.src` traffic **FROM** the addresses in the address set `a14783882619065065142` **TO** the port group `@a13757631697825269621` which contains the port `c754a19d-1e8c-4415-99b9-66fdcdaed196` (corresponding to the `server`'s logical port)
 
   subset of `ovn-nbctl find ACL`
   ```
@@ -360,9 +360,3 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
   severity            : []
 
   ```
-
-TODO: Add more examples(good for first PRs), specifically replicate above scenario by matching on the pod's network(`ip_block`) rather than the pod itself 
-
-
-
-

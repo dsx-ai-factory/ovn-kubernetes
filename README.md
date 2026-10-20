@@ -167,7 +167,7 @@ Here are some links to help in your ovn-kubernetes journey:
 
 - [Welcome to ovn-kubernetes](docs/index.md) for overview of ovn-kubernetes.
 - [Architecture of ovn-kubernetes](docs/design/architecture.md)
-- [Deploying OVN-Kubernetes cluster using KIND](docs/installation/launching-ovn-kubernetes-on-kind.md)
+- [Deploying OVN-Kubernetes cluster using KinD](docs/installation/launching-ovn-kubernetes-on-kind.md)
 - [Deploying OVN-Kubernetes CNI using Helm](docs/installation/launching-ovn-kubernetes-with-helm.md)
 - [Building and installing OVN-Kubernetes](BUILD.md)
 - [Contributing to OVN-Kubernetes](CONTRIBUTING.md) for how to contribute

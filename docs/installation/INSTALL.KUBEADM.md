@@ -2,7 +2,7 @@ The following is a walkthrough for an installation in an environment with 4 virt
 
 Note that the resulting environment might be highly unstable.
 
-If your goal is to set up an environment quickly or to set up a development environment, see the [kind installation documentation](launching-ovn-kubernetes-on-kind.md) instead.
+If your goal is to set up an environment quickly or to set up a development environment, see the [KinD installation documentation](launching-ovn-kubernetes-on-kind.md) instead.
 
 ## Environment setup
 
@@ -293,7 +293,7 @@ rtt min/avg/max/mdev = 18.506/18.506/18.506/0.000 ms
 
 ### Install container runtime engine and kubeadm (node1, node2, node3)
 
-The following will be a brief walkthrough of what's requried to install the container runtime and kubernetes. For further details, follow the `kubeadm` documentation:
+The following will be a brief walkthrough of what's required to install the container runtime and kubernetes. For further details, follow the `kubeadm` documentation:
 * [https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/)
 * [https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/)
 
@@ -654,7 +654,7 @@ br-int might be added by OVN, but the files for it are not created in /var/run/o
 2021-08-24T12:42:43.810Z|00025|rconn|WARN|unix:/var/run/openvswitch/br-int.mgmt: connection failed (No such file or directory)
 ~~~
 
-The best workaroud is to pre-create br-int before the OVN-Kubernetes installation:
+The best workaround is to pre-create br-int before the OVN-Kubernetes installation:
 ~~~
 ovs-vsctl add-br br-int
 ~~~
