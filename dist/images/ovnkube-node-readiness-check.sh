@@ -4,7 +4,9 @@
 
 bracketify() { case "$1" in *:*) echo "[$1]" ;; *) echo "$1" ;; esac; }
 
-metrics_endpoint_ip=${OVN_METRICS_ENDPOINT_IP}
+# ovnkube.sh binds the metrics server to METRICS_IP, falling back to
+# OVN_METRICS_ENDPOINT_IP, so probe the same address.
+metrics_endpoint_ip=${METRICS_IP:-${OVN_METRICS_ENDPOINT_IP}}
 if [[ -z ${metrics_endpoint_ip} ]]; then
   metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 fi
