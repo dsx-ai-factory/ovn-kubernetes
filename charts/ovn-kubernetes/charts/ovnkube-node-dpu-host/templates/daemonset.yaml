@@ -103,13 +103,16 @@ spec:
           # - whether the metrics server is running since it is one of the last things we do,
           # - also checks if we can access KUBERNETES_SERVICE_HOST:KUBERNETES_SERVICE_PORT
           # - also checks if we can access coredns service
+          # Each step in the script is time-bounded (worst case 13s in total) so that it
+          # always finishes within timeoutSeconds and names the failing check; keep the
+          # two in step if you change either.
           readinessProbe:
             exec:
               command:
               - /bin/bash
               - /root/ovnkube-node-readiness-check.sh
             initialDelaySeconds: 30
-            timeoutSeconds: 5
+            timeoutSeconds: 15
             periodSeconds: 30
           terminationMessagePolicy: FallbackToLogsOnError
           volumeMounts:

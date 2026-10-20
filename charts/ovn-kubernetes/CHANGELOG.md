@@ -1,5 +1,7 @@
 # 2.5.0-pr
 - development version for the next release; entries accumulate here until 2.5.0 is cut.
+- bound every step of the ovnkube-node readiness check and raise its probe timeout to 15s,
+  so a hung API VIP or DNS lookup is reported by name instead of as a generic probe timeout.
 
 # 2.4.0
 - released from the `release-2.4` branch, which was cut from `main` at 1.5.19 and
