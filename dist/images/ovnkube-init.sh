@@ -241,11 +241,10 @@ if [ -z "$cidr" ]; then
 fi
 suffix=${cidr##*/}
 if [ "$suffix" == "31" ]; then
-  # dpu-host is L3-routed with a /31: the host holds the odd (.1) address and the
-  # DPU holds the even (.0) address, which is our next hop. Since cidr comes from
-  # the host's k8s.ovn.org/host-cidrs annotation, net.network_address is the DPU.
-  # output is like: network=10.192.0.0/31 gateway=10.192.0.0
-  output=`python3 -c "import ipaddress; net=ipaddress.ip_network(\"$cidr\", strict=False); print('network=%s\ngateway=%s'%(net, net.network_address))"`
+  # A /31 holds exactly two addresses: the host holds $node_ip, so our next hop
+  # is the other one. Which of the two is even varies by deployment.
+  # output is like: network=10.192.0.0/31 gateway=10.192.0.1
+  output=`python3 -c "import ipaddress; net=ipaddress.ip_network(\"$cidr\", strict=False); ip=ipaddress.ip_address(\"$node_ip\"); print('network=%s\ngateway=%s'%(net, next(a for a in net if a != ip)))"`
   network=$(echo "$output" | awk -F= '/^network=/ {print $2}')
   gateway=$(echo "$output" | awk -F= '/^gateway=/ {print $2}')
 else
