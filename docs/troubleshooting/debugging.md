@@ -122,3 +122,41 @@ kubelet will complain about them in its log file.
 If you suspect issues on only one of the host, look at the log file of
 ovn-controller at /var/log/openvswitch/ovn-controller.log to see any
 obvious error messages.
+
+### Read the ovnkube-node readiness probe event.
+
+When an ovnkube-node pod is not Ready, the `Unhealthy` event on the pod names
+the check that failed:
+
+```
+kubectl -n ovn-kubernetes get events \
+  --field-selector involvedObject.kind=Pod,involvedObject.name=<ovnkube-node-pod>,reason=Unhealthy
+```
+
+The readiness probe runs `/root/ovnkube-node-readiness-check.sh` in the
+`ovnkube-controller` container on full-mode nodes and in the `ovnkube-node`
+container on DPU hosts. It performs three checks in order and stops at the
+first failure:
+
+1. a TLS connection to the ovnkube-node metrics endpoint, which is one of the
+   last things ovnkube-node starts;
+2. an HTTPS request to `/readyz` on the Kubernetes API service VIP
+   (`KUBERNETES_SERVICE_HOST`), to prove the node can reach the cluster
+   network;
+3. an A-record lookup of each name in `EXTERNAL_DNS_NAMES` (default
+   `google.com cloudflare.com`) against the CoreDNS cluster IP
+   (`COREDNS_CLUSTER_IP`), passing as soon as one name resolves.
+
+Each check is time-bounded, so the script finishes within the probe's
+`timeoutSeconds` (15s in the Helm charts) and the event reports the failing
+check together with the tool's own error, for example:
+
+```
+connectivity check on k8s svc endpoint 10.112.0.1:443 failed (rc=28)
+curl: (28) Failed to connect to 10.112.0.1 port 443 after 2001 ms: Timeout was reached
+```
+
+An event that only says `command timed out` with no such line means the script
+itself was killed by the kubelet, which should not happen with the bounded
+checks: exec into that container and run the script by hand to see which step
+takes too long.
