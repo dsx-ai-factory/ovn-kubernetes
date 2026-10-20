@@ -8,7 +8,7 @@ if [[ ! -f ${file} ]] ; then
     exit 1
 fi
 
-curl --unix-socket /var/run/ovn-kubernetes/cni/ovn-cni-server.sock -X POST http://dummy/ > /dev/null 2>err.txt
+curl -sS --max-time 3 --unix-socket /var/run/ovn-kubernetes/cni/ovn-cni-server.sock -X POST http://dummy/ > /dev/null 2>/root/err.txt
 if [ $? -ne 0 ]; then
     echo "ERROR: ovn-cni-server.sock is not working"
     echo "$(< /root/err.txt)"
