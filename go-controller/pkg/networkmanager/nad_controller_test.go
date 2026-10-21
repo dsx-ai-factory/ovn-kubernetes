@@ -277,10 +277,6 @@ func (tnc *testNetworkController) Reconcile(netInfo util.NetInfo) error {
 	return util.ReconcileNetInfo(tnc.ReconcilableNetInfo, netInfo)
 }
 
-func (tnc *testNetworkController) GetNetworkInterConnectInfo() *NetworkInterConnectInfo {
-	return nil
-}
-
 func (tnc *testNetworkController) HandleNetworkRefChange(node string, active bool) {
 	if tnc.handleRefChange != nil {
 		tnc.handleRefChange(node, active)

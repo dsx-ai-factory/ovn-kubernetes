@@ -1651,10 +1651,6 @@ func configureGlobalForwarding() error {
 	return nil
 }
 
-func (bnnc *BaseNodeNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
-	return nil
-}
-
 // GetNodeAddressManager returns the node's address manager from the gateway,
 // available after Init() has completed. Returns nil if the gateway has not
 // been initialized or is not the expected type.

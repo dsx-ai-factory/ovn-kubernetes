@@ -1357,12 +1357,6 @@ func (oc *Layer3UserDefinedNetworkController) RegisterServiceNetwork(runRepair b
 	return nil
 }
 
-func (oc *Layer3UserDefinedNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
-	return &networkmanager.NetworkInterConnectInfo{
-		LogicalEntityToConnect: &nbdb.LogicalRouter{Name: oc.GetNetworkScopedName(types.OVNClusterRouter)},
-	}
-}
-
 func (oc *Layer3UserDefinedNetworkController) ReconcileServiceNetwork() error {
 	if oc.svcController == nil {
 		return nil

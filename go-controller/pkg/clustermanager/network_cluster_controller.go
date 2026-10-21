@@ -1194,7 +1194,3 @@ func infrastructureExcludeCIDRs(netInfo util.NetInfo) []*net.IPNet {
 	}
 	return excludeCIDRs
 }
-
-func (ncc *networkClusterController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
-	return nil
-}

@@ -1242,35 +1242,6 @@ func (oc *Layer2UserDefinedNetworkController) DeregisterServiceNetwork() {
 	}
 }
 
-func (oc *Layer2UserDefinedNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
-	return &networkmanager.NetworkInterConnectInfo{
-		LogicalEntityToConnect: &nbdb.LogicalSwitch{Name: oc.GetNetworkScopedName(types.OVNLayer2Switch)},
-		StartInterConnect: func(_ networkmanager.BaseNetworkController, i interface{}) error {
-			layer2ClusterSubnets := oc.Subnets()
-			switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
-			logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
-			logicalRouter, ok := i.(*nbdb.LogicalRouter)
-			if !ok {
-				// configuration error, no retry
-				klog.Errorf("Inter-connect error: network %s can only connect to layer 3 network", oc.GetNetworkName())
-				return nil
-			}
-			return oc.ConnectToNetworks(logicalSwitch, logicalRouter, layer2ClusterSubnets)
-		},
-		StopInterConnect: func(_ networkmanager.BaseNetworkController, i interface{}) error {
-			logicalRouter, ok := i.(*nbdb.LogicalRouter)
-			if !ok {
-				// configuration error, no retry
-				klog.Errorf("Inter-connect error: network %s can only connect to layer 3 network", oc.GetNetworkName())
-				return nil
-			}
-			switchName := oc.GetNetworkScopedName(types.OVNLayer2Switch)
-			logicalSwitch := &nbdb.LogicalSwitch{Name: switchName}
-			return oc.DisconnectFromNetworks(logicalSwitch, logicalRouter)
-		},
-	}
-}
-
 // syncClusterRouterPorts connects the network switch to the transit router
 func (oc *Layer2UserDefinedNetworkController) syncClusterRouterPorts(node *corev1.Node, hostSubnets []*net.IPNet) error {
 	switchName := oc.GetNetworkScopedSwitchName("")

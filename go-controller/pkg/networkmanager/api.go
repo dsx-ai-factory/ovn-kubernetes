@@ -254,10 +254,6 @@ type BaseNetworkController interface {
 	ReconcilableNetworkController
 	Start(ctx context.Context) error
 	Stop()
-	// Network Controller capable of network inter-connect will return non-nil NetworkInterConnectInfo
-	// Active side return non-nil NetworkInterConnectInfo.StartInterConnect() and
-	// NetworkInterConnectInfo.StopInterConnect()
-	GetNetworkInterConnectInfo() *NetworkInterConnectInfo
 }
 
 // NetworkController is a BaseNetworkController that can also clean up after

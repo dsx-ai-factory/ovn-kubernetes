@@ -37,10 +37,6 @@ func (fnc *FakeNetworkController) Reconcile(util.NetInfo) error {
 	return nil
 }
 
-func (nc *FakeNetworkController) GetNetworkInterConnectInfo() *NetworkInterConnectInfo {
-	return nil
-}
-
 func (fnc *FakeNetworkController) HandleNetworkRefChange(_ string, _ bool) {}
 
 type FakeControllerManager struct{}

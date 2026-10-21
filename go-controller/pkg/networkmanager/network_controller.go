@@ -19,7 +19,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -52,8 +51,6 @@ func newNetworkController(name, node string, cm ControllerManager, wf watchFacto
 		networkControllers:     map[string]*networkControllerState{},
 		pendingNetworkRefNodes: map[string]sets.Set[string]{},
 		networkRefStates:       map[string]map[string]bool{},
-
-		perNetworkConnectToNADs: map[string]*interConnectState{},
 	}
 
 	// this controller does not feed from an informer, networks are manually
@@ -139,12 +136,6 @@ type networkController struct {
 	networks           map[string]util.MutableNetInfo
 	networksByID       map[int]string // reverse index: network ID -> network name for O(1) lookup
 	networkControllers map[string]*networkControllerState
-
-	// maps the networkName of the inter-connect state this network connects to.
-	// For every such networkName, we capture the interconnection state.
-	// key is network name of the active side (layer2 network),
-	// value is passive side information (of default/layer3 network)
-	perNetworkConnectToNADs map[string]*interConnectState
 
 	// getNADKeysForNetwork returns NAD keys associated with a network name.
 	getNADKeysForNetwork func(networkName string) []string
@@ -499,8 +490,6 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 		if err != nil {
 			return fmt.Errorf("failed to reconcile controller for network %s: %w", networkName, err)
 		}
-		// update NADs of network
-		c.passiveNADConnectToActiveNetwork(reconcilable, true)
 		return nil
 	}
 
@@ -524,12 +513,6 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 		return fmt.Errorf("failed to start network %s: %w", networkName, err)
 	}
 	c.setNetworkState(network.GetNetworkName(), &networkControllerState{controller: nc})
-	// update NADs of network
-	if nc.NADToInterConnect() != "" {
-		c.activeNetworkConnectToPassiveNAD(nc)
-	} else {
-		c.passiveNADConnectToActiveNetwork(nc, false)
-	}
 	return nil
 }
 
@@ -557,7 +540,6 @@ func (c *networkController) deleteNetwork(network string) error {
 		return fmt.Errorf("%s: failed to cleanup network %s: %w", c.name, network, err)
 	}
 
-	c.networkDisconnect(have.controller)
 	c.setNetworkState(network, nil)
 	c.clearPendingNetworkRefNodes(network)
 	c.clearNetworkRefState(network)
@@ -757,245 +739,6 @@ func (c *networkController) getRunningNetwork(id int) string {
 		}
 	}
 	return ""
-}
-
-type NetworkInterConnectInfo struct {
-	// the logical entity to connect to, it is either a logical router or a logical switch
-	LogicalEntityToConnect interface{}
-	StartInterConnect      func(BaseNetworkController, interface{}) error
-	StopInterConnect       func(BaseNetworkController, interface{}) error
-}
-
-type icstate string
-
-const (
-	ICSTATE_INIT      icstate = "Init"
-	ICSTATE_INVALID   icstate = "Invalid"
-	ICSTATE_CONNECTED icstate = "Connected"
-)
-
-type interConnectState struct {
-	// NAD name this network is requested to connect to
-	nadToConnect string
-	// network name of network to which "nadName" belongs
-	peerNetName string
-	state       icstate
-	err         error
-}
-
-func (ics *interConnectState) init(nadToConnect string) {
-	ics.nadToConnect = nadToConnect
-	ics.peerNetName = ""
-	ics.state = ICSTATE_INIT
-	ics.err = nil
-}
-
-func (c *networkController) activeNetworkConnectToPassiveNAD(activeController BaseNetworkController) {
-	if activeController.GetNetworkInterConnectInfo() == nil {
-		return
-	}
-	nadToConnect := activeController.NADToInterConnect()
-	if nadToConnect == "" {
-		return
-	}
-
-	c.Lock()
-	defer c.Unlock()
-	netName := activeController.GetNetworkName()
-
-	ics, ok := c.perNetworkConnectToNADs[netName]
-	if !ok {
-		ics = &interConnectState{}
-		ics.init(nadToConnect)
-		c.perNetworkConnectToNADs[netName] = ics
-
-	}
-	if ics.state == ICSTATE_CONNECTED || ics.state == ICSTATE_INVALID {
-		if ics.state == ICSTATE_INVALID {
-			klog.Errorf("Error: invalid inter-connect request between network %s and %s: %s",
-				netName, nadToConnect, ics.err)
-		}
-		return
-	}
-
-	if c.getNetworkNameForNADKey(ics.nadToConnect) == activeController.GetNetworkName() {
-		ics.state = ICSTATE_INVALID
-		ics.err = fmt.Errorf("network %s is requested to inter-connect to itself (NAD %s)", netName, nadToConnect)
-		klog.Error(ics.err)
-		return
-	}
-	activeNetworkICInfo := activeController.GetNetworkInterConnectInfo()
-	if activeNetworkICInfo == nil || activeNetworkICInfo.StartInterConnect == nil {
-		ics.state = ICSTATE_INVALID
-		ics.err = fmt.Errorf("network %s inter-connect to NAD %s failed: network %s does not support inter-connect",
-			netName, nadToConnect, netName)
-		klog.Error(ics.err)
-		return
-	}
-	klog.V(5).Infof("Attempt to connect network %s to NAD %s", netName, nadToConnect)
-
-	passiveControllerList := []BaseNetworkController{c.cm.GetDefaultNetworkController()}
-	for _, state := range c.networkControllers {
-		if !state.stoppedAndDeleting {
-			passiveControllerList = append(passiveControllerList, state.controller)
-		}
-	}
-	for _, passiveController := range passiveControllerList {
-		if passiveController.GetNetworkName() == c.getNetworkNameForNADKey(nadToConnect) {
-			passiveNetworkICInfo := passiveController.GetNetworkInterConnectInfo()
-			if passiveNetworkICInfo == nil || passiveNetworkICInfo.StartInterConnect != nil {
-				ics.state = ICSTATE_INVALID
-				ics.err = fmt.Errorf("network %s inter-connect to NAD %s failed: network %s does not support inter-connect",
-					netName, nadToConnect, passiveController.GetNetworkName())
-				klog.Error(ics.err)
-				break
-			}
-			ics.peerNetName = passiveController.GetNetworkName()
-			err := activeNetworkICInfo.StartInterConnect(activeController, passiveNetworkICInfo.LogicalEntityToConnect)
-			if err != nil {
-				klog.Errorf("Inter-connect request between network %s and NAD %s failed: %v",
-					activeController.GetNetworkName(), nadToConnect, err)
-				break
-			}
-			ics.state = ICSTATE_CONNECTED
-			break
-		}
-	}
-}
-
-// Attempt to connect/disconnect passive network to the active network
-// if update is true, this is NADs change of passive network, we may need to disconnect with
-// already connected active network
-func (c *networkController) passiveNADConnectToActiveNetwork(passiveController BaseNetworkController, update bool) {
-	errors := []error{}
-	if passiveController.GetNetworkInterConnectInfo() == nil {
-		return
-	}
-	c.Lock()
-	defer c.Unlock()
-	passiveNetworkICInfo := passiveController.GetNetworkInterConnectInfo()
-	for activeNetName, ics := range c.perNetworkConnectToNADs {
-		// get active controller first
-		state := c.networkControllers[activeNetName]
-		activeController := state.controller
-		if activeController == nil {
-			klog.Errorf("This should never happend, failed to find active network controller for %s", activeNetName)
-			continue
-		}
-		activeNetworkICInfo := activeController.GetNetworkInterConnectInfo()
-		if activeNetworkICInfo == nil {
-			klog.Errorf("This should never happend, active network controller of %s does not support inter-connect", activeNetName)
-			continue
-		}
-
-		nadToConnect := ics.nadToConnect
-		if passiveController.GetNetworkName() != c.getNetworkNameForNADKey(nadToConnect) {
-			if update {
-				// check if this active network was connected to this passive network, if so disconnect
-				if ics.peerNetName == passiveController.GetNetworkName() {
-					klog.V(5).Infof("NAD %s is gone, try to disconnected from network %s", nadToConnect, activeNetName)
-					if ics.state == ICSTATE_CONNECTED {
-						err := activeNetworkICInfo.StopInterConnect(activeController, passiveNetworkICInfo.LogicalEntityToConnect)
-						if err == nil {
-							klog.Infof("Inter-disconnect request between network %s and NAD %s successed", activeNetName, nadToConnect)
-						} else {
-							errors = append(errors, fmt.Errorf("inter-disconnect request between network %s and NAD %s failed: %v",
-								activeNetName, nadToConnect, err))
-						}
-					}
-					ics.init(nadToConnect)
-				}
-			}
-			continue
-		}
-		klog.V(5).Infof("NAD %s is requested to be connected to network %s", nadToConnect, activeNetName)
-		if ics.state == ICSTATE_CONNECTED || ics.state == ICSTATE_INVALID {
-			if ics.state == ICSTATE_INVALID {
-				klog.Errorf("Error: invalid inter-connect request between network %s and %s: %s",
-					activeNetName, nadToConnect, ics.err)
-			}
-			continue
-		}
-		if passiveNetworkICInfo == nil || passiveNetworkICInfo.StartInterConnect != nil {
-			ics.state = ICSTATE_INVALID
-			ics.err = fmt.Errorf("network %s inter-connect to NAD %s failed: NAD %s does not support inter-connect",
-				activeNetName, nadToConnect, passiveController.GetNetworkName())
-			klog.Error(ics.err)
-			continue
-		}
-		ics.peerNetName = passiveController.GetNetworkName()
-		err := activeNetworkICInfo.StartInterConnect(activeController, passiveNetworkICInfo.LogicalEntityToConnect)
-		if err == nil {
-			klog.Infof("Inter-connect request between network %s and NAD %s successed", activeNetName, nadToConnect)
-			ics.state = ICSTATE_CONNECTED
-		} else {
-			errors = append(errors, fmt.Errorf("inter-connect request between network %s and NAD %s failed: %v",
-				activeNetName, nadToConnect, err))
-		}
-	}
-	if len(errors) > 0 {
-		klog.Error(kerrors.NewAggregate(errors))
-	}
-}
-
-func (c *networkController) networkDisconnect(bnc BaseNetworkController) {
-	if bnc.GetNetworkInterConnectInfo() == nil {
-		return
-	}
-
-	c.Lock()
-	defer c.Unlock()
-	netName := bnc.GetNetworkName()
-
-	ics, ok := c.perNetworkConnectToNADs[netName]
-	if ok {
-		// this network is active network, try to see if it needs to disconnect
-		klog.Infof("Network %s stopped, disconnect-interconnect request between network %s and NAD %s", netName, netName, ics.nadToConnect)
-		if ics.state == ICSTATE_CONNECTED {
-			activeNetworkICInfo := bnc.GetNetworkInterConnectInfo()
-			passiveController := c.cm.GetDefaultNetworkController()
-
-			if ics.peerNetName != types.DefaultNetworkName {
-				state := c.networkControllers[ics.peerNetName]
-				if state != nil {
-					passiveController = state.controller
-				}
-			}
-			if passiveController != nil && passiveController.GetNetworkInterConnectInfo() != nil {
-				klog.V(5).Infof("Network %s stopped, try to disconnected from network %s", netName, ics.peerNetName)
-				err := activeNetworkICInfo.StopInterConnect(bnc, passiveController.GetNetworkInterConnectInfo().LogicalEntityToConnect)
-				if err == nil {
-					klog.Infof("Inter-disconnect request between network %s and network %s successed", netName, ics.peerNetName)
-				} else {
-					klog.Errorf("Inter-disconnect request between network %s and network %s failed: %v", netName, ics.peerNetName, err)
-				}
-			}
-		}
-		// then delete the state from the map
-		delete(c.perNetworkConnectToNADs, netName)
-	} else {
-		// this network may be a passive network, again, try to see if it needs to disconnect
-		for activeNetName, ics := range c.perNetworkConnectToNADs {
-			if ics.peerNetName == netName {
-				// this network is passive network, and it has already connected to a passive network, try to disconnect
-				klog.Infof("Network %s stopped, disconnect-interconnect request between network %s and network %s", netName, netName, activeNetName)
-				if ics.state == ICSTATE_CONNECTED && bnc.GetNetworkInterConnectInfo() != nil {
-					state := c.networkControllers[activeNetName]
-					if state != nil {
-						activeController := state.controller
-						activeNetworkICInfo := activeController.GetNetworkInterConnectInfo()
-						err := activeNetworkICInfo.StopInterConnect(activeController, bnc.GetNetworkInterConnectInfo().LogicalEntityToConnect)
-						if err == nil {
-							klog.Infof("Inter-disconnect request between network %s and network %s successed", activeNetName, netName)
-						} else {
-							klog.Errorf("Inter-disconnect request between network %s and network %s failed: %v", activeNetName, netName, err)
-						}
-					}
-				}
-				ics.init(ics.nadToConnect)
-			}
-		}
-	}
 }
 
 // GetNetworkByID returns the network with the given ID or nil if not found.
