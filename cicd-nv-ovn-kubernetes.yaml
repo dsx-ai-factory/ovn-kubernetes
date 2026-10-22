@@ -5,7 +5,7 @@ projectID: 2649
 
 buildOvnKubernetes:
   OVN:
-    pkgTag: 26.03.2.5ad7ebd7.66994044
+    pkgTag: 26.09.1.89523462.75778277
   OVS:
     pkgTag: 3.7.2.591e9402.64764736
 
