@@ -34,3 +34,5 @@ README-values.md.gotmpl
 README-deployment.md.gotmpl
 cicd-sdn-helm-ovn-kubernetes.yaml
 NOTES
+.gitattributes
+scripts/
