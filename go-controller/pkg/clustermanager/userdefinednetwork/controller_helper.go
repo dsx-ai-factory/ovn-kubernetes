@@ -106,6 +106,10 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (_ *netv1.Ne
 	return c.applyNADAnnotations(nadCopy, desiredNAD.Annotations)
 }
 
+// createNAD creates the NAD of obj in the given namespace. For a CUDN it
+// records the namespace in namespaceTracker as soon as the NAD exists, so a
+// sync that fails later still leaves the deletion branch something to release.
+// Must be called with namespaceTrackerLock held when obj is a CUDN.
 func (c *Controller) createNAD(obj client.Object, namespace string, desiredNAD *netv1.NetworkAttachmentDefinition) (*netv1.NetworkAttachmentDefinition, error) {
 	// Serialize the primary-network check and creation with other NAD creators.
 	c.createNetworkLock.Lock()
@@ -125,6 +129,9 @@ func (c *Controller) createNAD(obj client.Object, namespace string, desiredNAD *
 	newNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
+	}
+	if cudn, ok := obj.(*userdefinednetworkv1.ClusterUserDefinedNetwork); ok {
+		c.namespaceTracker[cudn.Name].Insert(namespace)
 	}
 
 	return newNAD, nil
@@ -260,6 +267,10 @@ func (c *Controller) migrateNADAnnotationOwnership(nad *netv1.NetworkAttachmentD
 	return updated, nil
 }
 
+// deleteNAD removes the finalizer from the NAD that obj controls in the given
+// namespace and deletes it. A NAD that is absent, not controlled by obj or
+// without the finalizer is left alone. A NAD still used by a pod is reported
+// with a networkInUseError.
 func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(obj.GetName())
 	if err != nil {
