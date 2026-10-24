@@ -126,5 +126,8 @@ of the package.
 | dashboard.namespace | string | `"ovn-kubernetes"` | Namespace for GrafanaDashboard resources |
 | dashboard.processMetrics.profile | string | `"otel_process_scraper"` | Host OVS process metric source: process_exporter or otel_process_scraper |
 | global.ovnkubeNamespace | string | `"ovn-kubernetes"` | Namespace where the OVN Kubernetes workloads run |
+| monitoring.metricsPortName | string | `"ovnkube-node-metrics"` | Service port name scraped for ovnkube-node metrics |
 | monitoring.namespace | string | `"ovn-kubernetes"` | Namespace for ServiceMonitor resources |
 | monitoring.serviceMonitorSelectorLabels.release | string | `"prometheus"` | Labels Prometheus uses to select ServiceMonitors |
+| tags.alert-rule | bool | `true` | Enable the alert-rule subchart |
+| tags.dashboard | bool | `true` | Enable the dashboard subchart |

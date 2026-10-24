@@ -23,8 +23,12 @@ maintainers:
 sources:
   - https://github.com/dsx-ai-factory/ovn-kubernetes
   - https://github.com/ovn-kubernetes/ovn-kubernetes
+# Use conditions instead of dependency tags so an umbrella chart can configure
+# these switches under its ovn-k8s-observability values subtree.
 dependencies:
   - name: alert-rule
     version: 2.4.2
+    condition: tags.alert-rule
   - name: dashboard
     version: 2.4.2
+    condition: tags.dashboard

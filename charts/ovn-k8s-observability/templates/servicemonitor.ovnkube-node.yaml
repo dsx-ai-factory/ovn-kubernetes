@@ -40,7 +40,7 @@ spec:
       - name
       targetLabel: interface
     path: /metrics
-    port: ovnkube-node-metrics
+    port: {{ .Values.monitoring.metricsPortName | default "ovnkube-node-metrics" }}
     relabelings:
     - action: replace
       regex: ([^.]+).*

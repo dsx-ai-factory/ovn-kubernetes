@@ -3,6 +3,12 @@
 
 # Default values for ovn-k8s-observability.
 
+tags:
+  # -- Enable the alert-rule subchart
+  alert-rule: true
+  # -- Enable the dashboard subchart
+  dashboard: true
+
 global:
   # -- Namespace where the OVN Kubernetes workloads run
   ovnkubeNamespace: ovn-kubernetes
@@ -87,6 +93,8 @@ alert-rule:
 monitoring:
   # -- Namespace for ServiceMonitor resources
   namespace: ovn-kubernetes
+  # -- Service port name scraped for ovnkube-node metrics
+  metricsPortName: ovnkube-node-metrics
   serviceMonitorSelectorLabels:
     # -- Labels Prometheus uses to select ServiceMonitors
     release: prometheus
