@@ -205,11 +205,18 @@ func (p PodAdmission) ValidateUpdate(ctx context.Context, oldPod, newPod *corev1
 			sets.New[string](changedKeys...).Difference(p.annotationKeys).UnsortedList())
 	}
 
-	// Verify that nothing but the annotations changed.
+	// Verify that only permitted annotations and the downstream node-name label changed.
 	// Check Spec as well because the webhook also handles the main pod resource.
 	// Ignore .ManagedFields fields which are modified on every update.
 	oldPodCopy := oldPod.DeepCopy()
 	newPodCopy := newPod.DeepCopy()
+	// Downstream controllers label their own-node pods for node-based selection.
+	if isOVNKubeNode && newPod.Labels[util.OvnPodNodeNameLabel] == nodeName {
+		if oldPodCopy.Labels == nil {
+			oldPodCopy.Labels = map[string]string{}
+		}
+		oldPodCopy.Labels[util.OvnPodNodeNameLabel] = nodeName
+	}
 	oldPodCopy.Annotations = nil
 	newPodCopy.Annotations = nil
 	oldPodCopy.ManagedFields = nil

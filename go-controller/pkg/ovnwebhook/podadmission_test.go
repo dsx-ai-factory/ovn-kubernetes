@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	kubevirtv1 "kubevirt.io/api/core/v1"
@@ -601,5 +602,115 @@ func TestPodNetworkAnnotationUpdate(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPodAdmission_NodeNameLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(oldPod, newPod *corev1.Pod)
+		allowed bool
+	}{
+		{
+			name:    "add correct node-name label",
+			allowed: true,
+		},
+		{
+			name: "correct stale node-name label",
+			mutate: func(oldPod, _ *corev1.Pod) {
+				oldPod.Labels = map[string]string{util.OvnPodNodeNameLabel: "previous-node"}
+			},
+			allowed: true,
+		},
+		{
+			name: "preserve unrelated labels",
+			mutate: func(oldPod, newPod *corev1.Pod) {
+				oldPod.Labels = map[string]string{"app": "test"}
+				newPod.Labels["app"] = "test"
+			},
+			allowed: true,
+		},
+		{
+			name: "allow permitted annotation alongside label",
+			mutate: func(_, newPod *corev1.Pod) {
+				newPod.Annotations = map[string]string{util.DPUConnectionStatusAnnot: "ready"}
+			},
+			allowed: true,
+		},
+		{
+			name: "reject wrong label value",
+			mutate: func(_, newPod *corev1.Pod) {
+				newPod.Labels[util.OvnPodNodeNameLabel] = "other-node"
+			},
+		},
+		{
+			name: "reject label removal",
+			mutate: func(oldPod, newPod *corev1.Pod) {
+				oldPod.Labels = newPod.Labels
+				newPod.Labels = nil
+			},
+		},
+		{
+			name: "reject another node's pod",
+			mutate: func(oldPod, newPod *corev1.Pod) {
+				oldPod.Spec.NodeName = "other-node"
+				newPod.Spec.NodeName = "other-node"
+			},
+		},
+		{
+			name: "reject unrelated label update",
+			mutate: func(_, newPod *corev1.Pod) {
+				newPod.Labels["app"] = "changed"
+			},
+		},
+		{
+			name: "reject unrelated annotation update",
+			mutate: func(_, newPod *corev1.Pod) {
+				newPod.Annotations = map[string]string{"unrelated": "changed"}
+			},
+		},
+		{
+			name: "reject other metadata update",
+			mutate: func(_, newPod *corev1.Pod) {
+				newPod.Finalizers = []string{"example.com/test"}
+			},
+		},
+		{
+			name: "reject spec update",
+			mutate: func(_, newPod *corev1.Pod) {
+				newPod.Spec.HostNetwork = true
+			},
+		},
+		{
+			name: "reject status update",
+			mutate: func(_, newPod *corev1.Pod) {
+				newPod.Status.Phase = corev1.PodRunning
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: podName},
+				Spec:       corev1.PodSpec{NodeName: nodeName},
+			}
+			newPod := oldPod.DeepCopy()
+			newPod.Labels = map[string]string{util.OvnPodNodeNameLabel: nodeName}
+			if tt.mutate != nil {
+				tt.mutate(oldPod, newPod)
+			}
+			oldBefore, newBefore := oldPod.DeepCopy(), newPod.DeepCopy()
+			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{
+				AdmissionRequest: admv1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{Username: userName}},
+			})
+			webhook := NewPodAdmissionWebhook(&fakeNodeLister{}, nil)
+			_, err := webhook.ValidateUpdate(ctx, oldPod, newPod)
+			if (err == nil) != tt.allowed {
+				t.Fatalf("allowed=%v, got error: %v", tt.allowed, err)
+			}
+			if !reflect.DeepEqual(oldPod, oldBefore) || !reflect.DeepEqual(newPod, newBefore) {
+				t.Fatal("admission mutated its input pods")
+			}
+		})
 	}
 }
