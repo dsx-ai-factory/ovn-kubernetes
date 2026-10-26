@@ -26,32 +26,35 @@ sources:
 - https://github.com/openvswitch/ovs
 - https://github.com/ovn-org/libovsdb
 appVersion: "2026-10.latest"
+# Components are selected by `condition`, not by the `tags` dependency field.
+# Helm resolves that field only against the release-root `tags` map, so when
+# this chart is a dependency of an umbrella chart the embedder has to set a
+# root-level `tags.<name>` that is shared with every other chart in the
+# release, and the scoped `ovn-kubernetes.tags.<name>` is ignored. A condition
+# path is resolved against this chart's own values instead, which keeps the
+# selection inside the subtree and reads the same `tags` values as before.
+#
+# Note that a condition whose path is absent leaves the dependency enabled, so
+# every name below must keep a default in values.yaml.
 dependencies:
 - name: ovs-node
   version: 2.5.0-pr
-  tags:
-  - ovs-node
+  condition: tags.ovs-node
 - name: ovnkube-identity
   version: 2.5.0-pr
-  tags:
-    - ovnkube-identity
+  condition: tags.ovnkube-identity
 - name: ovnkube-node-dpu-host
   version: 2.5.0-pr
-  tags:
-  - ovnkube-node-dpu-host
+  condition: tags.ovnkube-node-dpu-host
 - name: ovnkube-control-plane
   version: 2.5.0-pr
-  tags:
-  - ovnkube-control-plane
+  condition: tags.ovnkube-control-plane
 - name: ovnkube-single-node-zone
   version: 2.5.0-pr
-  tags:
-  - ovnkube-single-node-zone
+  condition: tags.ovnkube-single-node-zone
 - name: ovnkube-single-node-zone-dpu
   version: 2.5.0-pr
-  tags:
-  - ovnkube-single-node-zone-dpu
+  condition: tags.ovnkube-single-node-zone-dpu
 - name: ovnkube-crds
   version: 2.5.0-pr
-  tags:
-  - ovnkube-crds
+  condition: tags.ovnkube-crds

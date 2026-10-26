@@ -23,6 +23,7 @@ import yaml
 
 CHART_ROOT = Path(__file__).resolve().parent.parent
 ROOT_VALUES = CHART_ROOT / "values.yaml"
+CHART_FILE = CHART_ROOT / "Chart.yaml"
 CHARTS_DIR = CHART_ROOT / "charts"
 
 DESC_START_RE = re.compile(r"^(?P<indent>\s*)# -- (?P<text>.+)$")
@@ -112,6 +113,37 @@ def infer_schema(value, path, descriptions):
     return entry
 
 
+def condition_tags() -> list:
+    """Tag names used by a dependency `condition` in Chart.yaml.
+
+    Read from Chart.yaml rather than from values.yaml on purpose: these become
+    the schema's required keys, and a list derived from the defaults would
+    disappear along with any default someone deletes. A condition whose path is
+    absent leaves its dependency enabled, so a dropped default would otherwise
+    silently turn a component on.
+    """
+    names = []
+    for dep in load_yaml(CHART_FILE).get("dependencies") or []:
+        for path in (dep.get("condition") or "").split(","):
+            path = path.strip()
+            if path.startswith("tags.") and path.count(".") == 1:
+                names.append(path[len("tags."):])
+    return sorted(set(names))
+
+
+def require_condition_tags(schema):
+    """Make every tag a condition depends on a required boolean."""
+    names = condition_tags()
+    if not names:
+        return
+    tags = schema["properties"].setdefault("tags", {"type": "object"})
+    props = tags.setdefault("properties", {})
+    for name in names:
+        props.setdefault(name, {"type": "boolean"})
+    tags["required"] = names
+    schema["required"] = sorted(set(schema.get("required", []) + ["tags"]))
+
+
 def main():
     root_descriptions = extract_descriptions(ROOT_VALUES)
     root_values = load_yaml(ROOT_VALUES)
@@ -140,6 +172,7 @@ def main():
             k: infer_schema(v, k, all_descriptions) for k, v in merged.items()
         },
     }
+    require_condition_tags(schema)
     json.dump(schema, sys.stdout, indent=2)
     sys.stdout.write("\n")
 

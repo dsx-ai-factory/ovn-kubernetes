@@ -13,7 +13,7 @@ over the subchart's own defaults. The subchart only defines the template, so the
 is still emitted exactly once, which DPF requires.
 */ -}}
 {{- $subchart := index .Subcharts "ovnkube-single-node-zone-dpu" -}}
-{{- if and $subchart (index .Values.tags "ovnkube-single-node-zone-dpu") -}}
+{{- if $subchart -}}
 {{- $values := deepCopy $subchart.Values -}}
 {{- $serviceDaemonSet := deepCopy ($values.serviceDaemonSet | default dict) -}}
 {{- /*

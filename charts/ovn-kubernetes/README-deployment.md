@@ -1105,7 +1105,7 @@ null
 }
 </pre>
 </td>
-			<td>Subchart toggles.</td>
+			<td>Subchart toggles. Every key here backs a dependency `condition` in Chart.yaml, so each one must keep a default: a condition whose path is absent leaves that component enabled. values.schema.json requires all of them, from the condition list rather than from these defaults, so dropping one fails the install instead of quietly switching a component on. When this chart is embedded in an umbrella chart these are set as `ovn-kubernetes.tags.<name>`.</td>
 		</tr>
 		<tr>
 			<td>ovnkube-control-plane.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key</td>

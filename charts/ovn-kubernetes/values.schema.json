@@ -28,7 +28,16 @@
           "type": "boolean"
         }
       },
-      "description": "Subchart toggles."
+      "description": "Subchart toggles. Every key here backs a dependency `condition` in Chart.yaml, so each one must keep a default: a condition whose path is absent leaves that component enabled. values.schema.json requires all of them, from the condition list rather than from these defaults, so dropping one fails the install instead of quietly switching a component on. When this chart is embedded in an umbrella chart these are set as `ovn-kubernetes.tags.<name>`.",
+      "required": [
+        "ovnkube-control-plane",
+        "ovnkube-crds",
+        "ovnkube-identity",
+        "ovnkube-node-dpu-host",
+        "ovnkube-single-node-zone",
+        "ovnkube-single-node-zone-dpu",
+        "ovs-node"
+      ]
     },
     "k8sAPIServer": {
       "type": [
@@ -1253,5 +1262,8 @@
         }
       }
     }
-  }
+  },
+  "required": [
+    "tags"
+  ]
 }

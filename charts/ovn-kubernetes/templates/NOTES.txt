@@ -1,0 +1,25 @@
+ovn-kubernetes {{ .Chart.Version }} installed into namespace {{ .Values.global.namespace }}.
+
+Components rendered by this release:
+{{- range $name := (keys .Subcharts | sortAlpha) }}
+  - {{ $name }}
+{{- end }}
+{{- if not .Subcharts }}
+  (none - every component is disabled)
+{{- end }}
+
+{{- $known := list "ovs-node" "ovnkube-identity" "ovnkube-node-dpu-host" "ovnkube-control-plane" "ovnkube-single-node-zone" "ovnkube-single-node-zone-dpu" "ovnkube-crds" }}
+{{- $unknown := list }}
+{{- range $name := (keys (.Values.tags | default dict) | sortAlpha) }}
+{{- if not (has $name $known) }}
+{{- $unknown = append $unknown $name }}
+{{- end }}
+{{- end }}
+{{- if $unknown }}
+
+WARNING: these `tags` keys match no component of this chart and select
+nothing. Check them for typos:
+{{- range $name := $unknown }}
+  tags.{{ $name }}
+{{- end }}
+{{- end }}
