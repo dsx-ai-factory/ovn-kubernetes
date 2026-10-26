@@ -33,6 +33,15 @@ DESC_CONT_RE = re.compile(r"^(?P<indent>\s*)# (?P<text>.+)$")
 ANNOTATION_RE = re.compile(r"^\s*# @\w+")
 KEY_RE = re.compile(r"^(?P<indent>\s*)(?P<key>[^\s:#][^:]*):")
 
+# Element type for lists whose default is empty, which cannot be inferred from
+# the default alone. Keyed by dotted path; every entry has to match a list in
+# the values or generation fails, so a renamed key cannot leave a dead rule
+# behind.
+ARRAY_ITEM_TYPES = {
+    "global.hybridOverlaySubnetWriters": "string",
+}
+APPLIED_ARRAY_ITEM_TYPES = set()
+
 
 def extract_descriptions(path: Path) -> dict:
     """Map a dotted key path (e.g. "global.enableEgressIp") to its `# -- ` comment,
@@ -97,6 +106,10 @@ def infer_schema(value, path, descriptions):
         entry["type"] = ["string", "null"]
     elif isinstance(value, list):
         entry["type"] = ["array", "null"]
+        item_type = ARRAY_ITEM_TYPES.get(path)
+        if item_type:
+            entry["items"] = {"type": item_type}
+            APPLIED_ARRAY_ITEM_TYPES.add(path)
     elif isinstance(value, dict):
         entry["type"] = "object"
         props = {}
@@ -173,6 +186,11 @@ def main():
         },
     }
     require_condition_tags(schema)
+
+    unused = sorted(set(ARRAY_ITEM_TYPES) - APPLIED_ARRAY_ITEM_TYPES)
+    if unused:
+        sys.exit(f"ARRAY_ITEM_TYPES has no matching list value: {', '.join(unused)}")
+
     json.dump(schema, sys.stdout, indent=2)
     sys.stdout.write("\n")
 
