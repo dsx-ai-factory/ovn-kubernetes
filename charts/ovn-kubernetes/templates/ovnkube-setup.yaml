@@ -179,7 +179,7 @@ subjects:
   - kind: ServiceAccount
     namespace: {{ .Values.global.namespace }}
     name: ovn-misc
-  {{- if default false (index .Values.tags "ovs-node") }}
+  {{- if hasKey .Subcharts "ovs-node" }}
   - kind: ServiceAccount
     namespace: {{ .Values.global.namespace }}
     name: ovn-ovs
@@ -199,13 +199,13 @@ subjects:
   - kind: ServiceAccount
     namespace: {{ .Values.global.namespace }}
     name: ovn-misc
-  {{- if default false (index .Values.tags "ovs-node") }}
+  {{- if hasKey .Subcharts "ovs-node" }}
   - kind: ServiceAccount
     namespace: {{ .Values.global.namespace }}
     name: ovn-ovs
   {{- end }}
 
-{{- if default false (index .Values.tags "ovs-node") }}
+{{- if hasKey .Subcharts "ovs-node" }}
 ---
 apiVersion: v1
 kind: ServiceAccount
