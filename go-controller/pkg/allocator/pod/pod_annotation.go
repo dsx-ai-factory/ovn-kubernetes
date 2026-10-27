@@ -84,7 +84,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 	pod *corev1.Pod,
 	nadKey string,
 	network *nadapi.NetworkSelectionElement,
-	reallocateIP, skipIPAM bool,
+	reallocateIP bool,
 	networkRole string) (
 	*corev1.Pod,
 	*util.PodAnnotation,
@@ -103,7 +103,6 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotation(
 		allocator.ipamClaimsReconciler,
 		allocator.macRegistry,
 		reallocateIP,
-		skipIPAM,
 		networkRole,
 	)
 }
@@ -120,7 +119,7 @@ func allocatePodAnnotation(
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
 	macRegistry mac.Register,
-	reallocateIP, skipIPAM bool,
+	reallocateIP bool,
 	networkRole string) (
 	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -142,7 +141,6 @@ func allocatePodAnnotation(
 			claimsReconciler,
 			macRegistry,
 			reallocateIP,
-			skipIPAM,
 			networkRole,
 		)
 		return updatedPod, rollback, err
@@ -180,7 +178,7 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 	pod *corev1.Pod,
 	nadKey string,
 	network *nadapi.NetworkSelectionElement,
-	reallocateIP, skipIPAM bool,
+	reallocateIP bool,
 	networkRole string) (
 	*corev1.Pod,
 	*util.PodAnnotation,
@@ -200,7 +198,6 @@ func (allocator *PodAnnotationAllocator) AllocatePodAnnotationWithTunnelID(
 		allocator.ipamClaimsReconciler,
 		allocator.macRegistry,
 		reallocateIP,
-		skipIPAM,
 		networkRole,
 	)
 }
@@ -218,7 +215,7 @@ func allocatePodAnnotationWithTunnelID(
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
 	macRegistry mac.Register,
-	reallocateIP, skipIPAM bool,
+	reallocateIP bool,
 	networkRole string) (
 	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -237,7 +234,6 @@ func allocatePodAnnotationWithTunnelID(
 			claimsReconciler,
 			macRegistry,
 			reallocateIP,
-			skipIPAM,
 			networkRole,
 		)
 		return updatedPod, rollback, err
@@ -359,7 +355,7 @@ func allocatePodAnnotationWithRollback(
 	network *nadapi.NetworkSelectionElement,
 	claimsReconciler persistentips.PersistentAllocations,
 	macRegistry mac.Register,
-	reallocateIP, skipIPAM bool,
+	reallocateIP bool,
 	networkRole string) (
 	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
@@ -483,14 +479,14 @@ func allocatePodAnnotationWithRollback(
 		}
 	}()
 
-	if (hasIPAM && !skipIPAM) && hasStaticIPRequest {
+	if hasIPAM && hasStaticIPRequest {
 		if err = validateStaticIPRequest(netInfo, network, ipamClaim, podDesc); err != nil {
 			return
 		}
 	}
 
 	// we need to update the annotation if it is missing IPs or MAC
-	needsIPOrMAC := len(tentative.IPs) == 0 && ((hasIPAM && !skipIPAM) || hasIPRequest)
+	needsIPOrMAC := len(tentative.IPs) == 0 && (hasIPAM || hasIPRequest)
 	needsIPOrMAC = needsIPOrMAC || len(tentative.MAC) == 0
 	reallocateOnNonStaticIPRequest := len(tentative.IPs) == 0 && hasIPRequest && !hasStaticIPRequest
 
@@ -509,7 +505,7 @@ func allocatePodAnnotationWithRollback(
 		}
 	}
 
-	if hasIPAM && !skipIPAM {
+	if hasIPAM {
 		if len(tentative.IPs) > 0 {
 			if err = ipAllocator.AllocateIPs(tentative.IPs); err != nil && !shouldSkipAllocateIPsError(err, isNetworkAllocated, ipamClaim) {
 				err = fmt.Errorf("failed to ensure requested or annotated IPs %v for %s: %w",

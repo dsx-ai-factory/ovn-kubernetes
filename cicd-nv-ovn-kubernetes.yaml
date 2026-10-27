@@ -21,6 +21,7 @@ test:
       # Not yet supported in IC mode for nv-1.5
       exclude:
         - connect-to
+        - skip-ipam
 
 artifacts:
   promote: yes
