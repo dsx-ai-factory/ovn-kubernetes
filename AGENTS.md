@@ -40,6 +40,8 @@ pull request against this repository; it cannot be merged.
   | `go-controller/vendor/` | `go mod vendor` |
   | `LICENSES/` | `make third-party-licenses` |
   | `charts/ovn-kubernetes/values.schema.json` | `python3 scripts/gen-values-schema.py > values.schema.json` from the chart root |
+  | `charts/ovn-kubernetes/README.md` | `helm-docs -c . -g .` from the chart root |
+  | `charts/ovn-kubernetes/README-deployment.md` | `helm-docs -c . -g . -u -t README-deployment.md.gotmpl -o README-deployment.md` from the chart root; `-u` is required or every subchart value is dropped |
   | `charts/ovn-k8s-observability/README.md` | `make helm-docs` in that chart |
 
 - **Never rename the Go module path.** `go-controller/go.mod` deliberately

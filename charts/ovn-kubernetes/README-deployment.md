@@ -380,6 +380,15 @@ false
 			<td>Users other than ovnkube-cluster-manager allowed to write the hybrid overlay node subnet annotation</td>
 		</tr>
 		<tr>
+			<td>global.image</td>
+			<td>object</td>
+			<td><pre lang="json">
+{}
+</pre>
+</td>
+			<td>Optional image for all components. Set repository and tag together for local testing. Also set sha256 when global.useImageDigest is true.</td>
+		</tr>
+		<tr>
 			<td>global.imagePullSecretName</td>
 			<td>string</td>
 			<td><pre lang="json">
@@ -1197,6 +1206,24 @@ null
 			<td></td>
 		</tr>
 		<tr>
+			<td>ovnkube-control-plane.ovnkubeControlPlane.resources</td>
+			<td>object</td>
+			<td><pre lang="json">
+{
+  "limits": {
+    "cpu": "2",
+    "memory": "3Gi"
+  },
+  "requests": {
+    "cpu": "100m",
+    "memory": "300Mi"
+  }
+}
+</pre>
+</td>
+			<td>resource requests and limits for the ovnkube-cluster-manager container</td>
+		</tr>
+		<tr>
 			<td>ovnkube-control-plane.replicas</td>
 			<td>int</td>
 			<td><pre lang="json">
@@ -1397,6 +1424,24 @@ null
 			<td></td>
 		</tr>
 		<tr>
+			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZone.resources</td>
+			<td>object</td>
+			<td><pre lang="json">
+{
+  "limits": {
+    "cpu": "1000m",
+    "memory": "2Gi"
+  },
+  "requests": {
+    "cpu": "200m",
+    "memory": "500Mi"
+  }
+}
+</pre>
+</td>
+			<td>resource requests and limits for the ovnkube-controller container</td>
+		</tr>
+		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNbdb.logging.level</td>
 			<td>string</td>
 			<td><pre lang="json">
@@ -1404,6 +1449,24 @@ null
 </pre>
 </td>
 			<td></td>
+		</tr>
+		<tr>
+			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNbdb.resources</td>
+			<td>object</td>
+			<td><pre lang="json">
+{
+  "limits": {
+    "cpu": "500m",
+    "memory": "256Mi"
+  },
+  "requests": {
+    "cpu": "10m",
+    "memory": "100Mi"
+  }
+}
+</pre>
+</td>
+			<td>resource requests and limits for the nb-ovsdb container</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNorthd.logging.level</td>
@@ -1415,6 +1478,24 @@ null
 			<td></td>
 		</tr>
 		<tr>
+			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneNorthd.resources</td>
+			<td>object</td>
+			<td><pre lang="json">
+{
+  "limits": {
+    "cpu": "500m",
+    "memory": "512Mi"
+  },
+  "requests": {
+    "cpu": "20m",
+    "memory": "200Mi"
+  }
+}
+</pre>
+</td>
+			<td>resource requests and limits for the ovn-northd container</td>
+		</tr>
+		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneOvnHost.logging.level</td>
 			<td>string</td>
 			<td><pre lang="json">
@@ -1424,6 +1505,24 @@ null
 			<td></td>
 		</tr>
 		<tr>
+			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneOvnHost.resources</td>
+			<td>object</td>
+			<td><pre lang="json">
+{
+  "limits": {
+    "cpu": "500m",
+    "memory": "1Gi"
+  },
+  "requests": {
+    "cpu": "60m",
+    "memory": "256Mi"
+  }
+}
+</pre>
+</td>
+			<td>resource requests and limits for the ovn-controller container</td>
+		</tr>
+		<tr>
 			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneSbdb.logging.level</td>
 			<td>string</td>
 			<td><pre lang="json">
@@ -1431,6 +1530,24 @@ null
 </pre>
 </td>
 			<td></td>
+		</tr>
+		<tr>
+			<td>ovnkube-single-node-zone.ovnkubeSingleNodeZoneSbdb.resources</td>
+			<td>object</td>
+			<td><pre lang="json">
+{
+  "limits": {
+    "cpu": "500m",
+    "memory": "512Mi"
+  },
+  "requests": {
+    "cpu": "10m",
+    "memory": "256Mi"
+  }
+}
+</pre>
+</td>
+			<td>resource requests and limits for the sb-ovsdb container</td>
 		</tr>
 		<tr>
 			<td>ovnkube-single-node-zone.podAnnotations</td>
@@ -1717,3 +1834,4 @@ false
 		</tr>
 	</tbody>
 </table>
+
