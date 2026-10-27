@@ -1,0 +1,26 @@
+# This yaml describes how to build, deploy, test and submit artifacts for NV ovn-kubernetes
+# ovn-kubernetes depends on OVN and OVS artifacts
+
+projectID: 2649
+
+buildOvnKubernetes:
+  OVN:
+    pkgTag: 26.03.2.5ad7ebd7.66994044
+  OVS:
+    pkgTag: 3.7.2.591e9402.64764736
+
+cicd:
+  # Set deployment modes, valid values are: VMaaS-ic, NGN-ic, NGN-central
+  deployment_mode: VMaaS-ic-NoOverlay, NGN-ic
+
+test:
+  cicd-tests:
+    ic:
+      run-groups:
+        - all-ic
+      # Not yet supported in IC mode for nv-1.5
+      exclude:
+        - connect-to
+
+artifacts:
+  promote: yes
