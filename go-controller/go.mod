@@ -2,7 +2,7 @@ module github.com/ovn-kubernetes/ovn-kubernetes/go-controller
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/alexflint/go-filemutex v1.3.0
