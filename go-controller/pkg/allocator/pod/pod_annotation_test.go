@@ -190,7 +190,6 @@ func Test_allocatePodAnnotationReturnsUpdatedPod(t *testing.T) {
 		nil,
 		nil,
 		false,
-		false,
 		types.NetworkRolePrimary,
 	)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
@@ -261,7 +260,6 @@ func Test_allocatePodAnnotationWithTunnelIDReturnsUpdatedPod(t *testing.T) {
 		network,
 		nil,
 		nil,
-		false,
 		false,
 		types.NetworkRolePrimary,
 	)
@@ -1519,7 +1517,6 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				claimsReconciler,
 				macRegistry,
 				tt.args.reallocate,
-				false,
 				tt.role,
 			)
 

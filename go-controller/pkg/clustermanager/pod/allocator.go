@@ -449,14 +449,6 @@ func (a *PodAllocator) allocatePodOnNAD(ctx context.Context, pod *corev1.Pod, na
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
 		ipAllocator = a.ipAllocator.ForSubnet(a.netInfo.GetNetworkName())
 	}
-	skipIPAM, err := util.SkipIPAMForNAD(pod.Annotations, nadKey)
-	if err != nil {
-		return err
-	}
-	if skipIPAM && (a.netInfo.TopologyType() != types.Layer2Topology && a.netInfo.TopologyType() != types.LocalnetTopology) {
-		return fmt.Errorf("%s annotation applied on %s network, but it can only be applied on %s and %s network",
-			a.netInfo.GetNetworkName(), util.SkipIPOnNetworksAnnotation, types.Layer2Topology, types.LocalnetTopology)
-	}
 
 	var idAllocator id.NamedAllocator
 	if util.DoesNetworkRequireTunnelIDs(a.netInfo) {
@@ -491,7 +483,6 @@ func (a *PodAllocator) allocatePodOnNAD(ctx context.Context, pod *corev1.Pod, na
 		nadKey,
 		network,
 		reallocate,
-		skipIPAM,
 		networkRole,
 	)
 

@@ -21,6 +21,7 @@ test:
       # Not yet supported in IC mode
       exclude:
         - connect-to
+        - skip-ipam
 
 artifacts:
   promote: yes
