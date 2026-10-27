@@ -372,12 +372,12 @@ func (allocator *allocator) AvailableIPsCount(name string, isIPv4 bool) (int64, 
 			continue
 		}
 		var usedIPCount int64 = 0
-		maxCount := utilnet.RangeSize(&cidr)
+		// Each IPv4 subnet excludes its network and broadcast addresses.
+		maxCount := max(int64(0), utilnet.RangeSize(&cidr)-2)
 		ipam.ForEach(func(_ net.IP) { usedIPCount++ })
 		totalAvailableCount += maxCount - usedIPCount
 	}
-	// don't include the network address and broadcast address
-	return totalAvailableCount - 2, nil
+	return totalAvailableCount, nil
 }
 
 // EnsureIPAMForIPFamily checks whether we have an IP allocator for the given IP Family
