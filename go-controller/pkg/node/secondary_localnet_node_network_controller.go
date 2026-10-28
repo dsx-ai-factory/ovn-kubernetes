@@ -79,18 +79,16 @@ func (nc *UserDefinedLocalnetNodeNetworkController) Stop() {
 	nc.UserDefinedNodeNetworkController.Stop()
 
 	nc.stopNADController()
-
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		err := nc.updateLocalnetOvnBridgeMapping(false)
-		if err != nil {
-			klog.Error(err.Error())
-		}
-	}
 }
 
 // Cleanup cleans up node entities for the given secondary network
 func (nc *UserDefinedLocalnetNodeNetworkController) Cleanup() error {
-	return nil
+	// Stop also runs during process shutdown. Preserve the mapping until the
+	// network is deleted so ovn-controller keeps its localnet patch ports.
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return nil
+	}
+	return nc.updateLocalnetOvnBridgeMapping(false)
 }
 
 var ovsMutex = sync.Mutex{}
@@ -168,7 +166,7 @@ func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMappi
 		nc.bridgeName = bridgeName
 	} else if nc.bridgeName == "" {
 		// If this node never selected a bridge for this network, the mapping was
-		// not managed by this controller and should not be removed on stop.
+		// not managed by this controller and should not be removed on cleanup.
 		klog.V(5).Infof("Skip removing bridge mapping for localnet network %s on node %s: not managed by this controller", nc.GetNetworkName(), nc.name)
 		return nil
 	}
