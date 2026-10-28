@@ -14,6 +14,15 @@ Measurement accuracy can be impacted by other parallel processing that might be 
 |ovnkube_master_network_programming_duration_seconds | Histogram | The duration to apply network configuration for a kind (e.g. pod, service, networkpolicy). Configuration includes add, update and delete events for kinds. This includes OVN-Kubernetes master and OVN duration.
 |ovnkube_master_network_programming_ovn_duration_seconds| Histogram  | The duration for OVN to apply network configuration for a kind (e.g. pod, service, networkpolicy).
 
+### ClusterUserDefinedNetwork lifecycle
+
+The `ovnkube_clustermanager_cluster_user_defined_networks` gauge counts a CUDN
+once its protection finalizer is added and stops counting it when it is deleted
+or disappears. The CUDN's `ovnkube_clustermanager_cluster_user_defined_network_condition`
+and `ovnkube_clustermanager_udn_nodes_rendered` series are also removed when it is
+deleted or disappears. The latter metric is registered only when dynamic UDN
+allocation is enabled.
+
 ## Change log
 This list is to help notify if there are additions, changes or removals to metrics. Latest changes are at the top of this list.
 
