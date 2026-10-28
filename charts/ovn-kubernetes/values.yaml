@@ -12,7 +12,6 @@ tags:
   ovnkube-crds: true
   ovnkube-control-plane: true
   ovnkube-single-node-zone: true
-
 # -- K8s API Server address
 k8sAPIServer:
 # -- OVN Pod Network CIDR. The primary interface of the Pod is assigned IP
@@ -33,7 +32,6 @@ k8sToken:
 # e.g. k8s.v1.cni.cncf.io/resourceName: nvidia.com/asap2_vf
 # ovnPrimaryNADAnnotations:
 #  k8s.v1.cni.cncf.io/resourceName: nvidia.com/asap2_vf
-
 global:
   # -- namespace where all the OVN K8s components' resources must be deployed
   namespace: ovn-kubernetes
@@ -71,7 +69,6 @@ global:
     danConfigDir: /run/kata-containers/dans
   tls:
     enable: false
-
   # -- Whether or not enable ovnkube identity webhook
   enableOvnKubeIdentity: false
   # -- Users other than ovnkube-cluster-manager allowed to write the hybrid overlay node subnet annotation
@@ -192,7 +189,6 @@ global:
   routingTableIDStart: 0
   # -- kubelet cgroup path ovnkube-node should use
   kubeletCgroupPath: ""
-
 ovs-node:
   ovsDaemonsContainer:
     image:
@@ -208,119 +204,119 @@ ovnkube-node-dpu-host:
     repository: ovnkube
     # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
     # @default -- `""`
-    tag: 42489318-72551891-fcbd199
+    tag: 08c4cc26-77144166-08e84c2
     # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
     # @default -- `""`
-    sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+    sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
 ovnkube-identity:
   ovnkubeIdentity:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
 ovnkube-control-plane:
   ovnkubeControlPlane:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
 ovnkube-single-node-zone:
   ovnkubeSingleNodeZone:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
   ovnkubeSingleNodeZoneNbdb:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
   ovnkubeSingleNodeZoneSbdb:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
   ovnkubeSingleNodeZoneNorthd:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
   ovnkubeSingleNodeZoneOvnHost:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
 ovnkube-single-node-zone-dpu:
   ovnkubeSingleNodeZone:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
   ovnkubeSingleNodeZoneNbdb:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
   ovnkubeSingleNodeZoneSbdb:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
   ovnkubeSingleNodeZoneNorthd:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
   ovnkubeSingleNodeZoneOvnHost:
     image:
       repository: ovnkube
       # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
       # @default -- `""`
-      tag: 42489318-72551891-fcbd199
+      tag: 08c4cc26-77144166-08e84c2
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bc48e0c9000619ed5b37780fb6c8ad1d2dde433546897f1ca08919e1fd8fc03c
