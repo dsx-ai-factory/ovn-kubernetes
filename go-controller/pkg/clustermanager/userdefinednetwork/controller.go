@@ -180,9 +180,22 @@ type Controller struct {
 	// raNotifier notifies subscribing controllers about RouteAdvertisements events.
 	raNotifier *notifier.RouteAdvertisementsNotifier
 
-	networkInUseRequeueInterval time.Duration
-	eventRecorder               record.EventRecorder
+	// networkInUseBackoff paces the retries of a UDN or CUDN deletion that waits
+	// for its network to be released. A reconcile that returns nil makes the
+	// workqueue forget the key, so the queue's own rate limiter cannot grow the
+	// delay. CUDN keys have no namespace, so both controllers can share it.
+	networkInUseBackoff workqueue.TypedRateLimiter[string]
+	eventRecorder       record.EventRecorder
 }
+
+// Nothing enqueues the owner when its last pod leaves or its network controller
+// stops, so the cap bounds how late a deletion completes after the network is
+// released. The base leaves the informer time to deliver the writes of the
+// previous attempt before the next one lists the cache.
+const (
+	networkInUseBackoffBase = 100 * time.Millisecond
+	networkInUseBackoffMax  = 5 * time.Second
+)
 
 func New(
 	nadClient netv1clientset.Interface,
@@ -218,7 +231,9 @@ func New(
 		cudnMetricTracker: map[cudnMetricKey]sets.Set[string]{},
 		vidAllocator:      vidAllocator,
 		reservedVNIs:      map[vniKey]string{},
-		eventRecorder:     eventRecorder,
+		networkInUseBackoff: workqueue.NewTypedItemExponentialFailureRateLimiter[string](
+			networkInUseBackoffBase, networkInUseBackoffMax),
+		eventRecorder: eventRecorder,
 	}
 	udnCfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
@@ -755,10 +770,13 @@ func (c *Controller) reconcileUDN(key string) error {
 
 	var networkInUse *networkInUseError
 	if errors.As(syncErr, &networkInUse) {
-		// Call ReconcileRateLimited directly to ensure retries without the default limits
-		c.udnController.ReconcileRateLimited(key)
+		// Scheduled before the status error is returned: the queue drops a key
+		// after MaxAttempts errors and nothing re-enqueues the owner when its
+		// network is released.
+		c.udnController.ReconcileAfter(key, c.networkInUseBackoff.When(key))
 		return updateStatusErr
 	}
+	c.networkInUseBackoff.Forget(key)
 
 	return errors.Join(syncErr, updateStatusErr)
 }
@@ -936,10 +954,13 @@ func (c *Controller) reconcileCUDN(key string) error {
 
 	var networkInUse *networkInUseError
 	if errors.As(syncErr, &networkInUse) {
-		// Call ReconcileRateLimited directly to ensure retries without the default limits
-		c.cudnController.ReconcileRateLimited(key)
+		// Scheduled before the status error is returned: the queue drops a key
+		// after MaxAttempts errors and nothing re-enqueues the owner when its
+		// network is released.
+		c.cudnController.ReconcileAfter(key, c.networkInUseBackoff.When(key))
 		return updateStatusErr
 	}
+	c.networkInUseBackoff.Forget(key)
 
 	// vtepNotFoundError / vtepNotAcceptedError are non-fatal: the status has
 	// been updated to reflect the VTEP issue, and the VTEPNotifier will
@@ -1088,6 +1109,7 @@ func (c *Controller) getExistingNADs(cudn *userdefinednetworkv1.ClusterUserDefin
 func (c *Controller) releaseClusterUDN(name string) {
 	delete(c.namespaceTracker, name)
 	c.cudnMetricUncounted(name)
+	c.networkInUseBackoff.Forget(name)
 	metrics.DeleteCUDNCondition(name)
 	metrics.DeleteDynamicUDNNodeCount(util.GenerateCUDNNetworkName(name))
 	c.releaseEVPNIDsForNetwork(name)

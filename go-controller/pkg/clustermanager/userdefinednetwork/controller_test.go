@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/testing"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -92,10 +93,12 @@ var _ = Describe("User Defined Network Controller", func() {
 		if util.IsEVPNEnabled() {
 			vtepInformer = f.VTEPInformer()
 		}
-		return New(cs.NetworkAttchDefClient, f.NADInformer(),
+		c := New(cs.NetworkAttchDefClient, f.NADInformer(),
 			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
 			renderNADStub, networkManager.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), vtepInformer, f.RouteAdvertisementsInformer(), nil,
 		)
+		c.networkInUseBackoff = testNetworkInUseBackoff()
+		return c
 	}
 
 	// newTestControllerWithNetworkManager creates a controller with a started NetworkManager.
@@ -115,10 +118,12 @@ var _ = Describe("User Defined Network Controller", func() {
 		if util.IsEVPNEnabled() {
 			vtepInformer = f.VTEPInformer()
 		}
-		return New(cs.NetworkAttchDefClient, f.NADInformer(),
+		c := New(cs.NetworkAttchDefClient, f.NADInformer(),
 			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
 			renderNADStub, nm.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), vtepInformer, f.RouteAdvertisementsInformer(), nil,
 		)
+		c.networkInUseBackoff = testNetworkInUseBackoff()
+		return c
 	}
 
 	expectTransportCondition := func(cudnName string, status metav1.ConditionStatus, reason, message string) {
@@ -521,8 +526,6 @@ var _ = Describe("User Defined Network Controller", func() {
 				pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-2", Namespace: udn.Namespace, Annotations: testOVNPodAnnot}}
 
 				c = newTestController(renderNadStub(nad), udn, nad, pod1, pod2, testNamespace("test"))
-				// user short interval to make the controller re-enqueue requests
-				c.networkInUseRequeueInterval = 50 * time.Millisecond
 				Expect(c.Run()).To(Succeed())
 
 				assertFinalizersPresent(cs.UserDefinedNetworkClient, cs.NetworkAttchDefClient, udn, pod1, pod2)
@@ -1820,8 +1823,6 @@ var _ = Describe("User Defined Network Controller", func() {
 
 					By("start test controller")
 					c = newTestController(renderNadStub(testClusterUdnNAD(cudnName, "")), testObjs...)
-					// user short interval to make the controller re-enqueue requests when network in use
-					c.networkInUseRequeueInterval = 50 * time.Millisecond
 					Expect(c.Run()).To(Succeed())
 
 					Eventually(func() []metav1.Condition {
@@ -3372,6 +3373,12 @@ func testClusterUdnNAD(name, namespace string) *netv1.NetworkAttachmentDefinitio
 		},
 		Spec: netv1.NetworkAttachmentDefinitionSpec{},
 	}
+}
+
+// testNetworkInUseBackoff retries a blocked deletion every 50 ms so specs
+// can wait for it with the default Eventually timeout.
+func testNetworkInUseBackoff() workqueue.TypedRateLimiter[string] {
+	return workqueue.NewTypedItemExponentialFailureRateLimiter[string](50*time.Millisecond, 50*time.Millisecond)
 }
 
 func noopRenderNadStub() RenderNetAttachDefManifest {
