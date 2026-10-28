@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"strings"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
@@ -62,8 +61,6 @@ const (
 	OvnPodNodeNameLabel = "k8s.ovn.org/nodeName"
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide active network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
-	// SkipIPOnNetworksAnnotation specifies the NADs that don't require IP allocation
-	SkipIPOnNetworksAnnotation = "k8s.ovn.org/skip-ip-on-networks"
 	// UDNOpenPortsAnnotationName is the pod annotation to open default network pods on UDN pods.
 	UDNOpenPortsAnnotationName = "k8s.ovn.org/open-default-ports"
 
@@ -311,15 +308,6 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadKey string) (*PodA
 		}
 	}
 
-	var skip bool
-	skip, err = SkipIPAMForNAD(annotations, nadKey)
-	if err != nil {
-		return nil, err
-	}
-	if skip {
-		// pod doesn't require IP for this network
-		return podAnnotation, nil
-	}
 	if len(a.IPs) == 0 {
 		if a.IP != "" {
 			a.IPs = append(a.IPs, a.IP)
@@ -634,36 +622,6 @@ func IsNadForPodClampedDown(podAnnotation map[string]string, nadName string) boo
 		}
 	}
 	return false
-}
-
-// SkipIPAMForNAD return true if nadKey is part of value of SkipIPOnNetworksAnnotation annotation
-// nadKey is namespace/name/index of the secondary network NAD and "default" for default network NAD
-// Note that SkipIPAMForNAD does not work with Pod interfaces of multiple same secondary UDN.
-func SkipIPAMForNAD(annotations map[string]string, nadKey string) (bool, error) {
-	var err error
-
-	nadName := nadKey
-	if nadKey != types.DefaultNetworkName {
-		nadName, _, err = GetNadFromIndexedNADKey(nadKey)
-		if err != nil {
-			return false, err
-		}
-	}
-	nads, ok := annotations[SkipIPOnNetworksAnnotation]
-	if !ok {
-		return false, nil
-	}
-	for _, nad := range strings.Split(nads, ",") {
-		nad = strings.TrimSpace(nad)
-		if nad == nadName {
-			if nadName != nadKey {
-				return false, fmt.Errorf("%s pod config does not work with multiple same secondary UDN pod interfaces", SkipIPOnNetworksAnnotation)
-			} else {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
 }
 
 // GetK8sPodNetworkSelection returns the pod's NetworkSelectionElement for the

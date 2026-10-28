@@ -72,20 +72,11 @@ func (bnc *BaseNetworkController) allocatePodIPsOnSwitch(pod *corev1.Pod,
 		return "", nil
 	}
 
-	skipIPAM, err := util.SkipIPAMForNAD(pod.Annotations, nadKey)
-	if err != nil {
-		return "", err
-	}
-
 	expectedLogicalPortName = bnc.GetLogicalPortName(pod, nadKey)
 
 	// For IPAM-less networks (e.g., localnet without subnet ), skip IP allocation.
 	// The logical port should still be tracked to prevent deletion during sync.
-	if skipIPAM || !bnc.doesNetworkRequireIPAM() {
-		if skipIPAM {
-			klog.Infof("skip-ipam annotation is applied for pod: %s/%s, IP allocation is not needed",
-				pod.Namespace, pod.Name)
-		}
+	if !bnc.doesNetworkRequireIPAM() {
 		return expectedLogicalPortName, nil
 	}
 
@@ -467,15 +458,6 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(ctx context.Context, p
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
 
-	skipIPAM, err := util.SkipIPAMForNAD(pod.Annotations, nadKey)
-	if err != nil {
-		return nil, nil, nil, false, err
-	}
-	if skipIPAM && (bnc.TopologyType() != ovntypes.Layer2Topology && bnc.TopologyType() != ovntypes.LocalnetTopology) {
-		return nil, nil, nil, false,
-			fmt.Errorf("%s annotation applied on %s network, but it can only be applied on %s and %s network",
-				bnc.GetNetworkName(), util.SkipIPOnNetworksAnnotation, ovntypes.Layer2Topology, ovntypes.LocalnetTopology)
-	}
 	podDesc := fmt.Sprintf("%s/%s/%s", nadKey, pod.Namespace, pod.Name)
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
@@ -597,9 +579,9 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(ctx context.Context, p
 	// functionally equivalent going forward.
 	var annotationUpdated bool
 	if bnc.IsUserDefinedNetwork() {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForUserDefinedNetwork(ctx, pod, skipIPAM, existingLSP, nadKey, network, networkRole)
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForUserDefinedNetwork(ctx, pod, existingLSP, nadKey, network, networkRole)
 	} else {
-		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(ctx, pod, skipIPAM, existingLSP, podDesc, nadKey, network, networkRole)
+		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(ctx, pod, existingLSP, podDesc, nadKey, network, networkRole)
 	}
 
 	if err != nil {
@@ -635,12 +617,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(ctx context.Context, p
 	}
 
 	// CNI depends on the flows from port security, delay setting it until end
-	if skipIPAM {
-		klog.V(5).Infof("No IPs are allocated for skip-ipam port %s, adding mac %s only", portName, podAnnotation.MAC.String())
-		lsp.PortSecurity = []string{podAnnotation.MAC.String()}
-	} else {
-		lsp.PortSecurity = addresses
-	}
+	lsp.PortSecurity = addresses
 	customFields = append(customFields, libovsdbops.LogicalSwitchPortPortSecurity)
 
 	// On layer2 topology with interconnect, we need to add specific port config
@@ -679,15 +656,15 @@ func (bnc *BaseNetworkController) updatePodAnnotationWithRetry(ctx context.Conte
 
 // Given a switch, gets the next set of addresses (from the IPAM) for each of the node's
 // subnets to assign to the new pod
-func (bnc *BaseNetworkController) assignPodAddresses(switchName string, skipIPAM bool) (net.HardwareAddr, []*net.IPNet, error) {
+func (bnc *BaseNetworkController) assignPodAddresses(switchName string) (net.HardwareAddr, []*net.IPNet, error) {
 	var (
 		podMAC   net.HardwareAddr
 		podCIDRs []*net.IPNet
 		err      error
 	)
 
-	if !bnc.doesNetworkRequireIPAM() || skipIPAM {
-		klog.V(5).Infof("No IPAM, will only generate the MAC address for the pod NIC")
+	if !bnc.doesNetworkRequireIPAM() {
+		klog.V(5).Infof("layer2 topology without subnet; will only generate the MAC address for the pod NIC")
 		mac, err := util.GenerateRandMAC()
 		if err != nil {
 			return nil, nil, err
@@ -710,6 +687,8 @@ func (bnc *BaseNetworkController) getPortAddresses(switchName string, existingLS
 	podMac, podIPs, err := libovsdbutil.ExtractPortAddresses(existingLSP)
 	if err != nil {
 		return nil, nil, err
+	} else if podMac == nil || len(podIPs) == 0 {
+		return nil, nil, nil
 	}
 
 	var podIPNets []*net.IPNet
@@ -816,7 +795,7 @@ func calculateStaticMAC(podDesc string, mac string) (net.HardwareAddr, error) {
 }
 
 // allocatePodAnnotation and update the corresponding pod annotation.
-func (bnc *BaseNetworkController) allocatePodAnnotation(ctx context.Context, pod *corev1.Pod, skipIPAM bool, existingLSP *nbdb.LogicalSwitchPort, podDesc,
+func (bnc *BaseNetworkController) allocatePodAnnotation(ctx context.Context, pod *corev1.Pod, existingLSP *nbdb.LogicalSwitchPort, podDesc,
 	nadKey string, network *nadapi.NetworkSelectionElement, networkRole string) (*util.PodAnnotation, bool, error) {
 	var releaseIPs bool
 	var podMac net.HardwareAddr
@@ -851,7 +830,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(ctx context.Context, pod
 		podMac = podAnnotation.MAC
 		podIfAddrs = podAnnotation.IPs
 
-		if bnc.doesNetworkRequireIPAM() && !skipIPAM {
+		if bnc.doesNetworkRequireIPAM() {
 			if zoneContainsPodSubnet {
 				// ensure we have reserved the IPs in the annotation.
 				// For live migratable pods, the IPs may belong to a different
@@ -894,7 +873,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(ctx context.Context, pod
 	// ensure we have reserved the IPs found in OVN
 	if len(podIfAddrs) == 0 {
 		needsNewMacOrIPAllocation = true
-	} else if bnc.doesNetworkRequireIPAM() && !skipIPAM {
+	} else if bnc.doesNetworkRequireIPAM() {
 		if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && !ipallocator.IsErrAllocated(err) {
 			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), bnc.GetLogicalPortName(pod, nadKey), podDesc, switchName, err)
@@ -903,7 +882,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(ctx context.Context, pod
 		}
 	}
 	if needsNewMacOrIPAllocation {
-		if network != nil && network.IPRequest != nil && (!bnc.doesNetworkRequireIPAM() || skipIPAM) {
+		if network != nil && network.IPRequest != nil && !bnc.doesNetworkRequireIPAM() {
 			klog.V(5).Infof("Will use static IP addresses for pod %s on a flatL2 topology without subnet defined", podDesc)
 			podIfAddrs, err = calculateStaticIPs(podDesc, network.IPRequest)
 			if err != nil {
@@ -912,7 +891,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(ctx context.Context, pod
 			podMac = util.IPAddrToHWAddr(podIfAddrs[0].IP)
 		} else {
 			// Previous attempts to use already configured IPs failed, need to assign new
-			generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName, !bnc.doesNetworkRequireIPAM() || skipIPAM)
+			generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					podDesc, switchName, err)
@@ -973,7 +952,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(ctx context.Context, pod
 
 // allocatePodAnnotationForUserDefinedNetwork and update the corresponding pod
 // annotation.
-func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(ctx context.Context, pod *corev1.Pod, skipIPAM bool, lsp *nbdb.LogicalSwitchPort,
+func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(ctx context.Context, pod *corev1.Pod, lsp *nbdb.LogicalSwitchPort,
 	nadKey string, network *nadapi.NetworkSelectionElement, networkRole string) (*util.PodAnnotation, bool, error) {
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
@@ -1017,7 +996,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(ctx
 	}
 
 	var ipAllocator subnetipallocator.NamedAllocator
-	if bnc.doesNetworkRequireIPAM() && !skipIPAM {
+	if bnc.doesNetworkRequireIPAM() {
 		ipAllocator = bnc.lsManager.ForSwitch(switchName)
 	}
 	node, err := bnc.watchFactory.GetNode(pod.Spec.NodeName)
@@ -1033,7 +1012,6 @@ func (bnc *BaseNetworkController) allocatePodAnnotationForUserDefinedNetwork(ctx
 		nadKey,
 		network,
 		reallocate,
-		skipIPAM,
 		networkRole,
 	)
 
