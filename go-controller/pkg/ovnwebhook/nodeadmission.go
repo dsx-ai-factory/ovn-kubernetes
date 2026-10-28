@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net"
 	"reflect"
 	"slices"
 	"strings"
@@ -159,11 +160,24 @@ func (p NodeAdmission) ValidateUpdate(ctx context.Context, oldNode, newNode *cor
 			sets.New[string](changedKeys...).Difference(p.annotationKeys).UnsortedList())
 	}
 
-	// Verify that nothing but the annotations changed.
-	// Since ovnkube-node only has the node/status permissions, it is enough to check .Status and .ObjectMeta only.
-	// Ignore .ManagedFields fields which are modified on every update.
+	// Ignore permitted annotations, the DPU host MAC label, and API-managed fields.
+	// The webhook also handles the main Node resource, so Spec must remain unchanged.
 	oldNodeShallowCopy := *oldNode
 	newNodeShallowCopy := *newNode
+	if macLabel, present := newNode.Labels[util.OvnNodeMacAddr]; present && macLabel != oldNode.Labels[util.OvnNodeMacAddr] {
+		const ethernetAddressLength = 6
+		mac, err := net.ParseMAC(macLabel)
+		if err != nil || len(mac) != ethernetAddressLength || strings.ReplaceAll(mac.String(), ":", "-") != macLabel {
+			return nil, fmt.Errorf("ovnkube-node on node: %q must set %s to a dash-separated Ethernet MAC address", nodeName, util.OvnNodeMacAddr)
+		}
+		// DPU hosts publish their primary NIC MAC for node selection. Normalize
+		// only this label on a cloned map so other metadata stays protected.
+		oldNodeShallowCopy.Labels = maps.Clone(oldNode.Labels)
+		if oldNodeShallowCopy.Labels == nil {
+			oldNodeShallowCopy.Labels = map[string]string{}
+		}
+		oldNodeShallowCopy.Labels[util.OvnNodeMacAddr] = macLabel
+	}
 	oldNodeShallowCopy.Annotations = nil
 	newNodeShallowCopy.Annotations = nil
 	oldNodeShallowCopy.ManagedFields = nil
@@ -187,8 +201,9 @@ func (p NodeAdmission) ValidateUpdate(ctx context.Context, oldNode, newNode *cor
 		}
 	}
 	if !apiequality.Semantic.DeepEqual(oldNodeShallowCopy.ObjectMeta, newNodeShallowCopy.ObjectMeta) ||
-		!apiequality.Semantic.DeepEqual(oldNodeShallowCopy.Status, newNodeShallowCopy.Status) {
-		return nil, fmt.Errorf("ovnkube-node on node: %q is not allowed to modify anything other than annotations", nodeName)
+		!apiequality.Semantic.DeepEqual(oldNodeShallowCopy.Status, newNodeShallowCopy.Status) ||
+		!apiequality.Semantic.DeepEqual(oldNodeShallowCopy.Spec, newNodeShallowCopy.Spec) {
+		return nil, fmt.Errorf("ovnkube-node on node: %q is not allowed to modify anything other than permitted annotations or the primary MAC address label", nodeName)
 	}
 
 	return nil, nil

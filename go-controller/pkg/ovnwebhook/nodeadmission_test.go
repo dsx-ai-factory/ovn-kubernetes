@@ -395,7 +395,7 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 			},
 		},
 		{
-			name: "ovnkube-node cannot modify anything other than annotations",
+			name: "ovnkube-node cannot modify unrelated labels",
 			ctx: admission.NewContextWithRequest(context.TODO(), admission.Request{
 				AdmissionRequest: v1.AdmissionRequest{UserInfo: authenticationv1.UserInfo{
 					Username: userName,
@@ -415,7 +415,7 @@ func TestNodeAdmission_ValidateUpdate(t *testing.T) {
 					Labels:      map[string]string{"key": "new"},
 				},
 			},
-			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to modify anything other than annotations", nodeName),
+			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to modify anything other than permitted annotations or the primary MAC address label", nodeName),
 		},
 	}
 	for _, tt := range tests {
@@ -670,5 +670,181 @@ func TestNodeAdmissionRejectsUnrelatedNodeCredentialWrites(t *testing.T) {
 				t.Fatalf("node credentials were allowed to modify %s without changing OVN annotations", name)
 			}
 		})
+	}
+}
+
+func TestNodeAdmission_PrimaryMACLabel(t *testing.T) {
+	const macLabel = "02-11-22-33-44-55"
+	tests := []struct {
+		name    string
+		mutate  func(oldNode, newNode *corev1.Node)
+		allowed bool
+	}{
+		{name: "add MAC label", allowed: true},
+		{
+			name: "add MAC label when labels were absent",
+			mutate: func(oldNode, newNode *corev1.Node) {
+				oldNode.Labels = nil
+				delete(newNode.Labels, "existing")
+			},
+			allowed: true,
+		},
+		{
+			name: "update MAC label",
+			mutate: func(oldNode, _ *corev1.Node) {
+				oldNode.Labels[util.OvnNodeMacAddr] = "02-aa-bb-cc-dd-ee"
+			},
+			allowed: true,
+		},
+		{
+			name: "keep MAC label unchanged",
+			mutate: func(oldNode, _ *corev1.Node) {
+				oldNode.Labels[util.OvnNodeMacAddr] = macLabel
+			},
+			allowed: true,
+		},
+		{
+			name: "allow permitted annotation alongside MAC label",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Annotations = map[string]string{util.OVNNodeHostCIDRs: "10.0.0.1/24"}
+			},
+			allowed: true,
+		},
+		{
+			name: "preserve an unchanged legacy MAC label",
+			mutate: func(oldNode, newNode *corev1.Node) {
+				oldNode.Labels[util.OvnNodeMacAddr] = "legacy-value"
+				newNode.Labels[util.OvnNodeMacAddr] = "legacy-value"
+				newNode.Annotations = map[string]string{util.OVNNodeHostCIDRs: "10.0.0.1/24"}
+			},
+			allowed: true,
+		},
+		{
+			name: "ignore managed fields updates",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.ManagedFields = []metav1.ManagedFieldsEntry{{Manager: "test"}}
+			},
+			allowed: true,
+		},
+		{
+			name: "preserve the GCP network condition exception",
+			mutate: func(oldNode, newNode *corev1.Node) {
+				oldNode.Spec.ProviderID = "gce://project/zone/node"
+				newNode.Spec.ProviderID = oldNode.Spec.ProviderID
+				oldNode.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeNetworkUnavailable, Status: corev1.ConditionTrue}}
+				newNode.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeNetworkUnavailable, Status: corev1.ConditionFalse}}
+			},
+			allowed: true,
+		},
+		{
+			name: "reject another node",
+			mutate: func(oldNode, newNode *corev1.Node) {
+				oldNode.Name = "other-node"
+				newNode.Name = "other-node"
+			},
+		},
+		{
+			name: "reject MAC label removal",
+			mutate: func(oldNode, newNode *corev1.Node) {
+				oldNode.Labels[util.OvnNodeMacAddr] = macLabel
+				delete(newNode.Labels, util.OvnNodeMacAddr)
+			},
+		},
+		{
+			name: "reject invalid MAC label",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Labels[util.OvnNodeMacAddr] = "not-a-mac"
+			},
+		},
+		{
+			name: "reject empty MAC label",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Labels[util.OvnNodeMacAddr] = ""
+			},
+		},
+		{
+			name: "reject noncanonical MAC label",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Labels[util.OvnNodeMacAddr] = "02:11:22:33:44:55"
+			},
+		},
+		{
+			name: "reject EUI-64 MAC label",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Labels[util.OvnNodeMacAddr] = "02-11-22-33-44-55-66-77"
+			},
+		},
+		{
+			name: "reject unrelated label addition",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Labels["unrelated"] = "value"
+			},
+		},
+		{
+			name: "reject unrelated label change",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Labels["existing"] = "changed"
+			},
+		},
+		{
+			name: "reject unrelated label removal",
+			mutate: func(_, newNode *corev1.Node) {
+				delete(newNode.Labels, "existing")
+			},
+		},
+		{
+			name: "reject controller-owned annotation change",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Annotations = map[string]string{util.OvnNodeID: "3"}
+			},
+		},
+		{
+			name: "reject status change",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}
+			},
+		},
+		{
+			name: "reject finalizer change",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Finalizers = []string{"example.com/finalizer"}
+			},
+		},
+		{
+			name: "reject spec change",
+			mutate: func(_, newNode *corev1.Node) {
+				newNode.Spec.Unschedulable = true
+			},
+		},
+	}
+	for _, tt := range tests {
+		for _, subresource := range []string{"", "status"} {
+			t.Run(tt.name+"/"+subresource, func(t *testing.T) {
+				oldNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName, Labels: map[string]string{"existing": "keep"},
+				}}
+				newNode := oldNode.DeepCopy()
+				newNode.Labels[util.OvnNodeMacAddr] = macLabel
+				if tt.mutate != nil {
+					tt.mutate(oldNode, newNode)
+				}
+				oldBefore, newBefore := oldNode.DeepCopy(), newNode.DeepCopy()
+				ctx := admission.NewContextWithRequest(context.Background(), admission.Request{
+					AdmissionRequest: v1.AdmissionRequest{
+						Operation: v1.Update, SubResource: subresource,
+						UserInfo: authenticationv1.UserInfo{Username: userName},
+					},
+				})
+				// Trusting node credentials must not bypass their own-node restrictions.
+				webhook := NewNodeAdmissionWebhook(false, userName)
+				_, err := webhook.ValidateUpdate(ctx, oldNode, newNode)
+				if (err == nil) != tt.allowed {
+					t.Fatalf("allowed=%t, got error: %v", tt.allowed, err)
+				}
+				if !reflect.DeepEqual(oldNode, oldBefore) || !reflect.DeepEqual(newNode, newBefore) {
+					t.Fatal("admission mutated its input nodes")
+				}
+			})
+		}
 	}
 }
