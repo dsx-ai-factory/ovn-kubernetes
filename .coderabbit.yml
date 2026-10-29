@@ -51,6 +51,20 @@ reviews:
       instructions: |
         - OVN-Kubernetes is a Kubernetes network plugin built on OVN/OVS.
           All Go source lives under go-controller/.
+        - Evaluate the PR's motivation as well as its implementation.
+          Identify the concrete bug, user need, or maintenance benefit
+          from the PR description and available evidence, and check that
+          the change addresses it. Question assumptions contradicted by
+          the code, unreachable failure scenarios, redundant functionality,
+          and complexity disproportionate to the benefit. If the rationale
+          is unclear, request specific evidence or clarification rather
+          than inventing a justification. Ground concerns in the code or
+          stated requirements, not speculation or personal preference.
+          Do not require a linked issue or production incident: valid
+          motivations include preventative fixes for reachable failures,
+          performance improvements, refactoring, documentation, and test
+          coverage. Distinguish an unexplained motivation from evidence
+          that the proposed change does not solve the stated problem.
         - Do not approve PRs that add new Go dependencies without
           clear justification in the PR description.
         - Generated code (zz_generated*, vendor/, or files that have a comment
@@ -58,12 +72,42 @@ reviews:
           reviewed for style — only verify it was regenerated correctly.
         - Dual-stack (IPv4+IPv6) must always be considered — flag
           changes that only handle single-stack.
+        - Flag nil checks, fallback paths, optional callbacks, or other
+          production hooks for states excluded by supported initialization,
+          the call chain, or API contracts. Establish production reachability
+          before requesting defensive handling; retain checks for genuinely
+          optional inputs, external data, and reachable lifecycle/error states.
+          Do not request or accept production branches that weaken invariants
+          or silently skip required work solely to accommodate partially
+          initialized unit-test objects or avoid the normal test harness.
+          Prefer existing fixtures, fakes, and harnesses, with test-only
+          helpers in test files. New production injection points need a
+          design justification beyond simplifying a particular test.
         - Every feature or bug fix should include unit tests. Flag PRs
-          that modify behavior without corresponding test updates.
+          that modify product behavior without corresponding test updates,
+          subject to the test/ and website/documentation exceptions below.
+        - Changes under test/ are exempt from requirements to add unit
+          tests. Do not request unit tests for code in this directory,
+          including test helpers, image configuration, deployment
+          configuration, and infrastructure providers. Validate with
+          existing builds and relevant test suites as appropriate, and
+          preserve coverage of existing scenarios. For PRs that also
+          change product code outside test/, apply the usual test
+          requirements to those product changes only.
         - E2E tests are required whenever feasible — be strict. Flag PRs
           that add or change user-facing behavior without E2E coverage.
           Do not accept "will add E2E later" — push back on the author
           to include them in the same PR.
+        - Website infrastructure and documentation changes are exempt
+          from unit, regression, and E2E test requirements. The website
+          has no unit test suite. This includes documentation content,
+          mkdocs.yml (including navigation), website assets/templates,
+          documentation dependencies, and website build/deployment
+          scripts or workflows. Do not request new tests or a test
+          framework for these changes, even when fixing website behavior.
+          Use the existing documentation build and manual preview/link
+          checks as appropriate. For PRs that also change product code,
+          apply test requirements to the product-code changes only.
         - Be strict: docs must be updated in the same PR when relevant.
           Features need user-facing docs, design decisions and non-obvious
           bug fixes need developer-guide updates, process changes need
@@ -137,6 +181,10 @@ reviews:
           break users — flag removals, type changes, or new required fields.
         - Any API change must include API reference doc update.
         - New API must be added to the API reference index page.
+        - New or changed CRD API fields must include corresponding CRD
+          integration tests under test/crd-integration/ — flag new/changed
+          API fields that lack tests validating their defaulting, validation
+          (CEL/kubebuilder markers), and admission behavior.
         - CEL validation: flag missing CEL rules where needed, unanchored
           regex, missing enums, absent dual-stack guards, incomplete
           cross-field rules.
@@ -162,8 +210,10 @@ reviews:
           for easy addition of new cases (prefer table-driven or flat
           ginkgo entries over deeply nested contexts).
         - Flag duplicate tests covering the same scenario.
-        - Flag missing edge cases: nil inputs, empty lists, dual-stack,
-          error paths, and boundary conditions.
+        - Flag missing reachable edge cases: optional nil inputs, empty
+          lists, dual-stack, error paths, and boundary conditions. Do not
+          demand tests or production guards for states excluded by the
+          initialization flow or API contract.
         - Flag test helper/utility duplication — check if similar
           helpers already exist in pkg/testing/ or other test files
           in the same package before adding new ones.
@@ -236,6 +286,16 @@ reviews:
           intent, trade-offs, or constraints warrant a comment.
     - path: "test/e2e/**"
       instructions: |
+        - Verify CI reachability for every new spec or changed selection
+          requirement. Identify a concrete lane in the CI configuration
+          and trace test/Makefile and test/scripts/ selection, focus/skip
+          expressions, feature labels, Serial/PARALLEL handling, cluster
+          flags, and runtime skip prerequisites. Flag specs excluded by
+          every suitable lane. Kubernetes conformance jobs do not execute
+          OVN-Kubernetes specs in test/e2e/. Compilation or a focused
+          dry-run alone is not evidence of CI execution. When available,
+          inspect CI logs/reports for the specific spec running rather
+          than being skipped; otherwise report execution as unverified.
         - E2E tests must be backwards compatible — adding tests for
           new features must not break existing tests for users who
           don't use the new feature.
@@ -244,6 +304,10 @@ reviews:
           Context/When/It blocks.
         - Flag duplicate tests — new tests covering scenarios already
           tested (implicitly or explicitly) elsewhere in the suite.
+        - Flag pure CRD schema validation (defaulting, kubebuilder/CEL
+          validation, admission) added here that needs no live pod
+          networking — these belong in test/crd-integration/ instead,
+          which runs against envtest without a full cluster.
         - Flag test helpers duplicated across files — shared helpers
           belong in test/e2e/util.go or a dedicated utils file.
         - Adding or refactoring tests must not lose coverage for
@@ -353,16 +417,24 @@ reviews:
       - name: "Unit Tests for Go Changes"
         mode: "error"
         instructions: >-
-          If Go source files (*.go) under go-controller/pkg/ or
-          go-controller/cmd/ are added or modified (excluding files
-          under go-controller/vendor/ and *_test.go files), check
-          whether corresponding *_test.go files are also added or
-          modified in this PR. Exclude documentation-only, CI, or
-          script changes.
+          If non-generated Go source files (*.go) under
+          go-controller/pkg/ or go-controller/cmd/ are added or
+          modified, check whether corresponding *_test.go files are
+          also added or modified in this PR. Exclude files under
+          go-controller/vendor/, *_test.go files, documentation-only,
+          CI, and script changes.
 
-          Fail if production Go code changed with no test file changes.
-          Pass only if no production Go files changed, or if test files
-          are included alongside the production changes.
+          Exclude generated Go files from the test requirement. Treat a
+          file as generated when its leading comment block contains
+          "Code generated by ... DO NOT EDIT.", including files with
+          SPDX comments before that marker, or when its name matches
+          zz_generated*. Generated output should instead be checked for
+          correct regeneration with the repository's pinned generator.
+
+          Fail if non-generated production Go code changed with no test
+          file changes. Pass if no non-generated production Go files
+          changed, or if test files are included alongside the
+          non-generated production changes.
 
           If failing, advise the author: if there is a valid reason for
           not including tests (e.g. existing tests already cover the
@@ -383,8 +455,19 @@ reviews:
           this PR.
 
           Fail if user-facing behavior changed with no E2E test changes.
-          Pass only if no user-facing behavior changed, or if E2E test
-          files are included.
+          E2E file presence alone is not sufficient. For new specs or
+          changed selection requirements, identify a concrete CI lane
+          whose test command selects them with the required cluster
+          features enabled. Trace workflow and runner-script focus/skip
+          expressions, feature labels, Serial/PARALLEL handling, and
+          runtime skip prerequisites. Fail if no suitable lane executes
+          the specs, and request CI wiring in the same PR. Kubernetes
+          conformance jobs do not cover OVN-Kubernetes E2E specs.
+          Report the lane and selection evidence. When CI logs or reports
+          are available, confirm the specific specs ran rather than being
+          skipped. If execution is pending or unavailable, state that
+          limitation; do not treat compilation, an unrelated passing job,
+          or a focused dry-run as proof of CI execution.
 
           If failing, advise the author: if E2E tests are genuinely not
           feasible for this change, document the justification in the
@@ -415,6 +498,16 @@ reviews:
           convention. Fail if a new pattern is introduced without
           documenting it for future contributors.
 
+          Changes to agent instructions or automated review guidance
+          do not require duplicate contributor or product documentation.
+          AGENTS.md and .coderabbit.yml are appropriate places for that
+          guidance. Do not treat instructions about how agents assess
+          or validate work as new contributor conventions by themselves.
+          Require additional documentation only when the change
+          independently alters a contributor workflow, product behavior,
+          or architecture; apply that requirement to the relevant changes
+          even when the PR also modifies agent or review guidance.
+
           Fail if a new doc page (*.md) is added under docs/ but the
           mkdocs.yml nav section is not updated to include it.
 
@@ -422,6 +515,29 @@ reviews:
           required for this change, document the reasoning in the PR
           description and then use "@coderabbitai ignore pre-merge
           checks" to override.
+      - name: "Metrics Documentation"
+        mode: "warning"
+        instructions: >-
+          Check whether this PR adds, changes, renames, or removes a
+          Prometheus metric, including its name, type, labels, help text,
+          units, feature gate, or registration conditions.
+
+          If metrics change, verify that the relevant page under
+          docs/observability/metrics/ is updated in the same PR:
+
+          - cluster-manager metrics:
+            ovnkube-control-plane.md
+          - ovnkube-controller, ovnkube-node, NetworkQoS,
+            AdminNetworkPolicy, and libovsdb client metrics:
+            ovnkube-node.md
+          - OVN database, ovn-northd, and ovn-controller metrics:
+            ovn.md
+          - Open vSwitch metrics:
+            ovs.md
+
+          Pass if the PR does not change exported metrics or includes the
+          required documentation update. Warn if metric behavior changes
+          without a corresponding documentation change.
       - name: "Stale Project Docs and Config"
         mode: "error"
         instructions: >-
@@ -429,7 +545,7 @@ reviews:
           project files stale or inaccurate: .coderabbit.yml (path
           instructions, pre-merge checks, global review instructions),
           CONTRIBUTING.md, AGENTS.md, docs/developer-guide/,
-          docs/governance/, ARCHITECTURE.md, CODEOWNERS, or mkdocs.yml
+          docs/governance/, docs/design/architecture.md, CODEOWNERS, or mkdocs.yml
           navigation entries.
 
           Examples of staleness:
@@ -445,7 +561,7 @@ reviews:
           or removed but still referenced in docs or AGENTS.md.
 
           4. Architecture or component boundaries change but
-          ARCHITECTURE.md is not updated.
+          docs/design/architecture.md is not updated.
 
           Fail if any project docs or config become stale due to the
           changes. Pass only if the PR does not introduce any such

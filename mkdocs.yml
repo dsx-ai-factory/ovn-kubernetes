@@ -59,6 +59,14 @@ plugins:
       loop: false
       zoomable: true
       draggable: true
+  - redirects:
+      redirect_maps: {}
+  - minify:
+      minify_html: true
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: date
+      fallback_to_build_date: true
 markdown_extensions:
   - admonition
   - meta
@@ -73,9 +81,15 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:mermaid2.fence_mermaid_custom
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.snippets:
       base_path: site-src
       check_paths: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.keys
+  - pymdownx.mark
   - toc:
       permalink: true
 nav:
@@ -192,7 +206,12 @@ nav:
     - User Defined Networks: troubleshooting/udn.md
   - Observability:
     - observability/index.md
-    - Metrics: observability/metrics.md
+    - Metrics:
+      - Overview: observability/metrics.md
+      - OVN-Kubernetes control plane: observability/metrics/ovnkube-control-plane.md
+      - OVN-Kubernetes node: observability/metrics/ovnkube-node.md
+      - OVN: observability/metrics/ovn.md
+      - Open vSwitch: observability/metrics/ovs.md
     - SDN Dashboard: observability/sdn-dashboard.md
     - OVN observability: observability/ovn-observability.md
   - Enhancement Proposals:
@@ -217,5 +236,8 @@ nav:
     - Disable Port Security: okeps/okep-3926-disable-port-security.md
     - OVN Observability API: okeps/okep-5212-ovnobserv-api.md
     - DHCP IPAM for Localnet: okeps/okep-6224-dhcp-ipam-localnet.md
+    - EgressIP Node Selector: okeps/okep-6800-egressip-node-selector.md
+    - NetworkQoS for Ipamless Localnet Networks: okeps/okep-6815-network-qos-ipamless.md
+    - Scalable ARP/NDP Broadcast Handling for UDN: okeps/okep-6691-scalable-arp-ndp-broadcast-udn.md
   - Blog:
     - OVN-Kubernetes Blog: blog/index.md

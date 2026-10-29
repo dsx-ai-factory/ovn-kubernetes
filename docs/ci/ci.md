@@ -118,6 +118,35 @@ using an `exclude:` statement in
 [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml).
 -->
 
+# CRD Integration Tests
+
+Tests from
+[`test/crd-integration/`](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/test/crd-integration)
+verify **CRD admission behaviour** against a real kube-apiserver via
+[envtest](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest), with
+no KinD cluster required. See the
+[Local Testing Guide](../developer-guide/local_testing_guide.md#crd-integration-tests)
+for prerequisites, how to run them, and how to add new tests.
+
+## What belongs here
+
+These tests are the intended home for **CRD admission behaviour** that can
+be verified without live pod networking:
+
+- **Defaulting** — fields with `+kubebuilder:default` markers are filled in
+  correctly when absent from a user's YAML
+- **Validation** — `+kubebuilder:validation` constraints reject invalid objects
+- **CEL rules** — `+kubebuilder:validation:XValidation` expressions behave as
+  specified
+
+Do **not** add these to `test/e2e/` or `test/e2e/testscenario/`.  The E2E
+suite requires a full KinD cluster; CRD admission tests do not.  Adding them
+to the E2E suite makes them slower, harder to run locally, and harder to
+iterate on.  Schema-only tests currently in
+[`test/e2e/testscenario/`](https://github.com/dsx-ai-factory/ovn-kubernetes/tree/main/test/e2e/testscenario)
+should be migrated here over time (tracked in
+[ovn-kubernetes#6932](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6932)).
+
 # Conformance Tests
 
 We have a conformance test suite that can be invoked using the `make conformance` command.
