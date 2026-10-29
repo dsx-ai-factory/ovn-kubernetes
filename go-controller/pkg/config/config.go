@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
@@ -297,8 +298,10 @@ var (
 		ASNumber: 64512, // Default AS number
 	}
 
-	// Layer2UsesTransitRouter indicated whether the layer2 primary networks will use transit router.
-	// It is a per-node setting and is also reflected in the node annotations.
+	// Layer2UsesTransitRouter selects the current primary Layer2 topology.
+	// Both controller managers enable it at startup.
+	//
+	// DEPRECATED: retained only until the legacy topology branches are removed.
 	Layer2UsesTransitRouter bool
 )
 
@@ -768,6 +771,13 @@ type GatewayConfig struct {
 	CustomSnatRules string `gcfg:"custom-gwsnat-rules"`
 	// SecureManagementPort (disabled by default) controls if the management port is secured by ACLs.
 	SecureManagementPort bool `gcfg:"secure-mgmt-port"`
+
+	// DisableUDNARPNDPFlood might provide better scale capabilities with large
+	// number of UDNs. Instead of flooding ARP/NDP traffic from the gateway to
+	// the UDNs which might overload vswitchd or even drop packets, only CDN or
+	// UDN in an uplink group will get the traffic, OVNK will mirror the
+	// resulting mac binding entries to the UDNs.
+	DisableUDNARPNDPFlood bool `gcfg:"disable-udn-arp-ndp-flood"`
 }
 
 // EgressIPHealthCheckTLSConfig holds TLS settings for the Egress IP gRPC
@@ -2048,6 +2058,14 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Secure the management port by ACLs. Disabled by default.",
 		Destination: &cliConfig.Gateway.SecureManagementPort,
 	},
+	&cli.BoolFlag{
+		Name: "disable-udn-arp-ndp-flood",
+		Usage: "This option might provide better scale capabilities with large number of UDNs. Instead of flooding " +
+			"ARP/NDP traffic from the gateway to the UDNs which might overload vswitchd or even drop packets, only CDN " +
+			"or UDN in an uplink group will get the traffic, OVNK will mirror the resulting mac binding entries to the UDNs.",
+		Destination: &cliConfig.Gateway.DisableUDNARPNDPFlood,
+		Value:       Gateway.DisableUDNARPNDPFlood,
+	},
 }
 
 // ClusterMgrHAFlags capture leader election flags for cluster manager
@@ -2654,7 +2672,34 @@ func completeGatewayConfig(allSubnets *ConfigSubnets, masqueradeIPs *MasqueradeI
 	allSubnets.Append(ConfigSubnetMasquerade, v4MasqueradeCIDR)
 	allSubnets.Append(ConfigSubnetMasquerade, v6MasqueradeCIDR)
 
+	// Precompute the set consumed by IsGatewayStaticMACBindingIP now that the
+	// masquerade IPs are final; this is the only place they are finalized.
+	gatewayStaticMACBindingIPs = sets.New[string]()
+	for _, ip := range []net.IP{
+		masqueradeIPs.V4DummyNextHopMasqueradeIP,
+		masqueradeIPs.V6DummyNextHopMasqueradeIP,
+		masqueradeIPs.V4HostMasqueradeIP,
+		masqueradeIPs.V6HostMasqueradeIP,
+	} {
+		if ip != nil {
+			gatewayStaticMACBindingIPs.Insert(ip.String())
+		}
+	}
+
 	return nil
+}
+
+// gatewayStaticMACBindingIPs is the precomputed set of masquerade IP strings
+// the gateway programs as static MAC bindings on gateway router external ports,
+// populated by completeGatewayConfig. Read it through
+// IsGatewayStaticMACBindingIP.
+var gatewayStaticMACBindingIPs sets.Set[string]
+
+// IsGatewayStaticMACBindingIP reports whether ip is one of the masquerade IPs
+// the gateway programs as static MAC bindings on gateway router external ports
+// (the dummy next-hop and host masquerade IPs).
+func IsGatewayStaticMACBindingIP(ip string) bool {
+	return gatewayStaticMACBindingIPs.Has(ip)
 }
 
 func buildOVNKubernetesFeatureConfig(cli, file *config) error {
@@ -2942,6 +2987,28 @@ func validateConfig() error {
 	// Validate no-overlay/transport configuration
 	if err := validateNoOverlayConfig(); err != nil {
 		return err
+	}
+
+	// Validate gateway configuration
+	if err := validateGatewayConfig(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateGatewayConfig validates cross-configuration dependencies of the gateway
+// configuration.
+func validateGatewayConfig() error {
+	// disable-udn-arp-ndp-flood relies on the MAC binding controller mirroring
+	// bindings to UDN gateway routers, which only exist with Network Segmentation.
+	if Gateway.DisableUDNARPNDPFlood && !OVNKubernetesFeature.EnableNetworkSegmentation {
+		return fmt.Errorf("disable-udn-arp-ndp-flood cannot be enabled without also enabling Network Segmentation")
+	}
+	// The gateway bridge flows and the MAC binding controller the feature relies
+	// on run where OVN and OVS do (full and DPU modes), not on the DPU host.
+	if Gateway.DisableUDNARPNDPFlood && IsModeDPUHost() {
+		return fmt.Errorf("disable-udn-arp-ndp-flood is not supported in DPU host mode")
 	}
 
 	return nil

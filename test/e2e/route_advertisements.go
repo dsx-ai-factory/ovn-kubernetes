@@ -44,6 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
@@ -60,12 +61,20 @@ import (
 )
 
 const (
-	serverContainerName                     = "bgpserver"
-	routerContainerName                     = "frr"
-	echoClientPodName                       = "echo-client-pod"
-	bgpExternalNetworkName                  = "bgpnet"
-	netexecPort                             = 8080
+	echoClientPodName = "echo-client-pod"
+	netexecPort       = 8080
+	// Downstream retains the environment variable name exported by sdn-cicd.
 	defaultNetworkRouteAdvertisementNameEnv = "E2E_DEFAULT_NETWORK_ROUTE_ADVERTISEMENT_NAME"
+)
+
+// Names of the external BGP scaffolding deployed by contrib/kind.sh or
+// contrib/kind-helm.sh. Overridable so that suites can run against clusters
+// whose scaffolding uses non-default names (e.g. the dpu-sim environment,
+// which coexists with a regular kind cluster on the same machine).
+var (
+	bgpExternalServerContainerName = envOrDefault("OVN_TEST_BGP_SERVER_CONTAINER", "bgpserver")
+	routerContainerName            = envOrDefault("OVN_TEST_BGP_ROUTER_CONTAINER", "frr")
+	bgpExternalNetworkName         = envOrDefault("OVN_TEST_BGP_SERVER_NETWORK", "bgpnet")
 )
 
 func defaultNetworkRouteAdvertisementName() string {
@@ -73,12 +82,6 @@ func defaultNetworkRouteAdvertisementName() string {
 		return name
 	}
 	return "default"
-}
-
-func init() {
-	if os.Getenv("ENABLE_ROUTE_ADVERTISEMENTS") == "true" {
-		images.Add(images.FRR())
-	}
 }
 
 var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.RouteAdvertisements, func() {
@@ -149,7 +152,7 @@ var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.Ro
 			bgpNetwork, err := infraprovider.Get().GetNetwork(bgpExternalNetworkName)
 			framework.ExpectNoError(err, "network %s must be available and precreated before test run", bgpExternalNetworkName)
 			externalServerV4CIDR, externalServerV6CIDR, err := bgpNetwork.IPv4IPv6Subnets()
-			framework.ExpectNoError(err, "must get bgpnet subnets")
+			framework.ExpectNoError(err, "must get %s subnets", bgpExternalNetworkName)
 			framework.Logf("the network cidrs to be imported are v4=%s and v6=%s", externalServerV4CIDR, externalServerV6CIDR)
 			for _, node := range nodes.Items {
 				if isIPv4Supported(f.ClientSet) {
@@ -268,7 +271,7 @@ var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.Ro
 			bgpNetwork, err := infraprovider.Get().GetNetwork(bgpExternalNetworkName)
 			framework.ExpectNoError(err, "network %s must be available and precreated before test run", bgpExternalNetworkName)
 			externalServerV4CIDR, externalServerV6CIDR, err := bgpNetwork.IPv4IPv6Subnets()
-			framework.ExpectNoError(err, "must get bgpnet subnets")
+			framework.ExpectNoError(err, "must get %s subnets", bgpExternalNetworkName)
 			framework.Logf("the network cidrs to be imported are v4=%s and v6=%s", externalServerV4CIDR, externalServerV6CIDR)
 			for _, node := range nodes.Items {
 				if isIPv4Supported(f.ClientSet) {
@@ -787,10 +790,10 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 		serverContainerIPs = []string{}
 
 		bgpNetwork, err := infraprovider.Get().GetNetwork(bgpExternalNetworkName) // pre-created network
-		framework.ExpectNoError(err, "must get bgpnet network")
-		bgpServer := infraapi.ExternalContainer{Name: serverContainerName}
+		framework.ExpectNoError(err, "must get %s network", bgpExternalNetworkName)
+		bgpServer := infraapi.ExternalContainer{Name: bgpExternalServerContainerName}
 		networkInterface, err := infraprovider.Get().GetExternalContainerNetworkInterface(bgpServer, bgpNetwork)
-		framework.ExpectNoError(err, "container %s attached to network %s must contain network info", serverContainerName, bgpExternalNetworkName)
+		framework.ExpectNoError(err, "container %s attached to network %s must contain network info", bgpExternalServerContainerName, bgpExternalNetworkName)
 		if isIPv4Supported(f.ClientSet) && len(networkInterface.IPv4) > 0 {
 			serverContainerIPs = append(serverContainerIPs, networkInterface.IPv4)
 		}
@@ -815,7 +818,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 	})
 
 	ginkgo.DescribeTable("Route Advertisements",
-		func(cudnTemplate *udnv1.ClusterUserDefinedNetwork, ra *rav1.RouteAdvertisements) {
+		func(ctx ginkgo.SpecContext, cudnTemplate *udnv1.ClusterUserDefinedNetwork, ra *rav1.RouteAdvertisements) {
 			// set the exact selector
 			cudnTemplate.Spec.NamespaceSelector = metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
 				Key:      "kubernetes.io/metadata.name",
@@ -838,7 +841,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 			ginkgo.DeferCleanup(func() {
 				udnClient.K8sV1().ClusterUserDefinedNetworks().Delete(context.TODO(), cUDN.Name, metav1.DeleteOptions{})
 			})
-			gomega.Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cUDN.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
+			gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cUDN.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
 
 			ginkgo.DeferCleanup(func() {
 				ginkgo.By(fmt.Sprintf("delete pods in %s namespace to unblock CUDN CR & associate NAD deletion", f.Namespace.Name))
@@ -1292,7 +1295,7 @@ var _ = ginkgo.Describe("BGP: When an advertised CUDN network is dynamically all
 		gomega.Expect(len(nodes.Items)).To(gomega.BeNumerically(">", 2))
 	})
 
-	ginkgo.It("is accepted when the network is allocated on a subset of the nodes only", func() {
+	ginkgo.It("is accepted when the network is allocated on a subset of the nodes only", func(ctx ginkgo.SpecContext) {
 		ginkgo.By("create ClusterUserDefinedNetwork")
 		cudnTemplate := &udnv1.ClusterUserDefinedNetwork{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1341,7 +1344,7 @@ var _ = ginkgo.Describe("BGP: When an advertised CUDN network is dynamically all
 		ginkgo.DeferCleanup(func() {
 			udnClient.K8sV1().ClusterUserDefinedNetworks().Delete(context.TODO(), cUDN.Name, metav1.DeleteOptions{})
 		})
-		gomega.Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cUDN.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
+		gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cUDN.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
 		netName := types.CUDNPrefix + cUDN.Name
 
 		ginkgo.DeferCleanup(func() {
@@ -1463,7 +1466,7 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 		var ra *rav1.RouteAdvertisements
 		var hostNetworkPort int
 		ginkgo.Context("", ginkgo.Ordered, ginkgo.ContinueOnFailure, func() {
-			ginkgo.BeforeAll(func() {
+			ginkgo.BeforeAll(func(ctx ginkgo.SpecContext) {
 				ginkgo.By("Configuring primary UDN namespaces")
 				var err error
 				// Create namespaces directly via the API instead of f.CreateNamespace()
@@ -1529,8 +1532,8 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ginkgo.By("Waiting for networks to be ready")
-				gomega.Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudnA.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
-				gomega.Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudnB.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
+				gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudnA.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
+				gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudnB.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
 
 				ginkgo.By("Selecting 3 schedulable nodes")
 				// bound the node list: network pods are only scheduled on the
@@ -3222,7 +3225,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						bgpServerNetwork, err := infraprovider.Get().GetNetwork(bgpExternalNetworkName)
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						iface, err := infraprovider.Get().GetExternalContainerNetworkInterface(
-							infraapi.ExternalContainer{Name: serverContainerName},
+							infraapi.ExternalContainer{Name: bgpExternalServerContainerName},
 							bgpServerNetwork,
 						)
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3250,7 +3253,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						gomega.Expect(podIP).ToNot(gomega.BeEmpty())
 						// using the external server setup for the default network
-						testContainerToClientIPNOK(serverContainerName, podIP)
+						testContainerToClientIPNOK(bgpExternalServerContainerName, podIP)
 					},
 					ginkgo.Entry("When the network is IPv4", utilnet.IPv4),
 					ginkgo.Entry("When the network is IPv6", utilnet.IPv6),
@@ -3681,6 +3684,121 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		},
 		networksToTest,
 	)
+
+	// The node annotation is shared by all EVPN networks on that node, so this
+	// test must not overlap other tests that configure or depend on those networks.
+	ginkgo.It("withdraws and restores VTEP advertisements after an invalid node annotation", feature.EVPN, ginkgo.Serial, func() {
+		// configureNetworkWithInfra provisions only IPv4 VTEPs, including for
+		// dual-stack tenant networks; IPv6 VTEP coverage needs infrastructure support.
+		if !ipFamilySet.Has(utilnet.IPv4) {
+			e2eskipper.Skipf("IPv6 VTEPs are not supported")
+		}
+		ctx := context.Background()
+		nodes, err := e2enode.GetReadySchedulableNodes(ctx, f.ClientSet)
+		framework.ExpectNoError(err, "listing nodes for VTEP withdrawal test")
+		if len(nodes.Items) < 2 {
+			e2eskipper.Skipf("VTEP withdrawal test requires two schedulable nodes")
+		}
+		bgpAlloc, err := allocators.AllocateBGP(f, ictx)
+		framework.ExpectNoError(err, "allocating BGP test infrastructure")
+		spec := layer3IPVRFNetworkSpecGen(bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6, bgpAlloc)
+		spec.Layer3.Subnets = matchL3SubnetsByIPFamilies(ipFamilySet, spec.Layer3.Subnets...)
+		namespace, _, _ := configureNetworkWithInfra(f, ictx, testBaseName, ipFamilySet,
+			testNetworkName, cudnAdvertisedEVPNUnmanagedRandomVTEP, spec, bgpAlloc)
+		// Keep the network active on both nodes with dynamic UDN allocation.
+		for _, node := range nodes.Items[:2] {
+			e2epod.CreateExecPodOrFail(ctx, f.ClientSet, namespace.Name, "vtep-"+node.Name, func(p *corev1.Pod) {
+				p.Spec.NodeName = node.Name
+			})
+		}
+		raClient, err := raclientset.NewForConfig(f.ClientConfig())
+		framework.ExpectNoError(err, "creating the RouteAdvertisements client")
+		gomega.Eventually(routeAdvertisementsReadyFunc(*raClient, testNetworkName), timeout, polling).Should(gomega.Succeed(), "waiting for initial RouteAdvertisements acceptance")
+		vtepName := testNetworkName + "-vtep"
+		var original string
+		prefixes := make([]string, 2)
+		gomega.Eventually(func() error {
+			for i, node := range nodes.Items[:2] {
+				current, err := f.ClientSet.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+				if err != nil {
+					return fmt.Errorf("reading node %s for VTEP prefixes: %w", node.Name, err)
+				}
+				vteps, err := ovnutil.ParseNodeVTEPs(current)
+				if err != nil {
+					return fmt.Errorf("parsing node %s VTEP annotation: %w", node.Name, err)
+				}
+				ips := vteps[vtepName].IPs
+				if len(ips) != 1 || !utilnet.IsIPv4String(ips[0]) {
+					return fmt.Errorf("node %s has no single IPv4 VTEP for %s: %v", node.Name, vtepName, ips)
+				}
+				prefixes[i] = ips[0] + "/32"
+				if i == 0 {
+					original = current.Annotations[ovnutil.OVNNodeVTEPs]
+				}
+			}
+			return nil
+		}, timeout, polling).Should(gomega.Succeed(), "reading both node VTEP prefixes")
+		gomega.Expect(prefixes[0]).NotTo(gomega.Equal(prefixes[1]), "test nodes must have distinct VTEP addresses")
+		checkRoutes := func(targetPresent bool) error {
+			for i, prefix := range prefixes {
+				output, err := infraprovider.Get().ExecExternalContainerCommand(
+					infraapi.ExternalContainer{Name: routerContainerName},
+					[]string{"vtysh", "-c", "show bgp ipv4 unicast " + prefix + " json"})
+				if err != nil {
+					return fmt.Errorf("querying external FRR for VTEP prefix %s: %w", prefix, err)
+				}
+				var route struct {
+					Prefix string            `json:"prefix"`
+					Paths  []json.RawMessage `json:"paths"`
+				}
+				if err := json.Unmarshal([]byte(output), &route); err != nil {
+					return fmt.Errorf("decoding FRR route %s: %w", prefix, err)
+				}
+				present := route.Prefix == prefix && len(route.Paths) > 0
+				if present != (i == 1 || targetPresent) {
+					return fmt.Errorf("unexpected external FRR route for %s: %s", prefix, output)
+				}
+			}
+			return nil
+		}
+		ginkgo.By("observing both nodes' VTEP host routes on external FRR")
+		gomega.Eventually(func() error { return checkRoutes(true) }, timeout, polling).Should(gomega.Succeed(), "waiting for both VTEP routes in external FRR")
+		patchAnnotation := func(value string) error {
+			patch, err := json.Marshal(map[string]interface{}{"metadata": map[string]interface{}{
+				"annotations": map[string]string{ovnutil.OVNNodeVTEPs: value},
+			}})
+			if err != nil {
+				return fmt.Errorf("encoding VTEP annotation patch: %w", err)
+			}
+			_, err = f.ClientSet.CoreV1().Nodes().Patch(ctx, nodes.Items[0].Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{}, "status")
+			if err != nil {
+				return fmt.Errorf("patching node %s VTEP annotation: %w", nodes.Items[0].Name, err)
+			}
+			return nil
+		}
+		ginkgo.DeferCleanup(func() {
+			gomega.Eventually(func() error { return patchAnnotation(original) }, timeout, polling).Should(gomega.Succeed(), "restoring the original annotation during cleanup")
+		})
+		ginkgo.By("applying malformed JSON so node-side repair cannot race withdrawal")
+		framework.ExpectNoError(patchAnnotation("not-json"), "injecting a malformed VTEP annotation")
+		gomega.Eventually(func() error {
+			ra, err := raClient.K8sV1().RouteAdvertisements().Get(ctx, testNetworkName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("reading RouteAdvertisements %s after annotation update: %w", testNetworkName, err)
+			}
+			condition := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+			if condition == nil || condition.Status != metav1.ConditionFalse ||
+				!strings.Contains(condition.Message, nodes.Items[0].Name) || !strings.Contains(condition.Message, ovnutil.OVNNodeVTEPs) {
+				return fmt.Errorf("waiting for RA to reject node %s: %v", nodes.Items[0].Name, condition)
+			}
+			return checkRoutes(false)
+		}, timeout, polling).Should(gomega.Succeed(), "waiting for RA rejection and route withdrawal")
+		gomega.Consistently(func() error { return checkRoutes(false) }, 5*time.Second, polling).Should(gomega.Succeed(), "the rejected VTEP route must stay withdrawn while the other node remains advertised")
+		ginkgo.By("restoring the annotation and observing the VTEP route return")
+		framework.ExpectNoError(patchAnnotation(original), "restoring the valid VTEP annotation")
+		gomega.Eventually(routeAdvertisementsReadyFunc(*raClient, testNetworkName), timeout, polling).Should(gomega.Succeed(), "waiting for RouteAdvertisements acceptance after restoration")
+		gomega.Eventually(func() error { return checkRoutes(true) }, timeout, polling).Should(gomega.Succeed(), "waiting for both VTEP routes to return")
+	})
 
 	ginkgo.DescribeTable("Validates BUM suppression is in effect for L2 EVPN networks",
 		func(bumTestBaseName string, networkSpecGen func(string, string, allocators.BGPAllocation) *udnv1.NetworkSpec) {
@@ -4494,7 +4612,7 @@ func createUserDefinedNetwork(
 		30*time.Second,
 		true,
 		func(ctx context.Context) (bool, error) {
-			lastReadyErr = networkReadyFunc(client, name)()
+			lastReadyErr = networkReadyFunc(ctx, client, name)()
 			return lastReadyErr == nil, nil
 		},
 	); err != nil {
@@ -4580,10 +4698,10 @@ func createRouteAdvertisements(
 // getBGPServerContainerIPs retrieves the IP addresses of the BGP server container.
 func getBGPServerContainerIPs(f *framework.Framework) (serverContainerIPs []string) {
 	bgpNetwork, err := infraprovider.Get().GetNetwork(bgpExternalNetworkName) // pre-created network
-	framework.ExpectNoError(err, "must get bgpnet network")
-	bgpServer := infraapi.ExternalContainer{Name: serverContainerName}
+	framework.ExpectNoError(err, "must get %s network", bgpExternalNetworkName)
+	bgpServer := infraapi.ExternalContainer{Name: bgpExternalServerContainerName}
 	networkInterface, err := infraprovider.Get().GetExternalContainerNetworkInterface(bgpServer, bgpNetwork)
-	framework.ExpectNoError(err, "container %s attached to network %s must contain network info", serverContainerName, bgpExternalNetworkName)
+	framework.ExpectNoError(err, "container %s attached to network %s must contain network info", bgpExternalServerContainerName, bgpExternalNetworkName)
 	if isIPv4Supported(f.ClientSet) && len(networkInterface.IPv4) > 0 {
 		serverContainerIPs = append(serverContainerIPs, networkInterface.IPv4)
 	}

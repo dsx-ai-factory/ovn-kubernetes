@@ -38,6 +38,8 @@ k8sToken:
 # ovnPrimaryNADAnnotations:
 #  k8s.v1.cni.cncf.io/resourceName: nvidia.com/asap2_vf
 global:
+  # -- Run node agents without full container privileges and enable OVN-Kubernetes unprivileged CNI mode; localnet DHCP IPAM requires false
+  unprivilegedMode: false
   # -- namespace where all the OVN K8s components' resources must be deployed
   namespace: ovn-kubernetes
   # -- name of the secret used to pull container images used by various OVN K8s components

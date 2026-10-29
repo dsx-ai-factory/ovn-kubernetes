@@ -39,7 +39,6 @@ func NewUserDefinedLocalnetNodeNetworkController(cnnci *CommonNodeNetworkControl
 				ReconcilableNetInfo:             util.NewReconcilableNetInfo(netInfo),
 				stopChan:                        make(chan struct{}),
 				wg:                              &sync.WaitGroup{},
-				DoSCheckStopChan:                nil,
 				networkManager:                  networkManager,
 				ovsClient:                       ovsClient,
 			},
@@ -59,26 +58,12 @@ func (nc *UserDefinedLocalnetNodeNetworkController) Start(_ context.Context) err
 		}
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		err := nc.startNADController()
-		if err != nil {
-			return err
-		}
-
-		handler, err := nc.watchPodsDPU()
-		if err != nil {
-			return err
-		}
-		nc.podHandler = handler
-	}
 	return nil
 }
 
 // Stop gracefully stops the controller
 func (nc *UserDefinedLocalnetNodeNetworkController) Stop() {
 	nc.UserDefinedNodeNetworkController.Stop()
-
-	nc.stopNADController()
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		err := nc.updateLocalnetOvnBridgeMapping(false)

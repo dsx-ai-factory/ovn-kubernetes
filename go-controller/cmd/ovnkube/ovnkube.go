@@ -490,7 +490,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	}
 
 	if runMode.cleanupNode {
-		return ovnnode.CleanupClusterNode(runMode.identity)
+		return ovnnode.CleanupClusterNode(ctx, runMode.identity)
 	}
 	dpuName := ""
 	if runMode.node && config.OvnKubeNode.Mode == types.NodeModeDPU {

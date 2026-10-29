@@ -77,6 +77,12 @@ usage() {
     echo "       [ --frr-k8s-host-kubeconfig <file> ]"
     echo "       [ --frr-k8s-remote-node-map <host=dpu[,host=dpu...]> ]"
     echo "       [ -tr  | --enable-tracing ]"
+    echo "       [ --bgp-net-name <name> ]"
+    echo "       [ --bgp-server-name <name> ]"
+    echo "       [ --frr-container-name <name> ]"
+    echo "       [ --bgp-server-net-subnet-ipv4 <subnet> ]"
+    echo "       [ --bgp-server-net-subnet-ipv6 <subnet> ]"
+    echo "       [ --bgp-server-host-port <port> ]"
     echo "       [ --enable-coredumps ]"
     echo "       [ -ub | --uplink-bridge ]"
     echo "       [ -h ]"
@@ -88,6 +94,7 @@ usage() {
     echo "-me  | --multicast-enabled                    Enable multicast. DEFAULT: Disabled"
     echo "-ho  | --hybrid-enabled                       Enable hybrid overlay. DEFAULT: Disabled"
     echo "-obs | --observability                        Enable observability. DEFAULT: Disabled"
+    echo "-upm | --unprivileged-mode                    Run ovnkube-node without privileged: true."
     echo "-el  | --ovn-empty-lb-events                  Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
     echo "-ii  | --install-ingress                      Flag to install Ingress Components."
     echo "                                              DEFAULT: Don't install ingress components."
@@ -163,6 +170,12 @@ usage() {
     echo "--frr-k8s-remote-kubeconfig                   Kubeconfig used by DPU-cluster FRR-K8S pods to watch the host cluster API."
     echo "--frr-k8s-host-kubeconfig                     Kubeconfig used by this script to write FRR-K8S resources to the host cluster API."
     echo "--frr-k8s-remote-node-map                     Comma-separated host-node=dpu-node pairs for remote FRR-K8S node-name mapping."
+    echo "--bgp-net-name                                Name of the docker network hosting the external BGP server. DEFAULT: bgpnet"
+    echo "--bgp-server-name                             Name of the external BGP server container. DEFAULT: bgpserver"
+    echo "--frr-container-name                          Name of the external FRR router container. DEFAULT: frr"
+    echo "--bgp-server-net-subnet-ipv4                  IPv4 subnet of the external BGP server network. DEFAULT: 172.26.0.0/16"
+    echo "--bgp-server-net-subnet-ipv6                  IPv6 subnet of the external BGP server network. DEFAULT: fc00:f853:ccd:e796::/64"
+    echo "--bgp-server-host-port                        Host port published by the external BGP server container. DEFAULT: 18080"
     echo "-nokvipam | --opt-out-kv-ipam                 Skip installing the KubeVirt IPAM controller (requires --install-kubevirt)."
     echo ""
 
@@ -171,8 +184,7 @@ usage() {
 parse_args() {
     while [ "$1" != "" ]; do
         case $1 in
-            --delete )                            delete
-                                                  exit
+            --delete )                            KIND_DELETE=true
                                                   ;;
             -cf | --config-file )                 shift
                                                   if test ! -f "$1"; then
@@ -189,6 +201,8 @@ parse_args() {
             -ho | --hybrid-enabled )              OVN_HYBRID_OVERLAY_ENABLE=true
                                                   ;;
             -obs | --observability )              OVN_OBSERV_ENABLE=true
+                                                  ;;
+            -upm | --unprivileged-mode )          OVN_UNPRIVILEGED_MODE=true
                                                   ;;
             -el | --ovn-empty-lb-events )         OVN_EMPTY_LB_EVENTS=true
                                                   ;;
@@ -439,6 +453,54 @@ parse_args() {
                                                   fi
                                                   FRR_K8S_REMOTE_NODE_MAP=$1
                                                   ;;
+            --bgp-net-name )                      shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --bgp-net-name" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  BGP_NET_NAME=$1
+                                                  ;;
+            --bgp-server-name )                   shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --bgp-server-name" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  BGP_SERVER_NAME=$1
+                                                  ;;
+            --frr-container-name )                shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --frr-container-name" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  FRR_CONTAINER_NAME=$1
+                                                  ;;
+            --bgp-server-net-subnet-ipv4 )        shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --bgp-server-net-subnet-ipv4" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  BGP_SERVER_NET_SUBNET_IPV4=$1
+                                                  ;;
+            --bgp-server-net-subnet-ipv6 )        shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --bgp-server-net-subnet-ipv6" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  BGP_SERVER_NET_SUBNET_IPV6=$1
+                                                  ;;
+            --bgp-server-host-port )              shift
+                                                  if ! [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid bgp-server-host-port: ${1:-}" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  BGP_SERVER_HOST_PORT=$1
+                                                  ;;
             -nokvipam | --opt-out-kv-ipam )       KIND_OPT_OUT_KUBEVIRT_IPAM=true
                                                   ;;
             * )                                   usage
@@ -471,6 +533,12 @@ print_params() {
      echo "ENABLE_UPLINK = $ENABLE_UPLINK"
      echo "ENABLE_PRE_CONF_UDN_ADDR = $ENABLE_PRE_CONF_UDN_ADDR"
      echo "ENABLE_ROUTE_ADVERTISEMENTS = $ENABLE_ROUTE_ADVERTISEMENTS"
+     echo "BGP_NET_NAME = $BGP_NET_NAME"
+     echo "BGP_SERVER_NAME = $BGP_SERVER_NAME"
+     echo "FRR_CONTAINER_NAME = $FRR_CONTAINER_NAME"
+     echo "BGP_SERVER_NET_SUBNET_IPV4 = $BGP_SERVER_NET_SUBNET_IPV4"
+     echo "BGP_SERVER_NET_SUBNET_IPV6 = $BGP_SERVER_NET_SUBNET_IPV6"
+     echo "BGP_SERVER_HOST_PORT = $BGP_SERVER_HOST_PORT"
      echo "ENABLE_EVPN = $ENABLE_EVPN"
      echo "ADVERTISE_DEFAULT_NETWORK = $ADVERTISE_DEFAULT_NETWORK"
      echo "ADVERTISED_UDN_ISOLATION_MODE = $ADVERTISED_UDN_ISOLATION_MODE"
@@ -700,7 +768,7 @@ helm upgrade --install ovn-kubernetes . -f "${value_file}" ${extra_values_args} 
           --set global.extGatewayNetworkInterface=$(if [ "${OVN_SECOND_BRIDGE}" == "true" ]; then echo "eth1"; else echo ""; fi) \
           --set global.disableSnatMultipleGws=$(if [ "${OVN_DISABLE_SNAT_MULTIPLE_GWS}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.disableForwarding=$(if [ "${OVN_DISABLE_FORWARDING}" == "true" ]; then echo "true"; else echo "false"; fi) \
-          --set global.unprivilegedMode=false \
+          --set global.unprivilegedMode=$(if [ "${OVN_UNPRIVILEGED_MODE}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.metricsIp="${METRICS_IP:-}" \
           --set ovs-node.updateStrategy="${OVS_NODE_UPDATE_STRATEGY:-RollingUpdate}" \
           --set global.dummyGatewayBridge=$(if [ "${OVN_DUMMY_GATEWAY_BRIDGE}" == "true" ]; then echo "true"; else echo "false"; fi) \
@@ -727,6 +795,28 @@ EOF
     eval "${cmd}"
 }
 
+# install_ovs_tools_on_nodes installs ovs-vsctl and ovs-ofctl on every kind node.
+# Strictly, only unprivileged mode needs them: there the CNI plugin running
+# on the node plugs the pod interface into OVS itself, so the OVS client
+# tools have to be on the node's PATH. They are installed for every
+# deployment anyway because they make debugging from the node easier.
+# They talk to the ovs-node pod through the sockets in /var/run/openvswitch;
+# the node must not run OVS daemons of its own, so the package's units are
+# masked before installing it.
+install_ovs_tools_on_nodes() {
+  local node
+  for node in $(kind_get_nodes); do
+    if $OCI_BIN exec "${node}" sh -c 'command -v ovs-vsctl >/dev/null && command -v ovs-ofctl >/dev/null'; then
+      continue
+    fi
+    echo "Installing OVS client tools on ${node}"
+    $OCI_BIN exec "${node}" sh -c '
+      systemctl mask openvswitch-switch.service ovsdb-server.service ovs-vswitchd.service ovs-record-hostname.service >/dev/null 2>&1
+      apt-get update -qq >/dev/null
+      apt-get install -y -qq --no-install-recommends openvswitch-switch >/dev/null'
+  done
+}
+
 install_online_ovn_kubernetes_crds() {
   # NOTE: When you update vendoring versions for the ANP & BANP APIs, we must update the version of the CRD we pull from in the below URL
   run_kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/network-policy-api/v0.1.5/config/crd/experimental/policy.networking.k8s.io_adminnetworkpolicies.yaml
@@ -736,6 +826,13 @@ install_online_ovn_kubernetes_crds() {
 check_dependencies
 parse_args "$@"
 set_default_params
+# --delete runs only after all arguments are parsed and defaults are set, so
+# that name flags (e.g. --frr-container-name) select which BGP scaffolding to
+# tear down.
+if [ "${KIND_DELETE:-false}" == true ]; then
+  delete
+  exit
+fi
 if [ "${DPU_MODE}" == "dpu" ] && [ "${ENABLE_ROUTE_ADVERTISEMENTS}" == true ]; then
   if [[ -z "${FRR_K8S_REMOTE_KUBECONFIG:-}" || -z "${FRR_K8S_REMOTE_NODE_MAP:-}" ]]; then
     echo "DPU mode with route advertisements requires --frr-k8s-remote-kubeconfig and --frr-k8s-remote-node-map" >&2
@@ -829,6 +926,9 @@ if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
 fi
 if [ "$KIND_REMOVE_TAINT" == true ]; then
   remove_no_schedule_taint
+fi
+if [ "${DPU_MODE}" != "host" ]; then
+  install_ovs_tools_on_nodes
 fi
 create_ovn_kubernetes
 

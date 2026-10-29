@@ -25,6 +25,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
 	udncontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -1033,19 +1034,19 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				allocator, err := initTunnelKeysAllocator(clientSet.NetworkAttchDefClient, clientSet.NetworkConnectClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// check that reserving different keys for test2 will fail
-				err = allocator.ReserveKeys("test1", []int{16711685, 16715779})
+				err = allocator.ReserveKeys(id.NetworkTunnelKeyOwner("test1"), []int{16711685, 16715779})
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("can't reserve ids [16715779] for the resource test1. It is already allocated with different ids [16715780]"))
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("can't reserve ids [16715779] for the resource network/test1. It is already allocated with different ids [16715780]"))
 				// now try to allocate correct number of keys for test1 and check that returned IDs are correct
-				ids, err := allocator.AllocateKeys("test1", 2, 2)
+				ids, err := allocator.AllocateKeys(id.NetworkTunnelKeyOwner("test1"), 2, 2)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(ids).To(gomega.Equal([]int{16711685, 16715780}))
 				// now allocate ids for networkID 1
-				ids, err = allocator.AllocateKeys("test2", 1, 2)
+				ids, err = allocator.AllocateKeys(id.NetworkTunnelKeyOwner("test2"), 1, 2)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(ids).To(gomega.Equal([]int{16711684, 16715779}))
 				// now try networkID 3 to make sure IDs of nad test1 are not allocated again
-				ids, err = allocator.AllocateKeys("test3", 3, 2)
+				ids, err = allocator.AllocateKeys(id.NetworkTunnelKeyOwner("test3"), 3, 2)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(ids).To(gomega.Equal([]int{16711686, 16715781}))
 				return nil
@@ -1086,20 +1087,20 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				allocator, err := initTunnelKeysAllocator(clientSet.NetworkAttchDefClient, clientSet.NetworkConnectClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// check that reserving different keys for cnc1 will fail
-				err = allocator.ReserveKeys("cnc1", []int{16715780})
+				err = allocator.ReserveKeys(id.NetworkConnectTunnelKeyOwner("cnc1"), []int{16715780})
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("can't reserve ids [16715780] for the resource cnc1. It is already allocated with different ids [16715779]"))
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("can't reserve ids [16715780] for the resource cnc/cnc1. It is already allocated with different ids [16715779]"))
 				// now try to allocate key for cnc1 (using networkID 4097 as CNCs do)
 				// and check that returned ID is the already reserved one
-				ids, err := allocator.AllocateKeys("cnc1", 4097, 1)
+				ids, err := allocator.AllocateKeys(id.NetworkConnectTunnelKeyOwner("cnc1"), 4097, 1)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(ids).To(gomega.Equal([]int{16715779}))
 				// now allocate id for cnc2 (which had no annotation, also using networkID 4097)
-				ids, err = allocator.AllocateKeys("cnc2", 4097, 1)
+				ids, err = allocator.AllocateKeys(id.NetworkConnectTunnelKeyOwner("cnc2"), 4097, 1)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(ids).To(gomega.Equal([]int{16715780}))
 				// now try cnc3 to make sure IDs of cnc1 and cnc2 are not allocated again
-				ids, err = allocator.AllocateKeys("cnc3", 4097, 1)
+				ids, err = allocator.AllocateKeys(id.NetworkConnectTunnelKeyOwner("cnc3"), 4097, 1)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(ids).To(gomega.Equal([]int{16715781}))
 				return nil
@@ -1112,7 +1113,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("check for combined NAD and CNC tunnel keys allocations", func() {
+		ginkgo.It("check for combined NAD and same-named CNC tunnel keys allocations", func() {
 			app.Action = func(_ *cli.Context) error {
 				config.OVNKubernetesFeature.EnableNetworkConnect = true
 				config.OVNKubernetesFeature.EnableNetworkSegmentation = true
@@ -1128,7 +1129,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				// CNC uses networkID 4097, so it gets keys from idsAllocator range (16715779+)
 				cnc1 := &networkconnect.ClusterNetworkConnect{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "cnc1",
+						Name: "test1",
 						Annotations: map[string]string{
 							util.OvnConnectRouterTunnelKeyAnnotation: "16715780",
 						},
@@ -1140,11 +1141,11 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				allocator, err := initTunnelKeysAllocator(clientSet.NetworkAttchDefClient, clientSet.NetworkConnectClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// verify NAD keys are reserved (networkID 2 => first key from preserved range)
-				ids, err := allocator.AllocateKeys("test1", 2, 2)
+				ids, err := allocator.AllocateKeys(id.NetworkTunnelKeyOwner("test1"), 2, 2)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(ids).To(gomega.Equal([]int{16711685, 16715779}))
 				// verify CNC key is reserved (networkID 4097 => all keys from idsAllocator)
-				ids, err = allocator.AllocateKeys("cnc1", 4097, 1)
+				ids, err = allocator.AllocateKeys(id.NetworkConnectTunnelKeyOwner("test1"), 4097, 1)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(ids).To(gomega.Equal([]int{16715780}))
 				// test conflict: CNC tries to reserve NAD's random pool key (16715779)
@@ -1156,7 +1157,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				gomega.Expect(err.Error()).To(gomega.ContainSubstring("already reserved"))
 				// allocate new keys for a new NAD (networkID 3) and ensure reserved keys are not reused
-				ids, err = allocator.AllocateKeys("newnetwork", 3, 2)
+				ids, err = allocator.AllocateKeys(id.NetworkTunnelKeyOwner("newnetwork"), 3, 2)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				// first key: 16711686 (preserved range for networkID 3)
 				// second key: 16715781 (skipping 16715779 for test1 and 16715780 for cnc1)
@@ -1380,6 +1381,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
 	})
 
 	ginkgo.Context("Node gateway router port IP allocations", func() {
@@ -1763,125 +1765,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 			})
 		})
-	})
-
-	ginkgo.Context("Layer2 topology type detection", func() {
-		type topoTestEntry struct {
-			nodeAnnotations []map[string]string
-			expectedTransit bool
-		}
-
-		ginkgo.DescribeTable("sets Layer2UsesTransitRouter on Start",
-			func(entry topoTestEntry) {
-				app.Action = func(ctx *cli.Context) error {
-					var nodes []corev1.Node
-					for i, ann := range entry.nodeAnnotations {
-						nodes = append(nodes, corev1.Node{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:        fmt.Sprintf("node%d", i+1),
-								Annotations: ann,
-							},
-						})
-					}
-
-					kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: nodes})
-					fakeClient := &util.OVNClusterManagerClientset{
-						KubeClient: kubeFakeClient,
-					}
-
-					_, err := config.InitConfig(ctx, nil, nil)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					config.Layer2UsesTransitRouter = false
-
-					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-					c, cancel := context.WithCancel(ctx.Context)
-					defer cancel()
-					clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					err = clusterManager.Start(c)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					defer clusterManager.Stop()
-
-					gomega.Expect(config.Layer2UsesTransitRouter).To(
-						gomega.Equal(entry.expectedTransit),
-						"Layer2UsesTransitRouter mismatch",
-					)
-
-					return nil
-				}
-				gomega.Expect(app.Run([]string{
-					app.Name,
-					"-cluster-subnets=" + clusterCIDR,
-				})).To(gomega.Succeed())
-			},
-			ginkgo.Entry("all nodes use transit router",
-				topoTestEntry{
-					nodeAnnotations: []map[string]string{
-						{util.Layer2TopologyVersion: util.TransitRouterTopoVersion},
-						{util.Layer2TopologyVersion: util.TransitRouterTopoVersion},
-					},
-					expectedTransit: true,
-				},
-			),
-			ginkgo.Entry("no nodes, no legacy state",
-				topoTestEntry{
-					nodeAnnotations: []map[string]string{},
-					expectedTransit: true,
-				},
-			),
-			ginkgo.Entry("nodes without any L2 annotations (fresh cluster)",
-				topoTestEntry{
-					nodeAnnotations: []map[string]string{
-						{},
-						{},
-					},
-					expectedTransit: true,
-				},
-			),
-			ginkgo.Entry("node has legacy tunnel IDs without topology version (upgrade, not migrated)",
-				topoTestEntry{
-					nodeAnnotations: []map[string]string{
-						{ovntypes.UDNLayer2NodeGRLRPTunnelIDAnnotation: `{"blue":"7"}`},
-						{ovntypes.UDNLayer2NodeGRLRPTunnelIDAnnotation: `{"blue":"8"}`},
-					},
-					expectedTransit: false,
-				},
-			),
-			ginkgo.Entry("mixed: one node migrated, one still has legacy tunnel IDs",
-				topoTestEntry{
-					nodeAnnotations: []map[string]string{
-						{util.Layer2TopologyVersion: util.TransitRouterTopoVersion},
-						{ovntypes.UDNLayer2NodeGRLRPTunnelIDAnnotation: `{"blue":"7"}`},
-					},
-					expectedTransit: false,
-				},
-			),
-			ginkgo.Entry("node has both legacy tunnel IDs and topology version (migration complete)",
-				topoTestEntry{
-					nodeAnnotations: []map[string]string{
-						{
-							util.Layer2TopologyVersion:                    util.TransitRouterTopoVersion,
-							ovntypes.UDNLayer2NodeGRLRPTunnelIDAnnotation: `{"blue":"7"}`,
-						},
-					},
-					expectedTransit: true,
-				},
-			),
-			ginkgo.Entry("fully migrated node plus new unannotated node",
-				topoTestEntry{
-					nodeAnnotations: []map[string]string{
-						{
-							util.Layer2TopologyVersion:                    util.TransitRouterTopoVersion,
-							ovntypes.UDNLayer2NodeGRLRPTunnelIDAnnotation: `{"blue":"7"}`,
-						},
-						{},
-					},
-					expectedTransit: true,
-				},
-			),
-		)
 	})
 
 	ginkgo.Context("EVPN VTEP and UDN integration", func() {

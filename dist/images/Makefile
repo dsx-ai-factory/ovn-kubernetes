@@ -34,8 +34,9 @@ endif
 GO_IMAGE ?= quay.io/projectquay/golang:1.26@sha256:506a668eb4c763a964ffc4d4ad0125d45d75aac899392be7e5d39380f8452564
 OVN_KUBERNETES_DIR ?= .
 KUBECTL_MINOR ?= $(shell awk '/^[[:space:]]*k8s.io\/kubernetes v/ {gsub(/^v/, "", $$2); split($$2, version, "."); print version[1] "." version[2]; exit}' ../../go-controller/go.mod)
-UBUNTU_BASE_IMAGE ?= ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
-FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:43@sha256:c45b30a84cf2fb151e3d8f8683707ce42356f674357f10951b4dd71014a502f3
+UBUNTU_BASE_IMAGE ?= ubuntu:26.10@sha256:262df65c0ec6bf8d9dcc87454f4330a05fae4b97825f45854af3b136666584c2
+OVN_DEB_VERSION ?= 26.09.0-1
+FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:44@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb
 
 ifeq ($(strip $(KUBECTL_MINOR)),)
 $(error failed to derive KUBECTL_MINOR from ../../go-controller/go.mod)
@@ -55,6 +56,7 @@ ubuntu-image:
 		--build-arg KUBECTL_MINOR=${KUBECTL_MINOR} \
 		--build-arg UBUNTU_BASE_IMAGE=${UBUNTU_BASE_IMAGE} \
 		--build-arg ARTIFACTORY_CERT=${NV_ARTIFACTORY_CERT} \
+		--build-arg OVN_DEB_VERSION=${OVN_DEB_VERSION} \
 		--platform=linux/${ARCH} \
 		-t ${UBUNTU_IMAGE} \
 		-f Dockerfile.ubuntu ../..

@@ -35,7 +35,7 @@ spec:
         - name: {{ .Values.global.imagePullSecretName }}
       {{- end }}
       serviceAccountName: ovn-ovs
-      priorityClassName: system-cluster-critical
+      priorityClassName: system-node-critical
       hostNetwork: true
       dnsPolicy: Default
       {{- if not .Values.global.unprivilegedMode }}

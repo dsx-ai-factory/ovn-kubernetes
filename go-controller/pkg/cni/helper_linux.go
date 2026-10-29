@@ -403,6 +403,20 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		contIface.Sandbox = netns.Path()
 	} else {
 		if len(netdevice) != 0 {
+			// Record the original netdevice name as the link alias before touching
+			// the device. It shows which VF backs the renamed pod interface, and
+			// CNI DEL renames the VF back from it when the pod annotations are
+			// already gone. Only simulated devices depend on it: they are veths
+			// identified by name alone, so without the alias they could not be
+			// returned to the host (see returnSimulatedNetdevsToHost). Physical
+			// VFs are found again through their PCI address whatever their name.
+			hostLink, err := util.GetNetLinkOps().LinkByName(netdevice)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to lookup device %s: %v", netdevice, err)
+			}
+			if err := util.GetNetLinkOps().LinkSetAlias(hostLink, netdevice); err != nil {
+				return nil, nil, fmt.Errorf("failed to set alias on device %s: %v", netdevice, err)
+			}
 			// 1. Move netdevice to Container namespace
 			newNetdevName, err := safeMoveIfToNetns(netdevice, netns, containerID)
 			if err != nil {
@@ -1073,6 +1087,85 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, ovsClie
 	return []*current.Interface{hostIface, contIface}, nil
 }
 
+// returnNetdevToHost renames a container netdevice back to oldName and moves
+// it to the host network namespace. Must be called from within the container
+// network namespace.
+func returnNetdevToHost(link netlink.Link, oldName string, hostNS ns.NetNS) error {
+	name := link.Attrs().Name
+	if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
+		return fmt.Errorf("failed to bring down container interface %s: %v", name, err)
+	}
+	if err := util.GetNetLinkOps().LinkSetMTU(link, config.DefaultVFMTU); err != nil {
+		return fmt.Errorf("failed to reset MTU on tne container interface %s: %v", name, err)
+	}
+	if name != oldName {
+		if err := util.GetNetLinkOps().LinkSetName(link, oldName); err != nil {
+			return fmt.Errorf("failed to rename container interface %s to %s: %v", name, oldName, err)
+		}
+	}
+	if err := util.GetNetLinkOps().LinkSetNsFd(link, int(hostNS.Fd())); err != nil {
+		return fmt.Errorf("failed to move container interface %s back to host namespace: %v", oldName, err)
+	}
+	return nil
+}
+
+// returnSimulatedNetdevsToHost returns any simulated netdevices still present in the
+// pod network namespace to the host during CNI DEL of the default network.
+//
+// The runtime only issues a DEL for the default network: the primary UDN
+// attachment shares the sandbox and no separate DEL ever comes for it, so
+// without this it would be destroyed together with the namespace. A simulated
+// device is a veth: losing the pod-side end also destroys the DPU-side
+// representor peer, permanently breaking any future pod assigned the same VF.
+//
+// A link is recognized as a simulated netdevice when its name is the primary
+// UDN interface name, or its name or alias matches the simulated netdevice
+// naming pattern. The restore name is taken from the link alias recorded at
+// setup time, or from the link name itself when that already matches the
+// pattern and no alias was recorded. A link whose original name cannot be
+// determined is left in place, since the simulated allocator resolves devices
+// strictly by name and could never find it again anyway. Renaming before the
+// move keeps retries idempotent: a link already renamed by an interrupted run
+// is recognized again through its name or alias.
+func returnSimulatedNetdevsToHost(netns, hostNS ns.NetNS) error {
+	return netns.Do(func(_ ns.NetNS) error {
+		links, err := util.GetNetLinkOps().LinkList()
+		if err != nil {
+			return fmt.Errorf("failed to list container interfaces: %v", err)
+		}
+		var errs []error
+		for _, link := range links {
+			attrs := link.Attrs()
+			if attrs == nil {
+				continue
+			}
+			name, alias := attrs.Name, attrs.Alias
+			isCandidate := name == primaryUDNIfName ||
+				util.IsSimulatedNetdevName(name) ||
+				util.IsSimulatedNetdevName(alias)
+			if !isCandidate {
+				continue
+			}
+			var oldName string
+			switch {
+			case util.IsSimulatedNetdevName(alias):
+				oldName = alias
+			case util.IsSimulatedNetdevName(name):
+				oldName = name
+			default:
+				klog.Warningf("Cannot determine the original name of simulated netdevice %s, leaving it in the container namespace", name)
+				continue
+			}
+			if err := returnNetdevToHost(link, oldName, hostNS); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			klog.Infof("Returned simulated netdevice %s to host namespace", oldName)
+		}
+		return errors.Join(errs...)
+	})
+}
+
 func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInfo *PodInterfaceInfo, podLister corev1listers.PodLister, pod *corev1.Pod) (err error) {
 	_, span := tracing.StartSpan(pr.ctx, tracing.SpanNameUnconfigureInterface)
 	span.SetAttributes(pr.getSpanAttributes()...)
@@ -1137,30 +1230,21 @@ func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInf
 						return fmt.Errorf("failed to get virt-launcher container interface %s %s: %v", ifName, podDesc, err)
 					}
 				}
-				err = util.GetNetLinkOps().LinkSetDown(link)
-				if err != nil {
-					return fmt.Errorf("failed to bring down container interface %s %s: %v", pr.IfName, podDesc, err)
-				}
-				err = util.GetNetLinkOps().LinkSetMTU(link, config.DefaultVFMTU)
-				if err != nil {
-					return fmt.Errorf("failed to reset MTU on tne container interface %s %s: %v", pr.IfName, podDesc, err)
-				}
-				// rename device to make sure it is unique in the host namespace:
-				// if original name of device is empty, sandbox id and a '0' letter prefix is used to make up the unique name.
+				// rename the netdevice back to its original name to make sure
+				// it is unique in the host namespace. If the original name is
+				// unknown, fall back to the link alias recorded at setup time,
+				// then to a unique placeholder derived from the sandbox id and
+				// the link index.
 				oldName := ifInfo.NetdevName
+				if oldName == "" {
+					oldName = link.Attrs().Alias
+				}
 				if oldName == "" {
 					id := fmt.Sprintf("_%d", link.Attrs().Index)
 					oldName = pr.SandboxID[:(15-len(id))] + id
 				}
-				err = util.GetNetLinkOps().LinkSetName(link, oldName)
-				if err != nil {
-					return fmt.Errorf("failed to rename container interface %s to %s %s: %v",
-						pr.IfName, oldName, podDesc, err)
-				}
-				// move device to host netns
-				err = util.GetNetLinkOps().LinkSetNsFd(link, int(hostNS.Fd()))
-				if err != nil {
-					return fmt.Errorf("failed to move container interface %s back to host namespace %s: %v", pr.IfName, podDesc, err)
+				if err := returnNetdevToHost(link, oldName, hostNS); err != nil {
+					return fmt.Errorf("%v %s", err, podDesc)
 				}
 			}
 			if isSecondary {
@@ -1170,6 +1254,17 @@ func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInf
 		})
 		if err != nil {
 			klog.Errorf("Error in UnconfigureInterface: %v", err)
+		}
+
+		if ifInfo.IsDPUHostMode && ifInfo.IsSimulatedDPU && !isSecondary {
+			// Return any simulated netdevices left in the sandbox (the primary
+			// UDN attachment in particular, which gets no DEL of its own) to
+			// the host before the namespace is destroyed. Propagate errors so
+			// that the runtime retries the DEL rather than proceeding with the
+			// namespace teardown.
+			if err := returnSimulatedNetdevsToHost(netns, hostNS); err != nil {
+				return fmt.Errorf("failed to return simulated netdevices to host namespace %s: %v", podDesc, err)
+			}
 		}
 	}
 
@@ -1244,8 +1339,8 @@ func (pr *PodRequest) deletePodConntrack(podLister corev1listers.PodLister, pod 
 	// north/south NodePort/SNAT ingress connection routed to the VM) that must
 	// survive the migration. Compute, once per DEL, the set of IPs still owned
 	// by another living pod of the VM and skip only those; genuinely released
-	// IPs (e.g. the source pod's default-network IP) are still flushed as
-	// before.
+	// IPs (e.g. the source pod's infrastructure IP for a primary UDN) are
+	// still flushed as before.
 	preservedIPs := pr.migrationPreservedIPs(podLister, pod)
 
 	for _, ip := range result.IPs {
@@ -1274,10 +1369,9 @@ func (pr *PodRequest) deletePodConntrack(podLister corev1listers.PodLister, pod 
 // another living pod of the same KubeVirt VM as the pod being torn down,
 // because of a live migration: the migration target pod when the source is
 // deleted, or the source pod when a failed migration target is deleted.
-// Only the IPs actually preserved across the migration are returned:
-// the cluster default network is skipped, since it allocates per-node subnets
-// and its IPs move with the pod, not with the VM; genuinely released IPs keep
-// being flushed.
+// All networks are considered: VMs on the cluster default network can preserve
+// their IPs across nodes too. deletePodConntrack still flushes addresses that
+// are not owned by the surviving pod, such as released infrastructure IPs.
 //
 // An empty set is returned (flush everything, the previous behavior) when:
 //   - podLister or pod is nil (the unprivileged CNI shim has no apiserver
@@ -1287,15 +1381,15 @@ func (pr *PodRequest) deletePodConntrack(podLister corev1listers.PodLister, pod 
 //
 // Note: podLister requires cluster-wide pod visibility, since the surviving
 // pod of a live migration always runs on a different node. The cniserver's
-// podLister is backed by factory.LocalPodInformer(), which today watches pods
-// on all nodes; if that informer is ever scoped down to node-local pods, this
-// function will return an empty set (see the TODO on the pod informer
-// registration in pkg/factory/factory.go NewNodeWatchFactory).
+// podLister is backed by factory.PodInformer(), which watches pods
+// on all nodes.
 func (pr *PodRequest) migrationPreservedIPs(podLister corev1listers.PodLister, pod *corev1.Pod) sets.Set[string] {
 	preservedIPs := sets.New[string]()
-	if podLister == nil || pod == nil || !kubevirt.IsPodLiveMigratable(pod) {
+	if podLister == nil || pod == nil {
 		return preservedIPs
 	}
+	// DiscoverLiveMigrationStatus already filters non-VM pods. Primary UDN
+	// binding plugins can migrate without the legacy pod-bridge annotation.
 	status, err := kubevirt.DiscoverLiveMigrationStatus(podLister, pod)
 	if err != nil {
 		klog.Warningf("Failed to discover live migration status for pod %s/%s: %v", pr.PodNamespace, pr.PodName, err)
@@ -1314,14 +1408,7 @@ func (pr *PodRequest) migrationPreservedIPs(podLister corev1listers.PodLister, p
 				vmPod.Namespace, vmPod.Name, err)
 			continue
 		}
-		for nadName, podNetwork := range podNetworks {
-			// The cluster default network allocates per-node subnets, so its
-			// IPs are never preserved across a live migration: the surviving
-			// pod owns a different IP from its own node's subnet, and the
-			// deleted pod's default-network IP is genuinely released.
-			if nadName == types.DefaultNetworkName {
-				continue
-			}
+		for _, podNetwork := range podNetworks {
 			for _, ipStr := range podNetwork.IPs {
 				ip, _, err := net.ParseCIDR(ipStr)
 				if err != nil {

@@ -46,7 +46,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/hostport"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/nadconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/dpulease"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
@@ -99,30 +98,9 @@ type BaseNodeNetworkController struct {
 	// Used by DPU representor cleanup and other OVS-aware bookkeeping.
 	ovsClient client.Client
 
-	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
-	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*podNADInfo). Key of nadToDPUCDMap
-	// is nadName; value is podNADInfo including DPU_ConnectionDetails when VF representor is successfully
-	// configured for that given NAD. DPU mode only
-	// Note that we assume that Pod's Network Attachment Selection Annotation will not change over time.
-	// TBD: use syncmap.SyncMap instead of LockByKey()?
-	podNADToDPUCDMap sync.Map
-
-	// per-NAD NADConfig mapping, key is nadName, value is pointer of NADConfig
-	NADConfigMap       sync.Map
-	totalMaxNewConnPPS uint // if totalMaxNewConnPPS is greater than 0, we'd need to enable DOS Checker
-
-	// Count of NADs that needs to be checked for DoS.
-	// We could do this per nad, but it might be more efficient to do it on the controller.
-	sync.RWMutex
-
-	// chan to sop rate limiting go routine, it is also used to indicate if rate limiting is enabled or not
-	DoSCheckStopChan chan struct{}
-
 	// stopChan and WaitGroup per controller
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
-
-	nadConfigController *nadconfig.NadConfigController
 }
 
 func newCommonNodeNetworkControllerInfo(kubeClient clientset.Interface, kube kube.Interface, apbExternalRouteClient adminpolicybasedrouteclientset.Interface,
@@ -194,7 +172,6 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			networkManager:                  networkManager,
 			stopChan:                        stopChan,
 			wg:                              wg,
-			DoSCheckStopChan:                nil,
 			ovsClient:                       ovsClient,
 		},
 		routeManager: routeManager,
@@ -990,14 +967,12 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
+func (nc *DefaultNodeNetworkController) Start(ctx context.Context) (err error) {
 	klog.Infof("Starting the default node network controller")
 
 	if config.OVNKubernetesFeature.EnablePodHostPort && (!config.IsModeFull() || config.Gateway.Mode != config.GatewayModeShared) {
 		return fmt.Errorf("enable-pod-host-port requires full-mode nodes and shared gateway mode")
 	}
-
-	var err error
 
 	if nc.mgmtPortController == nil {
 		return fmt.Errorf("default node network controller hasn't been pre-started")
@@ -1037,7 +1012,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 	// Set masquerade IP reconciliation callback for all modes except DPU.
 	// DPU mode does not configure masquerade resources.
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if !config.IsModeDPU() {
 		gw, ok := nc.Gateway.(*gateway)
 		if !ok {
 			return fmt.Errorf("unexpected gateway type %T, expected *gateway", nc.Gateway)
@@ -1078,7 +1053,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			nc.Kube,
 			nc.name,
 			nc.watchFactory.NodeInformer(),
-			nc.watchFactory.LocalPodInformer(),
+			nc.watchFactory.PodInformer(),
 			informer.NewDefaultEventHandler,
 			false,
 		)
@@ -1112,11 +1087,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			return fmt.Errorf("initialize hostPort nftables helper: %w", err)
 		}
 		if config.OVNKubernetesFeature.EnablePodHostPort {
-			hostPortController := hostport.NewController(nc.name, nc.watchFactory.LocalPodInformer(), nft)
+			hostPortController := hostport.NewController(nc.name, nc.watchFactory.PodInformer(), nft)
 			if err := hostPortController.Start(nc.stopChan, nc.wg); err != nil {
 				return err
 			}
-		} else if err := hostport.Cleanup(nft); err != nil {
+		} else if err = hostport.Cleanup(nft); err != nil {
 			return err
 		}
 	}
@@ -1163,16 +1138,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	if config.IsModeDPU() {
-		err := nc.startNADController()
-		if err != nil {
-			return err
-		}
-		_, err = nc.watchPodsDPU()
-		if err != nil {
-			return err
-		}
-	} else {
+	if !config.IsModeDPU() {
 		// start the cni server
 		if nc.cniServer != nil {
 			if err := nc.cniServer.Start(cni.ServerRunDir); err != nil {
@@ -1198,7 +1164,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	if config.OVNKubernetesFeature.EnableEgressService && (config.IsModeDPUHost() || config.IsModeFull()) {
 		wf := nc.watchFactory.(*factory.WatchFactory)
 		c, err := egressservice.NewController(nc.stopChan, nodetypes.OvnKubeNodeSNATMark, nc.name,
-			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
+			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer(), wf.PodInformer())
 		if err != nil {
 			return err
 		}
@@ -1255,7 +1221,6 @@ func (nc *DefaultNodeNetworkController) Stop() {
 		klog.Infof("Default node network controller is already stopped")
 		return
 	}
-	nc.stopNADController()
 	close(nc.stopChan)
 	nc.stopChan = nil
 	nc.wg.Wait()

@@ -19,6 +19,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -55,8 +56,11 @@ type NetworkStatusReporter func(networkName string, fieldManager string, conditi
 type networkClusterController struct {
 	watchFactory *factory.WatchFactory
 	kube         kube.InterfaceOVN
-	stopChan     chan struct{}
-	wg           *sync.WaitGroup
+	// nodeClient is used only for the rare live apiserver node read in the node
+	// allocator; normal reads go through the informer/lister.
+	nodeClient kubernetes.Interface
+	stopChan   chan struct{}
+	wg         *sync.WaitGroup
 
 	nodeReconciler *sharednode.NodeController
 
@@ -213,6 +217,7 @@ func newNetworkClusterController(
 		ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
 		watchFactory:        wf,
 		kube:                kube,
+		nodeClient:          ovnClient.KubeClient,
 		stopChan:            make(chan struct{}),
 		wg:                  wg,
 		recorder:            recorder,
@@ -441,7 +446,7 @@ func (ncc *networkClusterController) init() error {
 	}
 
 	if ncc.hasNodeAllocation() {
-		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.GetNetInfo(), ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.GetNetInfo(), ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.nodeClient, ncc.tunnelIDAllocator)
 		err := ncc.nodeAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)
@@ -462,7 +467,7 @@ func (ncc *networkClusterController) init() error {
 				ncc.ReconcilableNetInfo,
 				ncc.kube,
 				ncc.watchFactory,
-				ipAllocator.ForSubnet(ncc.GetNetworkName()),
+				ipAllocator,
 				ncc.recorder,
 				ncc.stopChan,
 				ncc.networkManager)
@@ -1012,8 +1017,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, _ interface{}
 			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
 		}
 
-		ipAllocator := h.ncc.subnetAllocator.ForSubnet(h.ncc.GetNetworkName())
-		err := h.ncc.ipamClaimReconciler.Reconcile(ipamClaim, nil, ipAllocator)
+		err := h.ncc.ipamClaimReconciler.Reconcile(ipamClaim, nil, h.ncc.subnetAllocator)
 		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
 			return fmt.Errorf("error deleting IPAMClaim: %w", err)
 		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
@@ -1038,7 +1042,7 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 			syncFunc = func(claims []interface{}) error {
 				return h.ncc.ipamClaimReconciler.Sync(
 					claims,
-					h.ncc.subnetAllocator.ForSubnet(h.ncc.GetNetworkName()),
+					h.ncc.subnetAllocator,
 				)
 			}
 
@@ -1162,7 +1166,8 @@ func newIPAllocatorForNetwork(netInfo util.NetInfo) (subnet.Allocator, error) {
 				gatewayIPS,
 				&net.IPNet{IP: gwIP, Mask: util.GetIPFullMask(gwIP)})
 		}
-		err := ipAllocator.AllocateIPPerSubnet(netInfo.GetNetworkName(), gatewayIPS)
+		// Gateway IPs may already be protected by excluded subnets.
+		err := ipAllocator.AllocateIPs(netInfo.GetNetworkName(), "layer2-gateway", gatewayIPS)
 		if err != nil && !ipam.IsErrAllocated(err) {
 			return nil, fmt.Errorf("failed to allocate gatewayIPs %v for %s: %w", netInfo.GetNetworkName(), gatewayIPS, err)
 		}

@@ -58,6 +58,7 @@ func getBridgePortsInterfaces(ovsClient libovsdbclient.Client, br *vswitchd.Brid
 	for _, portUUID := range br.Ports {
 		port, ok := portByUUID[portUUID]
 		if !ok {
+			// If an OVS port has disappeared when walking, log a message and continue.
 			klog.Infof("Failed to get port %s on bridge %q: %v", portUUID, br.Name, libovsdbclient.ErrNotFound)
 			continue
 		}

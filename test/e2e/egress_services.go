@@ -16,19 +16,23 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -92,6 +96,143 @@ var _ = ginkgo.Describe("EgressService", feature.EgressService, func() {
 		externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 		framework.ExpectNoError(err, "failed to create external container")
 	})
+
+	ginkgo.DescribeTable("Should validate namespace ownership of manually managed EndpointSlices",
+		func(specCtx ginkgo.SpecContext, protocol v1.IPFamily) {
+			skipIfProtoNotAvailableFn(protocol, externalContainer)
+			ctx, cancel := context.WithTimeout(specCtx, 5*time.Minute)
+			defer cancel()
+			dstIP, addressType, ipFamily := externalContainer.GetIPv4(), discoveryv1.AddressTypeIPv4, "ip4"
+			if protocol == v1.IPv6Protocol {
+				dstIP, addressType, ipFamily = externalContainer.GetIPv6(), discoveryv1.AddressTypeIPv6, "ip6"
+			}
+			podIP := func(pod *v1.Pod) string {
+				for _, ip := range pod.Status.PodIPs {
+					if utilnet.IsIPv6String(ip.IP) == (protocol == v1.IPv6Protocol) {
+						return ip.IP
+					}
+				}
+				framework.Failf("pod %s/%s has no %s address", pod.Namespace, pod.Name, protocol)
+				return ""
+			}
+
+			ginkgo.By("Creating same-namespace backends and a victim in another namespace")
+			victimNamespace, err := f.CreateNamespace(ctx, "egress-service-victim", nil)
+			framework.ExpectNoError(err, "failed to create victim namespace")
+			anchor, err := createGenericPodWithLabel(f, "anchor", nodes[0].Name, f.Namespace.Name, command, nil)
+			framework.ExpectNoError(err, "failed to create anchor backend")
+			backend, err := createGenericPodWithLabel(f, "backend", nodes[0].Name, f.Namespace.Name, command, nil)
+			framework.ExpectNoError(err, "failed to create backend")
+			victim, err := createGenericPodWithLabel(f, "victim", nodes[0].Name, victimNamespace.Name, command, nil)
+			framework.ExpectNoError(err, "failed to create victim pod")
+
+			// Neither backend matches this selector. Membership is supplied by
+			// the manually managed slice, independently of the Service selector.
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
+				map[string]string{"egress": "manual-only"}, podHTTPPort)
+			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
+			port, tcp := int32(8080), v1.ProtocolTCP
+			slice, err := f.ClientSet.DiscoveryV1().EndpointSlices(f.Namespace.Name).Create(ctx, &discoveryv1.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "manual-egress", Labels: map[string]string{
+					discoveryv1.LabelServiceName: serviceName,
+					discoveryv1.LabelManagedBy:   "egress-service-e2e",
+				}},
+				AddressType: addressType,
+				Ports:       []discoveryv1.EndpointPort{{Port: &port, Protocol: &tcp}},
+				Endpoints: []discoveryv1.Endpoint{
+					{Addresses: []string{podIP(anchor)}, NodeName: &anchor.Spec.NodeName},
+					{Addresses: []string{podIP(backend)}, NodeName: &backend.Spec.NodeName},
+					{Addresses: []string{podIP(victim)}, NodeName: &victim.Spec.NodeName,
+						TargetRef: &v1.ObjectReference{Kind: "Pod", Namespace: f.Namespace.Name, Name: backend.Name, UID: backend.UID}},
+				},
+			}, metav1.CreateOptions{})
+			framework.ExpectNoError(err, "failed to create manual EndpointSlice")
+
+			ginkgo.By("Pinning the egress host so backend deletion cannot move it")
+			hostname := nodes[2].Labels[v1.LabelHostname]
+			gomega.Expect(hostname).NotTo(gomega.BeEmpty(), "egress node must have a hostname label")
+			manifest := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  sourceIPBy: LoadBalancerIP
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/hostname: %q
+`, serviceName, f.Namespace.Name, hostname)
+			_, err = e2ekubectl.RunKubectlInput(f.Namespace.Name, manifest, "create", "-f", "-")
+			framework.ExpectNoError(err, "failed to create EgressService")
+			_, hostV4, hostV6 := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
+			setSVCRouteOnExternalContainer(externalContainer, svcIP, hostV4, hostV6)
+
+			ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+			dbPods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(ctx, metav1.ListOptions{
+				LabelSelector: "app=ovnkube-node", FieldSelector: "spec.nodeName=" + nodes[0].Name,
+			})
+			framework.ExpectNoError(err, "failed to locate backend node's OVN database")
+			gomega.Expect(dbPods.Items).To(gomega.HaveLen(1), "expected one ovnkube-node pod on backend node")
+			policyForIP := func(ip string) (string, error) {
+				out, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", dbPods.Items[0].Name,
+					"-c", deploymentconfig.Get().NBDBContainerName(), "--", "ovn-nbctl",
+					"--timeout=15", "--bare", "--columns=_uuid", "find", "logical_router_policy",
+					fmt.Sprintf("priority=%d", ovntypes.EgressSVCReroutePriority), fmt.Sprintf("match=\"%s.src == %s\"", ipFamily, ip))
+				if err != nil {
+					return "", fmt.Errorf("failed to inspect logical router policy for endpoint IP %s: %w", ip, err)
+				}
+				return strings.TrimSpace(out), nil
+			}
+			checkBackend := func(pod *v1.Pod) {
+				gomega.Eventually(func() (string, error) { return policyForIP(podIP(pod)) }, retryTimeout, retryInterval).
+					ShouldNot(gomega.BeEmpty(), "missing egress policy for pod %s", pod.Name)
+				gomega.Eventually(func() error {
+					return curlAgnHostClientIPFromPod(f.Namespace.Name, pod.Name, svcIP, dstIP, externalContainer.GetPortStr())
+				}, retryTimeout, retryInterval).Should(gomega.Succeed(), "backend %s must use the Service IP", pod.Name)
+			}
+			checkBackend(anchor)
+			checkBackend(backend)
+
+			ginkgo.By("Rejecting the victim IP despite a forged same-namespace Pod reference")
+			victimNodeIP, victimNodeV6 := getNodeAddresses(&nodes[0])
+			if protocol == v1.IPv6Protocol {
+				victimNodeIP = victimNodeV6
+			}
+			gomega.Consistently(func() error {
+				policy, err := policyForIP(podIP(victim))
+				if err != nil {
+					return fmt.Errorf("failed to inspect victim policy: %w", err)
+				}
+				if policy != "" {
+					return fmt.Errorf("cross-namespace victim has an egress policy: %s", policy)
+				}
+				return curlAgnHostClientIPFromPod(victimNamespace.Name, victim.Name, victimNodeIP, dstIP, externalContainer.GetPortStr())
+			}, 5*time.Second, time.Second).Should(gomega.Succeed(), "victim traffic must retain its normal node SNAT")
+
+			ginkgo.By("Removing a backend while deliberately retaining its stale EndpointSlice address")
+			oldIP := podIP(backend)
+			framework.ExpectNoError(f.ClientSet.CoreV1().Pods(f.Namespace.Name).Delete(ctx, backend.Name, metav1.DeleteOptions{}), "failed to delete backend")
+			gomega.Eventually(func() bool {
+				_, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(ctx, backend.Name, metav1.GetOptions{})
+				return apierrors.IsNotFound(err)
+			}, retryTimeout, retryInterval).Should(gomega.BeTrue(), "backend deletion did not complete")
+			gomega.Eventually(func() (string, error) { return policyForIP(oldIP) }, retryTimeout, retryInterval).
+				Should(gomega.BeEmpty(), "stale endpoint retained a policy after pod deletion")
+			checkBackend(anchor)
+
+			ginkgo.By("Recreating the backend and restoring its egress rules")
+			backend, err = createGenericPodWithLabel(f, "backend", nodes[0].Name, f.Namespace.Name, command, nil)
+			framework.ExpectNoError(err, "failed to recreate backend")
+			if podIP(backend) != oldIP {
+				slice.Endpoints[1].Addresses = []string{podIP(backend)}
+				_, err = f.ClientSet.DiscoveryV1().EndpointSlices(f.Namespace.Name).Update(ctx, slice, metav1.UpdateOptions{})
+				framework.ExpectNoError(err, "failed to update recreated backend address")
+			}
+			checkBackend(backend)
+		},
+		ginkgo.Entry("IPv4", v1.IPv4Protocol),
+		ginkgo.Entry("IPv6", v1.IPv6Protocol),
+	)
 
 	ginkgo.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip without selectors",
 		func(protocol v1.IPFamily) {
@@ -420,9 +561,9 @@ spec:
 			ginkgo.By("By setting a secondary IP on non-egress node acting as \"another node\"")
 			var otherDstIP net.IP
 			if protocol == v1.IPv6Protocol {
-				otherDstIP, err = ipalloc.NewPrimaryIPv6()
+				otherDstIP, err = allocators.NewPrimaryIPv6(dstNode.Name)
 			} else {
-				otherDstIP, err = ipalloc.NewPrimaryIPv4()
+				otherDstIP, err = allocators.NewPrimaryIPv4(dstNode.Name)
 			}
 			framework.ExpectNoError(err, "failed to allocate secondary node IP")
 			otherDst := otherDstIP.String()
@@ -761,9 +902,9 @@ spec:
 			// allocate EIP IP
 			var egressIP net.IP
 			if IsIPv6Cluster(f.ClientSet) {
-				egressIP, err = ipalloc.NewPrimaryIPv6()
+				egressIP, err = allocators.NewPrimaryIPv6(eipNode.Name)
 			} else {
-				egressIP, err = ipalloc.NewPrimaryIPv4()
+				egressIP, err = allocators.NewPrimaryIPv4(eipNode.Name)
 			}
 			framework.ExpectNoError(err, "must allocate new primary network IP address")
 			egressIPYaml := "egressip.yaml"
@@ -1155,6 +1296,119 @@ metadata:
 		},
 		ginkgo.Entry("ipv4 pods", v1.IPv4Protocol, false),
 		ginkgo.Entry("ipv6 pods", v1.IPv6Protocol, true),
+	)
+
+	ginkgo.DescribeTable("Should validate egress service backend pods on the egress host retain ClusterIP connectivity",
+		func(ctx ginkgo.SpecContext, protocol v1.IPFamily) {
+			if protocol == v1.IPv4Protocol && !externalContainer.IsIPv4() {
+				ginkgo.Skip("skipped because external container does not have an IPv4 address")
+			}
+			if protocol == v1.IPv6Protocol && !externalContainer.IsIPv6() {
+				ginkgo.Skip("skipped because external container does not have an IPv6 address")
+			}
+
+			egressNode := ""
+			// Place the backend pod and EgressService host on the same worker node.
+			// The API ClusterIP resolves to a different node in Kind.
+			for _, node := range nodes {
+				if _, isControlPlane := node.Labels["node-role.kubernetes.io/control-plane"]; !isControlPlane {
+					egressNode = node.Name
+					break
+				}
+			}
+			gomega.Expect(egressNode).NotTo(gomega.BeEmpty(), "test requires a worker node for the EgressService host")
+
+			ginkgo.By("Blackholing the custom routing table on the egress node")
+			setBlackholeDefaultRouteOnRoutingTable(providerCtx, egressNode, blackholeRoutingTable, protocol)
+
+			ginkgo.By("Getting the Kubernetes API server ClusterIP for the tested address family")
+			apiCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			kubernetesService, err := f.ClientSet.CoreV1().Services(metav1.NamespaceDefault).Get(
+				apiCtx, "kubernetes", metav1.GetOptions{})
+			cancel()
+			framework.ExpectNoError(err, "failed to get the Kubernetes API service")
+			ipFamily := utilnet.IPv4
+			if protocol == v1.IPv6Protocol {
+				ipFamily = utilnet.IPv6
+			}
+			apiClusterIP := getFirstIPStringOfFamily(ipFamily, kubernetesService.Spec.ClusterIPs)
+			if apiClusterIP == "" {
+				ginkgo.Skip(fmt.Sprintf("Kubernetes API service has no %s ClusterIP", protocol))
+			}
+
+			ginkgo.By("Creating a backend pod for the EgressService on the egress node")
+			egressPod, err := createGenericPodWithLabel(f, "egress-pod", egressNode, f.Namespace.Name, command, podsLabels,
+				func(pod *v1.Pod) {
+					pod.Spec.RestartPolicy = v1.RestartPolicyAlways
+					pod.Spec.Containers[0].ReadinessProbe = &v1.Probe{
+						ProbeHandler: v1.ProbeHandler{
+							Exec: &v1.ExecAction{Command: []string{
+								"curl", "-sk", "--connect-timeout", "2",
+								fmt.Sprintf("https://%s/version", net.JoinHostPort(apiClusterIP, "443")),
+							}},
+						},
+						TimeoutSeconds:   3,
+						PeriodSeconds:    1,
+						FailureThreshold: 1,
+					}
+				})
+			framework.ExpectNoError(err, "failed to create egress backend pod")
+			podHealthy := func() error {
+				apiCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(apiCtx, egressPod.Name, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				if !podutils.IsPodReady(pod) {
+					return fmt.Errorf("pod %s is not ready", pod.Name)
+				}
+				for _, status := range pod.Status.ContainerStatuses {
+					if status.RestartCount != 0 {
+						return fmt.Errorf("container %s restarted %d times", status.Name, status.RestartCount)
+					}
+				}
+				return nil
+			}
+
+			ginkgo.By("Waiting for the backend pod to reach the API ClusterIP before EgressService is configured")
+			gomega.Eventually(podHealthy, 30*time.Second, 500*time.Millisecond).Should(gomega.Succeed())
+
+			ginkgo.By("Creating an EgressService with custom network pinned to the backend pod's node")
+			egressServiceConfig := `
+apiVersion: k8s.ovn.org/v1
+kind: EgressService
+metadata:
+  name: ` + serviceName + `
+  namespace: ` + f.Namespace.Name + `
+spec:
+  sourceIPBy: "LoadBalancerIP"
+  network: "` + blackholeRoutingTable + `"
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/hostname: ` + egressNode + `
+`
+			if err := os.WriteFile(egressServiceYAML, []byte(egressServiceConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove(egressServiceYAML); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+			e2ekubectl.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressServiceYAML)
+			createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol, podsLabels, podHTTPPort)
+
+			ginkgo.By("Waiting for the backend pod's node to be selected as egress host")
+			egressHost, _, _ := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
+			gomega.Expect(egressHost.Name).To(gomega.Equal(egressNode), "expected backend pod's node to be EgressService host")
+
+			ginkgo.By("Verifying the backend pod remains ready without restarts while EgressService is active")
+			gomega.Consistently(podHealthy, 30*time.Second, time.Second).Should(gomega.Succeed(),
+				"egress backend pod should keep reaching the Kubernetes API ClusterIP without restarting")
+		},
+		ginkgo.Entry("ipv4 pods", v1.IPv4Protocol),
+		ginkgo.Entry("ipv6 pods", v1.IPv6Protocol),
 	)
 
 	ginkgo.Describe("Multiple Networks, external clients sharing ip", func() {
@@ -1631,6 +1885,26 @@ func setBlackholeRoutingTableOnNodes(providerCtx infraapi.Context, nodes []v1.No
 			setBlackholeRoutesOnRoutingTable(providerCtx, node.Name, extContainer.GetIPv6(), routingTable)
 		}
 	}
+}
+
+func setBlackholeDefaultRouteOnRoutingTable(providerCtx infraapi.Context, nodeName, table string, protocol v1.IPFamily) {
+	family := "-4"
+	if protocol == v1.IPv6Protocol {
+		family = "-6"
+	}
+
+	out, err := infraprovider.Get().ExecK8NodeCommand(nodeName,
+		[]string{"ip", family, "route", "replace", "blackhole", "default", "table", table})
+	framework.ExpectNoError(err, "failed to set blackhole default route in table %s on node %s, out: %s", table, nodeName, out)
+
+	providerCtx.AddCleanUpFn(func() error {
+		out, err := infraprovider.Get().ExecK8NodeCommand(nodeName,
+			[]string{"ip", family, "route", "del", "blackhole", "default", "table", table})
+		if err != nil && !strings.Contains(err.Error(), "RTNETLINK answers: No such process") {
+			return fmt.Errorf("failed to remove blackhole default route from table %s on node %s: stdout %q, err: %w", table, nodeName, out, err)
+		}
+		return nil
+	})
 }
 
 // Sets the regular+blackhole routes on the nodes to the external container.

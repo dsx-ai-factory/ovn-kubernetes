@@ -4,6 +4,7 @@
 package ipreserv
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -59,7 +60,7 @@ type Controller struct {
 	ipresvInformer    ipresvinformers.IPReservationInformer
 	ipresvLister      ipresvlisters.IPReservationLister
 	ipresvCacheSynced cache.InformerSynced
-	allocator         subnet.NamedAllocator
+	allocator         subnet.IPAllocator
 	controllerName    string
 	ipresvCache       *syncmap.SyncMap[*ipReservationState]
 	networkManager    networkmanager.Interface
@@ -76,15 +77,21 @@ type Controller struct {
 
 type ipReservationState struct {
 	key         string
+	owner       string
 	spec        ipreservation.IPReservationSpec
 	reservedIPs []string
+}
+
+// reservationOwner keeps reservation ownership independent of the pods using the network.
+func reservationOwner(reservation *ipreservation.IPReservation) string {
+	return "ipreservation/" + string(reservation.UID)
 }
 
 // NewController returns a new IPReservation Controller.
 func NewController(netInfo util.ReconcilableNetInfo,
 	kube kube.InterfaceOVN,
 	watchFactory *factory.WatchFactory,
-	allocator subnet.NamedAllocator,
+	allocator subnet.IPAllocator,
 	recorder record.EventRecorder,
 	stopChan <-chan struct{},
 	networkManager networkmanager.Interface,
@@ -308,7 +315,7 @@ func (c *Controller) sync(ipresvKey string) error {
 			return nil
 		}
 		if exstingIPResvState != nil {
-			if !reflect.DeepEqual(exstingIPResvState.spec, ipresvObj.Spec) {
+			if exstingIPResvState.owner != reservationOwner(ipresvObj) || !reflect.DeepEqual(exstingIPResvState.spec, ipresvObj.Spec) {
 				// old IP reservation has already been deleted and new one has been created
 				// release the old reservation and create the new one
 				if err = c.deleteIPReservation(exstingIPResvState); err != nil {
@@ -326,7 +333,7 @@ func (c *Controller) sync(ipresvKey string) error {
 			c.recordIPReservationEvent("IPReservationAddError", err.Error(), ipresvObj)
 			return err
 		}
-		IPResvState := &ipReservationState{key, ipresvObj.Spec, resvIPs}
+		IPResvState := &ipReservationState{key: key, owner: reservationOwner(ipresvObj), spec: ipresvObj.Spec, reservedIPs: resvIPs}
 		c.ipresvCache.Store(key, IPResvState)
 		return nil
 	})
@@ -363,7 +370,7 @@ func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation)
 	}
 
 	isIPv4 := resvIPObj.Spec.IPFamily == ipreservation.IPv4Protocol
-	if !c.allocator.EnsureIPAMForIPFamily(isIPv4) {
+	if !c.allocator.EnsureIPAMForIPFamily(c.GetNetworkName(), isIPv4) {
 		err := fmt.Errorf("there is no %s subnet for the given network %s for the IP allocator to reserve IPs",
 			resvIPObj.Spec.IPFamily, resvIPObj.Spec.NetworkAttachmentName)
 		tmpErr := c.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, ovntypes.OvnK8sStatusFailed,
@@ -376,7 +383,7 @@ func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation)
 	if isIPv4 {
 		// currently an optimization only for IPv4 case;
 		// it could be that after this check, the IPs got used by new pods that came up
-		totalAvailableCount, err := c.allocator.AvailableIPsCount(resvIPObj.Spec.IPFamily == ipreservation.IPv4Protocol)
+		totalAvailableCount, err := c.allocator.AvailableIPsCount(c.GetNetworkName(), isIPv4)
 		if err != nil {
 			return nil, err
 		}
@@ -394,7 +401,7 @@ func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation)
 			resvIPObj.Spec.NetworkAttachmentName, resvIPObj.Namespace, resvIPObj.Name, resvIPObj.Spec.Count)
 	}
 
-	resvIPNets, err := c.allocator.AllocateIPsByCount(isIPv4, resvIPObj.Spec.Count)
+	resvIPNets, err := c.allocator.AllocateIPsByCount(c.GetNetworkName(), reservationOwner(resvIPObj), isIPv4, resvIPObj.Spec.Count)
 	if err != nil {
 		err = fmt.Errorf("failed to reserve %d IPs for IPReservation %s/%s object for network %s - %v",
 			resvIPObj.Spec.Count, resvIPObj.Namespace, resvIPObj.Name, resvIPObj.Spec.NetworkAttachmentName, err)
@@ -414,7 +421,7 @@ func (c *Controller) ensureIPReservation(resvIPObj *ipreservation.IPReservation)
 	err = c.updateIPReservationStatusWithRetry(resvIPObj.Namespace, resvIPObj.Name, ovntypes.OvnK8sStatusSucceeded, nil,
 		resvIPs)
 	if err != nil {
-		tmpErr := c.allocator.ReleaseIPs(resvIPNets)
+		tmpErr := c.allocator.ReleaseIPs(c.GetNetworkName(), reservationOwner(resvIPObj), resvIPNets)
 		tmpRes := "success"
 		if tmpErr != nil {
 			tmpRes = fmt.Sprintf("failed - %v", tmpErr)
@@ -441,7 +448,7 @@ func (c *Controller) deleteIPReservation(ipResvSate *ipReservationState) error {
 	}
 
 	// take care of the error case
-	err := c.allocator.ReleaseIPs(resvIPNets)
+	err := c.allocator.ReleaseIPs(c.GetNetworkName(), ipResvSate.owner, resvIPNets)
 	if err != nil {
 		err = fmt.Errorf("failed relasing IPs for IPReservation %s object for network %s, will retry - %v",
 			ipResvSate.key, ipResvSate.spec.NetworkAttachmentName, err)
@@ -484,9 +491,9 @@ func (c *Controller) syncIPReservations() error {
 		for _, resvIP := range resvIPObj.Status.ReservedIPs {
 			ip, ipnet, _ := net.ParseCIDR(resvIP)
 			ipnet.IP = ip
-			err := c.allocator.AllocateIPs([]*net.IPNet{ipnet})
-			if err != nil {
-				if err == ipallocator.ErrAllocated {
+			err := c.allocator.AllocateIPs(c.GetNetworkName(), reservationOwner(resvIPObj), []*net.IPNet{ipnet})
+			if err != nil && (!ipallocator.IsErrAllocated(err) || errors.Is(err, ipallocator.ErrAllocatedByOther)) {
+				if errors.Is(err, ipallocator.ErrAllocatedByOther) {
 					// This should not happen ever!! if it does, then something else - a Pod or another IPReservation
 					// object took the IP from us!
 					err = fmt.Errorf("failed to reserve the IP %s for IPReservation object %s/%s while syncing. "+
@@ -502,7 +509,7 @@ func (c *Controller) syncIPReservations() error {
 					ipnet, resvIPObj.Namespace, resvIPObj.Name)
 			}
 		}
-		IPResvState := &ipReservationState{key, resvIPObj.Spec, resvIPObj.Status.ReservedIPs}
+		IPResvState := &ipReservationState{key: key, owner: reservationOwner(resvIPObj), spec: resvIPObj.Spec, reservedIPs: resvIPObj.Status.ReservedIPs}
 		c.ipresvCache.Store(key, IPResvState)
 	}
 	return nil

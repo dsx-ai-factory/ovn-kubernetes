@@ -22,6 +22,8 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const layer2GatewayIPOwner = "layer2-gateway"
+
 // method/structure shared by all layer 2 network controller, including localnet and layer2 network controllres.
 
 // BaseLayer2UserDefinedNetworkController structure holds per-network fields and network specific
@@ -271,7 +273,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 		return nil, fmt.Errorf("failed to transact logical switch operations: %w", err)
 	}
 
-	if err = oc.lsManager.AddOrUpdateSwitch(switchName, hostSubnets, reservedSubnets, excludeSubnets...); err != nil {
+	if err = oc.lsManager.AddOrUpdateSwitch(switchName, hostSubnets, reservedSubnets, nil, excludeSubnets...); err != nil {
 		return nil, err
 	}
 
@@ -283,8 +285,8 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 				gatewayIPS,
 				&net.IPNet{IP: gwIP, Mask: util.GetIPFullMask(gwIP)})
 		}
-		// It is ok if the gateway IPs are already reserved
-		err = oc.lsManager.AllocateIPs(switchName, gatewayIPS)
+		// Gateway IPs may already be protected by excluded subnets.
+		err = oc.lsManager.AllocateIPs(switchName, layer2GatewayIPOwner, gatewayIPS)
 		if err != nil && !ipam.IsErrAllocated(err) {
 			return nil, fmt.Errorf("failed to allocate gatewayIPs %v on %s: %w", gatewayIPS, switchName, err)
 		}

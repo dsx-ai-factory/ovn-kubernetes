@@ -48,6 +48,7 @@ func IsPodAnnotationUpdateRetryable(err error) bool {
 // UpdatePodWithRetryOrRollback updates pod annotations with the result of the
 // allocate function. If the pod update fails, it applies the rollback provided by
 // the allocate function. Retry details are recorded on the active span in ctx.
+// If the informer observes a different UID, the original pod is treated as not found.
 func UpdatePodWithRetryOrRollback(ctx context.Context, podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, allocate AllocateToPodWithRollbackFunc) error {
 	start := time.Now()
 	defer func() {
@@ -85,6 +86,10 @@ func UpdatePodWithRetryOrRollback(ctx context.Context, podLister listers.PodList
 		}
 		if err != nil {
 			return err
+		}
+		if pod.UID != "" && oldPod.UID != pod.UID {
+			return fmt.Errorf("pod was replaced: expected UID %q, found %q: %w", pod.UID, oldPod.UID,
+				apierrors.NewNotFound(corev1.Resource("pods"), pod.Name))
 		}
 
 		// Informer cache should not be mutated, so copy the object

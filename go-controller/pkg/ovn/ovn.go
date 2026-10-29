@@ -215,7 +215,7 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(ctx context.Context, oldP
 
 	if kubevirt.IsPodLiveMigratable(pod) {
 		v4Subnets, v6Subnets := util.GetClusterSubnetsWithHostPrefix()
-		return kubevirt.EnsureLocalZonePodAddressesToNodeRoute(oc.watchFactory, oc.nbClient, oc.lsManager, pod, ovntypes.DefaultNetworkName, append(v4Subnets, v6Subnets...))
+		return kubevirt.EnsureDefaultNetworkForLocalMigratablePod(oc.watchFactory, oc.nbClient, oc.lsManager, pod, append(v4Subnets, v6Subnets...))
 	}
 
 	return nil
@@ -232,11 +232,13 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(_ context.Context, _, po
 	return nil
 }
 
-// removePod tried to tear down a pod. It returns nil on success and error on failure;
+// removePod tries to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(ctx context.Context, pod *corev1.Pod, portInfo *lpInfo) (err error) {
-	if oc.isPodScheduledOnLocalNode(pod) {
-		ctx, span := oc.startTrace(ctx, pod)
+	isLocalPod := oc.isPodScheduledOnLocalNode(pod)
+	if isLocalPod {
+		var span trace.Span
+		ctx, span = oc.startTrace(ctx, pod)
 		defer func() {
 			if err != nil {
 				span.RecordError(err)
@@ -244,23 +246,16 @@ func (oc *DefaultNetworkController) removePod(ctx context.Context, pod *corev1.P
 			}
 			span.End()
 		}()
-
-		if err = oc.removeLocalZonePod(ctx, pod, portInfo); err != nil {
-			return err
-		}
-	} else {
-		if err := oc.removeRemoteZonePod(ctx, pod); err != nil {
-			return err
-		}
 	}
 
-	err = kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod)
-	if err != nil {
+	if err = kubevirt.CleanUpLiveMigratablePod(oc.nbClient, oc.watchFactory, pod); err != nil {
 		return err
 	}
 
-	oc.forgetPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName)
-	return nil
+	if isLocalPod {
+		return oc.removeLocalZonePod(ctx, pod, portInfo)
+	}
+	return oc.removeRemoteZonePod(ctx, pod)
 }
 
 // removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
@@ -300,16 +295,6 @@ func (oc *DefaultNetworkController) removeLocalZonePod(ctx context.Context, pod 
 // failure indicates the pod tear down should be retried later.
 // It removes the remote pod ips from the namespace address set.
 func (oc *DefaultNetworkController) removeRemoteZonePod(_ context.Context, pod *corev1.Pod) error {
-	// while this check is only intended for local pods, we also need it for
-	// remote live migrated pods that might have been allocated from this zone
-	if oc.wasPodReleasedBeforeStartup(string(pod.UID), ovntypes.DefaultNetworkName) {
-		klog.Infof("Completed pod %s/%s was already released before startup",
-			pod.Namespace,
-			pod.Name,
-		)
-		return nil
-	}
-
 	// FIXME: there are other things we are probably leaving behind and should
 	// be removed for completed VMs, like per-pod SNAT. Also
 	// removeRemoteZonePodFromNamespaceAddressSet above should probably not be
@@ -328,7 +313,7 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(_ context.Context, pod *
 			}
 			switchName, zoneContainsPodSubnet := kubevirt.ZoneContainsPodSubnet(oc.lsManager, ips)
 			if zoneContainsPodSubnet {
-				if err := oc.lsManager.ReleaseIPs(switchName, ips); err != nil {
+				if err := oc.releasePodIPs(pod, ovntypes.DefaultNetworkName, &lpInfo{logicalSwitch: switchName, ips: ips}); err != nil {
 					return err
 				}
 			}
@@ -439,6 +424,8 @@ func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, r
 	return nil
 }
 
+// InitEgressServiceZoneController wires the zone controller to shared informers
+// and the default network routing and address-set operations.
 func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssvc_zone.Controller, error) {
 	// If the EgressIP controller is enabled it will take care of creating the
 	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
@@ -474,7 +461,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
 		oc.watchFactory.EndpointSliceCoreInformer(),
-		oc.watchFactory.NodeCoreInformer(), oc.nodeName)
+		oc.watchFactory.NodeCoreInformer(), oc.watchFactory.PodCoreInformer(), oc.nodeName)
 }
 
 func (oc *DefaultNetworkController) newANPController() error {

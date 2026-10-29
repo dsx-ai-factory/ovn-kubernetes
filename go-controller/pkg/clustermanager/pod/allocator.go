@@ -402,7 +402,7 @@ func (a *PodAllocator) releasePodOnNAD(ctx context.Context, pod *corev1.Pod, nad
 	}
 
 	if doReleaseIPs {
-		err := a.ipAllocator.ReleaseIPs(a.netInfo.GetNetworkName(), podAnnotation.IPs)
+		err := a.ipAllocator.ReleaseIPs(a.netInfo.GetNetworkName(), podIdAllocationName(nadKey, string(pod.UID)), podAnnotation.IPs)
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
@@ -445,9 +445,9 @@ func (a *PodAllocator) allocatePodOnNAD(ctx context.Context, pod *corev1.Pod, na
 		span.End()
 	}()
 
-	var ipAllocator subnet.NamedAllocator
+	var ipAllocator subnet.IPAllocator
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
-		ipAllocator = a.ipAllocator.ForSubnet(a.netInfo.GetNetworkName())
+		ipAllocator = a.ipAllocator
 	}
 
 	var idAllocator id.NamedAllocator
@@ -469,16 +469,11 @@ func (a *PodAllocator) allocatePodOnNAD(ctx context.Context, pod *corev1.Pod, na
 		return nil
 	}
 
-	node, err := a.nodeLister.Get(pod.Spec.NodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get node %q: %w", pod.Spec.NodeName, err)
-	}
-
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
 		ctx,
 		ipAllocator,
+		a.netInfo.GetNetworkName(), podIdAllocationName(nadKey, string(pod.UID)),
 		idAllocator,
-		node,
 		pod,
 		nadKey,
 		network,
@@ -488,7 +483,7 @@ func (a *PodAllocator) allocatePodOnNAD(ctx context.Context, pod *corev1.Pod, na
 
 	if err != nil {
 		if errors.Is(err, ipallocator.ErrFull) ||
-			errors.Is(err, ipallocator.ErrAllocated) ||
+			ipallocator.IsErrAllocated(err) ||
 			errors.Is(err, mac.ErrReserveMACConflict) ||
 			errors.Is(err, podallocator.ErrIPFamilyMismatch) ||
 			errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
