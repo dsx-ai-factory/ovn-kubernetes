@@ -204,24 +204,24 @@ spec:
       expr: |
         histogram_quantile(1.0,
          sum by (le) (
-          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m]
-          offset 15m)
+          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m])
          )
         )
         -
         histogram_quantile(1.0,
          sum by (le) (
-          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m])
+          rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m]
+          offset 15m)
          )
         ) > 10
-      for: 30m
+      for: 10m
       labels:
         severity: major
         {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
       annotations:
        message: |
          The pod creation latency aggregated across all nodes for the last
-         30 minutes has increased 10 seconds as compared to 15 minutes before.
+         10 minutes has increased 10 seconds as compared to 15 minutes before.
 
     - alert: OvnKubeControllerStale
       expr: time() - max(ovnkube_controller_nb_e2e_timestamp) > 120

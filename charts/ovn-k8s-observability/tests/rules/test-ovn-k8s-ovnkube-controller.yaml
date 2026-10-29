@@ -145,3 +145,41 @@ tests:
               message: |
                 OvnKube/Host K8s pod ovnkube-node-abc is in not Ready state on critical infrastructure node node-cs-001 for longer than 20min.
                 Not ready containers: sb-ovsdb
+
+  - name: OvnKubeIncreaseInPodCreationLatencyP100 - should fire when P100 rises
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_controller_pod_creation_latency_seconds_bucket{le="1"}'
+        values: '0+10x30 300+0x31'
+      - series: 'ovnkube_controller_pod_creation_latency_seconds_bucket{le="10"}'
+        values: '0+10x30 300+0x31'
+      - series: 'ovnkube_controller_pod_creation_latency_seconds_bucket{le="60"}'
+        values: '0+10x62'
+      - series: 'ovnkube_controller_pod_creation_latency_seconds_bucket{le="+Inf"}'
+        values: '0+10x62'
+    alert_rule_test:
+      - eval_time: 43m
+        alertname: OvnKubeIncreaseInPodCreationLatencyP100
+        exp_alerts:
+          - exp_labels:
+              severity: major
+            exp_annotations:
+              message: |
+                The pod creation latency aggregated across all nodes for the last
+                10 minutes has increased 10 seconds as compared to 15 minutes before.
+
+  - name: OvnKubeIncreaseInPodCreationLatencyP100 - should remain inactive when P100 falls
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_controller_pod_creation_latency_seconds_bucket{le="1"}'
+        values: '0+0x30 0+10x31'
+      - series: 'ovnkube_controller_pod_creation_latency_seconds_bucket{le="10"}'
+        values: '0+0x30 0+10x31'
+      - series: 'ovnkube_controller_pod_creation_latency_seconds_bucket{le="60"}'
+        values: '0+10x62'
+      - series: 'ovnkube_controller_pod_creation_latency_seconds_bucket{le="+Inf"}'
+        values: '0+10x62'
+    promql_expr_test:
+      - expr: ALERTS{alertname="OvnKubeIncreaseInPodCreationLatencyP100"}
+        eval_time: 40m
+        exp_samples: []
