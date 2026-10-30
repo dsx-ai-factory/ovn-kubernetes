@@ -14,23 +14,7 @@
 ARG OVN_FROM=koji
 ARG BUILDER_IMAGE=quay.io/projectquay/golang:1.26@sha256:506a668eb4c763a964ffc4d4ad0125d45d75aac899392be7e5d39380f8452564
 ARG OVN_KUBERNETES_DIR=.
-ARG FEDORA_BASE_IMAGE=quay.io/fedora/fedora:43@sha256:c45b30a84cf2fb151e3d8f8683707ce42356f674357f10951b4dd71014a502f3
-
-#############################################
-# Stage to build OVN Kubernetes from Source #
-#############################################
-
-FROM --platform=${BUILDPLATFORM} ${BUILDER_IMAGE} AS ovnkube-builder
-
-ARG TARGETOS
-ARG TARGETARCH
-
-WORKDIR /workspace
-RUN dnf install --best --refresh -y make git
-COPY ${OVN_KUBERNETES_DIR} ovn-kubernetes
-RUN cd ovn-kubernetes/dist/images && \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} make bld
-
+ARG FEDORA_BASE_IMAGE=quay.io/fedora/fedora:44@sha256:278ccc1c8af3d618b64accbba691bb14f82d371b2e13c86fa2ac7a447d1e03bb
 
 #############################################
 # Stage to get OVN and OVS RPMs from source #
@@ -92,14 +76,13 @@ RUN ./boot.sh
 RUN ./configure --with-ovs-source=/root/ovs/
 RUN make -j rpm-fedora
 RUN rm rpm/rpmbuild/RPMS/x86_64/*debug*
-RUN rm rpm/rpmbuild/RPMS/x86_64/*docker*
 RUN git log -n 1
 
 ########################################
 # Stage to download OVN RPMs from koji #
 ########################################
 FROM ${FEDORA_BASE_IMAGE} AS kojidownloader
-ARG ovnver=ovn-26.03.1-50.fc43
+ARG ovnver=ovn-26.09.0-33.fc44
 
 USER root
 
@@ -113,7 +96,10 @@ RUN echo "Running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 # Final stage
 RUN dnf install --best --refresh -y --setopt=tsflags=nodocs koji
 
-RUN if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM" ] ; then koji download-build $ovnver --arch=x86_64  ; \
+# Prefer IPv4. Docker/buildkit IPv6 is often a documentation prefix (2001:db8::)
+# that cannot complete SYN to Fedora koji AAAA records, so download-build hangs.
+RUN echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf && \
+    if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM" ] ; then koji download-build $ovnver --arch=x86_64  ; \
     else koji download-build $ovnver --arch=aarch64 ; fi
 
 ######################################
@@ -129,6 +115,45 @@ COPY --from=ovnbuilder /root/ovs/rpm/rpmbuild/RPMS/x86_64/*.rpm /
 FROM ${FEDORA_BASE_IMAGE} AS koji
 
 COPY --from=kojidownloader /*.rpm /
+
+#############################################################
+# Stage to prepare OVN Kubernetes Sources (OVN from source) #
+#############################################################
+FROM --platform=${BUILDPLATFORM} ${BUILDER_IMAGE} AS ovnkube-prepare-source
+WORKDIR /workspace
+RUN dnf install --best --refresh -y make git
+COPY ${OVN_KUBERNETES_DIR} ovn-kubernetes
+WORKDIR /workspace/ovn-kubernetes/go-controller
+# Get a working version of libovsdb (for modelgen).
+RUN GO111MODULE=on go install \
+    github.com/ovn-kubernetes/libovsdb/cmd/modelgen@$( \
+    go list -mod=mod -m -f '{{ .Version }}' \
+    github.com/ovn-kubernetes/libovsdb \
+)
+# Regenerate models based on the actual OVN NB/SB schema.
+COPY --from=ovnbuilder /root/ovn/ovn-nb.ovsschema pkg/nbdb/ovn-nb.ovsschema
+COPY --from=ovnbuilder /root/ovn/ovn-sb.ovsschema pkg/sbdb/ovn-sb.ovsschema
+RUN go generate ./pkg/nbdb && go generate ./pkg/sbdb
+
+###########################################################
+# Stage to prepare OVN Kubernetes Sources (OVN from koji) #
+###########################################################
+FROM --platform=${BUILDPLATFORM} ${BUILDER_IMAGE} AS ovnkube-prepare-koji
+WORKDIR /workspace
+RUN dnf install --best --refresh -y make git
+COPY ${OVN_KUBERNETES_DIR} ovn-kubernetes
+
+#############################################
+# Stage to build OVN Kubernetes from Source #
+#############################################
+FROM --platform=${BUILDPLATFORM} ovnkube-prepare-${OVN_FROM} AS ovnkube-builder
+
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+RUN cd ovn-kubernetes/dist/images && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} make bld
 
 #################################
 # Stage to build ovn-kubernetes #

@@ -301,9 +301,24 @@ spec:
             {{- toYaml (mergeOverwrite (dict "cpu" "100m" "memory" "300Mi") (deepCopy ($serviceDaemonSet.resources | default dict))) | nindent 12 }}
         securityContext:
           runAsUser: 0
+          {{- if .Values.global.unprivilegedMode }}
+          capabilities:
+            add:
+            - NET_ADMIN
+          {{- else }}
           privileged: true
+          {{- end }}
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
+        {{- if .Values.global.unprivilegedMode }}
+        # Without privileged mode, write host-network sysctls through this mount.
+        - mountPath: /host/proc/sys/net
+          name: host-proc-sys-net
+        # The iptables wrapper uses the host filesystem.
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
+        {{- end }}
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
@@ -337,7 +352,7 @@ spec:
           readOnly: true
         - mountPath: /var/run/netns
           name: host-netns
-          mountPropagation: Bidirectional
+          mountPropagation: HostToContainer
         # for ovn-db metrics
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
@@ -492,6 +507,8 @@ spec:
           value: {{ default "169.254.0.0/17" .Values.global.v4MasqueradeSubnet | quote }}
         - name: OVN_V6_MASQUERADE_SUBNET
           value: {{ default "" .Values.global.v6MasqueradeSubnet | quote }}
+        - name: OVN_UNPRIVILEGED_MODE
+          value: {{ ternary "yes" "no" (.Values.global.unprivilegedMode | default false) | quote }}
         - name: OVN_MULTICAST_ENABLE
           value: {{ hasKey .Values.global "enableMulticast" | ternary .Values.global.enableMulticast false | quote }}
         - name: OVN_EX_GW_NETWORK_INTERFACE
@@ -648,6 +665,15 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
+      {{- if .Values.global.unprivilegedMode }}
+      - name: host-proc-sys-net
+        hostPath:
+          path: /proc/sys/net
+          type: Directory
+      - name: host-slash
+        hostPath:
+          path: /
+      {{- end }}
       - name: host-netns
         hostPath:
           path: /var/run/netns

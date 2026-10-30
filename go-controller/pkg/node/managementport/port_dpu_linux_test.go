@@ -293,6 +293,41 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				"empty deviceID should not be confused with PCI device gone")
 		})
 
+		It("Resolves a renamed netdev through its link alias", func() {
+			// A previous instance renamed the netdev to the management port
+			// name, keeping the original name as the link alias. Name-based
+			// resolution (simulated devices) must fall back to the alias.
+			mgmtPortDpuHost := &managementPortNetdev{
+				deviceID: deviceID,
+			}
+			mockDeviceIDToNetdev(deviceID, "eth0-2")
+			renamedLink := &mocks.Link{}
+			renamedLink.On("Attrs").Return(&netlink.LinkAttrs{Name: "ovn-k8s-mp0", Alias: "eth0-2"})
+			netlinkOpsMock.On("LinkByName", "eth0-2").Return(nil, fmt.Errorf("link not found"))
+			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
+			netlinkOpsMock.On("LinkList").Return([]netlink.Link{renamedLink}, nil)
+
+			link, err := mgmtPortDpuHost.findNetdevByDeviceID()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(link.Attrs().Name).To(Equal("ovn-k8s-mp0"))
+		})
+
+		It("Fails when the netdev is missing and no link carries its alias", func() {
+			mgmtPortDpuHost := &managementPortNetdev{
+				deviceID: deviceID,
+			}
+			mockDeviceIDToNetdev(deviceID, "eth0-2")
+			otherLink := &mocks.Link{}
+			otherLink.On("Attrs").Return(&netlink.LinkAttrs{Name: "ovn-k8s-mp0", Alias: "eth0-9"})
+			netlinkOpsMock.On("LinkByName", "eth0-2").Return(nil, fmt.Errorf("link not found"))
+			netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
+			netlinkOpsMock.On("LinkList").Return([]netlink.Link{otherLink}, nil)
+
+			_, err := mgmtPortDpuHost.findNetdevByDeviceID()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("the link lookup failed"))
+		})
+
 		It("Fails with errMgmtPortDeviceNotFound when device ID resolves to empty netdev name", func() {
 			mgmtPortDpuHost := &managementPortNetdev{
 				deviceID: deviceID,
@@ -423,13 +458,9 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(linkMock, nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
 
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
-				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
-			})
-
 			err = mgmtPort.doReconcile()
 			Expect(err).NotTo(HaveOccurred())
+			expectSysctl("ipv4/conf/"+types.K8sMgmtIntfName+"/forwarding", "1")
 		})
 
 		It("Recreates management port successfully when reconciliation fails but VF exists", func() {
@@ -461,13 +492,9 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(linkMock, nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
 
-			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
-				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding=1",
-			})
-
 			err = mgmtPort.doReconcile()
 			Expect(err).NotTo(HaveOccurred())
+			expectSysctl("ipv4/conf/"+types.K8sMgmtIntfName+"/forwarding", "1")
 		})
 
 		It("Returns error on transient create() failure (VF exists but config fails)", func() {

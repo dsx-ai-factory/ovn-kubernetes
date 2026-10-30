@@ -429,7 +429,6 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			setUpGatewayFakeOVSCommands(fexec)
 			deleteStaleManagementPortFakeCommands(fexec, mgtPort)
 			getCreationFakeCommands(fexec, mgtPort, mgtPortMAC, netName, nodeName, NetInfo.MTU())
-			getRPFilterLooseModeFakeCommands(fexec)
 			setUpUDNOpenflowManagerFakeOVSCommands(fexec)
 			getDeletionFakeOVSCommands(fexec, mgtPort)
 
@@ -574,6 +573,9 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
+		expectMgmtPortSysctls(Default, types.K8sMgmtIntfName)
+		expectForwardingSysctls(Default, "breth0")
+		expectMgmtPortSysctls(Default, mgtPort)
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 })

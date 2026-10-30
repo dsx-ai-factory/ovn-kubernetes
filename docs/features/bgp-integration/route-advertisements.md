@@ -75,6 +75,41 @@ configuration. Please use the `Feature Config` option
 `enable-route-advertisements` under `OVNKubernetesFeatureConfig` config to
 enable it.
 
+## Local KinD demo
+
+A local KinD cluster can enable route advertisements with
+`contrib/kind.sh -mne -rae`.
+For FRR-k8s development, apply the patches in
+`contrib/frr-k8s/patches` to an FRR-k8s checkout and run the patched
+`hack/demo/demo.sh` script from that checkout.
+
+Without arguments, the demo configures the main BGP session only. It discovers
+the KinD node `InternalIP` addresses and the external FRR peer address for each
+available IP family. In a dual-stack cluster, the rendered FRR and Kubernetes
+configuration includes both IPv4 and IPv6 peers.
+
+To add a second BGP session over a VLAN, pass the positional arguments in this
+order:
+
+```shell
+$ cd hack/demo && ./demo.sh <second-session-interface> <second-session-vrf> [<second-session-vlan> [<ipv4-sed> [<ipv6-sed>]]]
+```
+
+- `<second-session-interface>`: VLAN-capable host interface used as the VLAN
+  parent. If omitted, no second BGP session is configured.
+- `<second-session-vrf>`: VRF used by the node-side FRR-k8s session. The demo
+  creates the external FRR peer VRF as `<second-session-vrf>-ext`.
+- `<second-session-vlan>`: VLAN ID for the second session. Default: `221`.
+- `<ipv4-sed>`: sed expression applied to the main IPv4 BGP session IPs to
+  derive the second-session IPv4 addresses. Default: `s|111|221|g`.
+- `<ipv6-sed>`: sed expression applied to the main IPv6 BGP session IPs to
+  derive the second-session IPv6 addresses. Default: `s|c956|ca56|g`.
+
+Because the values are positional, pass the VLAN ID explicitly when overriding
+only the sed expressions. Second-session mode is supported only with host
+networking; it also requires passwordless `sudo` when the demo is not run as
+root, and a VLAN-capable interface connected to the second-session network.
+
 ## User-facing API Changes
 
 A new OVN-Kubernetes API is introduced for this feature:
@@ -99,6 +134,17 @@ export routes for. It also allows to select which `FRRConfiguration` instances
 to use as template, and as a consequence, provides the flexibility to export
 routes in a different number of ways including: which BGP peers to export to,
 the use of iBGP or eBGP, etc.
+
+For user-provided `FRRConfiguration` templates, neighbor lists are preserved,
+including entries that match the target node's address. These peers may use
+different uplinks or VRFs, so OVN-Kubernetes does not use the node's primary
+interface address or Kubernetes `InternalIP` addresses to filter them.
+Administrators must ensure that each template's neighbors are appropriate for
+every node selected by its `nodeSelector`. A shared template peering with
+external routers is valid; for node-to-node full-mesh peering, use per-node
+templates and selectors that exclude each node's own peering address.
+For automatic configuration of node-to-node peers, see
+[managed routing in no-overlay mode](no-overlay.md#managed-routing).
 
 ### Import routes into the default pod network
 
@@ -833,6 +879,37 @@ does not stay in the configuration the nodes run; once none remain, the
 and they stop being advertised. These checks apply to hand-written
 `NetworkAttachmentDefinition` objects too, which are not covered by the
 `ClusterUserDefinedNetwork` CRD validation.
+
+For EVPN networks, the controller also validates selected entries in each
+selected node's `k8s.ovn.org/vteps` annotation. Addresses must be global unicast,
+have no zone identifier, and belong to the referenced VTEP's configured CIDRs.
+IPv4-mapped IPv6 addresses are evaluated as IPv4 after unmapping, including for
+the limit of one address per family. Private IPv4 and IPv6 unique-local
+addresses are allowed. See [VTEP IP Management](evpn.md#vtep-ip-management).
+
+If a selected entry is invalid, or the entire annotation is malformed JSON, the
+controller reports `Accepted=False` on the `RouteAdvertisements` and identifies
+the node in the condition message. It excludes that node and deletes its
+generated `FRRConfiguration` objects for this `RouteAdvertisements`. This can
+withdraw all advertisements provided by those objects, not just the VTEP host
+route. Other valid selected nodes continue to be reconciled. Wrong-shaped or
+invalid unselected entries do not cause rejection when the overall JSON is
+valid.
+
+VTEP collision checks span RouteAdvertisements sharing the default-VRF
+underlay. They include nodes selected by other EVPN RAs with a configured
+underlay router, even if the current RA selects different nodes or VTEPs.
+Annotations that no such RA selects do not reserve an address. Generated
+configurations across RAs provide evidence of an established advertiser; a
+unique current advertiser is preserved, otherwise conflicting nodes are
+excluded. Each RA withdraws only its own configurations and reports conflicts
+involving its VTEP prefixes. Node, RA selection, and generated configuration
+changes trigger reevaluation across RAs.
+
+The controller does not remove or repair the node annotation. After the
+annotation is corrected, reconciliation can generate the node's configuration
+again and restore its advertisements, provided the remaining validation checks
+pass.
 
 Check that `FRRConfiguration` have been generated as expected:
 

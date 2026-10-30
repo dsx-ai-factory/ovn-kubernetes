@@ -135,7 +135,7 @@ var _ = Describe("cni_dpu tests", func() {
 			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("PatchPodStatusAnnotations", pod, cpod).Return(nil)
-			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, &dpuCd)
+			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, pod, &dpuCd)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -149,7 +149,7 @@ var _ = Describe("cni_dpu tests", func() {
 			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, nil, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("PatchPodStatusAnnotations", pod, cpod).Return(nil)
-			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, nil)
+			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, pod, nil)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -161,7 +161,7 @@ var _ = Describe("cni_dpu tests", func() {
 			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("PatchPodStatusAnnotations", pod, cpod).Return(fmt.Errorf("failed to set annotation"))
-			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, &dpuCd)
+			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, pod, &dpuCd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to set annotation"))
 		})

@@ -1033,7 +1033,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netInfo.Transport()).To(Equal(types.NetworkTransportNoOverlay))
 
-				node1 := createTestNode(node1Name, "1")
+				node1 := createTestNode(node1Name, "4")
 				clusterRouterName := netInfo.GetNetworkScopedClusterRouterName()
 				transitSwitchName := netInfo.GetNetworkScopedName(types.TransitSwitch)
 
@@ -1198,7 +1198,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netInfo.Transport()).NotTo(Equal(types.NetworkTransportNoOverlay))
 
-				node1 := createTestNode(node1Name, "1")
+				node1 := createTestNode(node1Name, "4")
 				clusterRouterName := netInfo.GetNetworkScopedClusterRouterName()
 				transitSwitchName := netInfo.GetNetworkScopedName(types.TransitSwitch)
 
@@ -2184,6 +2184,20 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 			udnEnabledSvcV4ASHashName, _ := addressset.GetHashNamesForAS(udnenabledsvc.GetAddressSetDBIDs())
 			masqSNAT.Match += fmt.Sprintf(" && (ip4.dst == $%s || ip4.dst == $%s)", nodeIPV4ASHashName, udnEnabledSvcV4ASHashName)
 		}
+		// In shared gateway mode a network whose east/west traffic goes through
+		// the interconnect overlay expresses pod egress as a default route to
+		// the gateway router. Local gateway mode, EVPN and no-overlay keep a
+		// per-node-subnet src-ip route.
+		egressRoute := expectedGRStaticRoute(staticRouteUUID1, nodeSubnet.String(), lrsrNextHop,
+			&nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo)
+		if config.Gateway.Mode != config.GatewayModeLocal &&
+			netInfo.Transport() != types.NetworkTransportNoOverlay && !hasEVPN {
+			allIPs := "0.0.0.0/0"
+			if knet.IsIPv6String(lrsrNextHop) {
+				allIPs = "::/0"
+			}
+			egressRoute = expectedGRStaticRoute(staticRouteUUID1, allIPs, lrsrNextHop, nil, nil, netInfo)
+		}
 		expectedEntities = append(expectedEntities,
 			&nbdb.LogicalRouterPort{
 				UUID:        rtojLRPUUID,
@@ -2192,7 +2206,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 				MAC:         "0a:58:64:41:00:01",
 				ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
 			},
-			expectedGRStaticRoute(staticRouteUUID1, nodeSubnet.String(), lrsrNextHop, &nbdb.LogicalRouterStaticRoutePolicySrcIP, nil, netInfo),
+			egressRoute,
 			expectedGRStaticRoute(staticRouteUUID2, gwRouterJoinIPAddress().IP.String(), gwRouterJoinIPAddress().IP.String(), nil, nil, netInfo),
 			expectedLogicalRouterPolicy(routerPolicyUUID1, netInfo, nodeName, nodeIP, managementPortIP(nodeSubnet).String()),
 			expectedLogicalRouterPolicy(routerPolicyUUID2, netInfo, nodeName, masqIPAddr, managementPortIP(nodeSubnet).String()),
@@ -2376,7 +2390,7 @@ func gwRouterOptions(gwConfig util.L3GatewayConfig) map[string]string {
 
 	return map[string]string{
 		"lb_force_snat_ip":              "router_ip",
-		"mac_binding_age_threshold":     "0",
+		"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
 		"chassis":                       gwConfig.ChassisID,
 		"always_learn_from_arp_request": "false",
 		"dynamic_neigh_routers":         dynamicNeighRouters,

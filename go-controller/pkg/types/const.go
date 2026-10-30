@@ -9,6 +9,9 @@ import "time"
 type OvnK8sStatus string
 
 const (
+	// ManagedBGPConfigurationName identifies the shared full-mesh BGP template.
+	ManagedBGPConfigurationName = "ovnk-managed-bgp"
+
 	// Default network name
 	DefaultNetworkName           = "default"
 	DefaultNetworkControllerName = "default-network-controller"
@@ -344,6 +347,10 @@ const (
 	NetworkTransportNoOverlay = "no-overlay"
 	NetworkTransportEVPN      = "evpn"
 
+	// MAC security modes controls MAC spoof protection enforcement on a logical switch
+	MACSecurityModeEnabled  = "enabled"
+	MACSecurityModeDisabled = "disabled"
+
 	// NoOverlaySNATEnabled enables SNAT for outbound traffic
 	NoOverlaySNATEnabled = "enabled"
 	// NoOverlaySNATDisabled disables SNAT for outbound traffic
@@ -362,6 +369,13 @@ const (
 	// Logical Switch or Router Port
 	MaxLogicalPortTunnelKey = 32767
 
+	// MinNodeID is 2 because ID 1 maps to the cluster router's join-switch IP.
+	MinNodeID = 2
+
+	// MaxNodeIDs is the highest node ID that can be allocated. Limited to the
+	// maximum number of nodes supported by k8s.
+	MaxNodeIDs = 5000
+
 	// InformerSyncTimeout is used when waiting for the initial informer cache sync
 	// (i.e. all existing objects should be listed by the informer).
 	// It allows ~5 list() retries with the default reflector exponential backoff config
@@ -378,7 +392,8 @@ const (
 	// GRMACBindingAgeThreshold is the lifetime in seconds of each MAC binding
 	// entry for the gateway routers. After this time, the entry is removed and
 	// may be refreshed with a new ARP request.
-	GRMACBindingAgeThreshold = "0"
+	GRMACBindingAgeThreshold    = "300"
+	GRMACBindingAgeThresholdInt = 300
 
 	AdminPBRResyncInterval = 60 * time.Second
 

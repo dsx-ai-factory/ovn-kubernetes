@@ -35,7 +35,7 @@ spec:
         - name: {{ .Values.global.imagePullSecretName }}
       {{- end }}
       serviceAccountName: ovn-ovs
-      priorityClassName: system-cluster-critical
+      priorityClassName: system-node-critical
       hostNetwork: true
       dnsPolicy: Default
       {{- if not .Values.global.unprivilegedMode }}
@@ -76,8 +76,6 @@ spec:
               mountPath: /sys
             - name: host-etc-openvswitch
               mountPath: /etc/openvswitch
-            - name: host-var-run-dbus
-              mountPath: /var/run/dbus
             - name: host-var-log-ovs
               mountPath: /var/log/openvswitch
             - name: host-var-lib-ovs

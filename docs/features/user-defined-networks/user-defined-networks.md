@@ -71,6 +71,84 @@ existing CRs in the cluster.
 
 Always check the dependencies on the [Requirements page](../requirements.md)
 
+### Primary Layer2 upgrade prerequisite
+
+Primary Layer2 networks must have completed migration from the legacy topology
+before upgrading to this version. The legacy topology connects the pod switch
+directly to each node's gateway router. The current Geneve topology places a
+transit router between the pod switch and the gateway routers, providing a
+stable gateway MAC and IPv6 link-local address across nodes.
+
+Automatic migration support was introduced in **v1.2.0** and is also present in
+**v1.3.0 and v1.4.0**. If a deployment still uses the legacy topology, first use
+one of these migration-capable releases to complete the transition before
+upgrading to this version.
+
+Installing a migration-capable release alone does not complete the transition.
+Its controller selects the new topology at startup only after local primary
+Layer2 workload logical switch ports are absent from the OVN Northbound database
+and cluster-manager has allocated the network tunnel keys. Workload removal
+after startup does not rerun that selection; the controller must restart while
+those conditions hold. Verify that network reconciliation has completed on all
+participating nodes and that any surviving VMs use the stable network gateway
+MAC and IPv6 link-local address rather than the old node-specific gateway
+identities. See the
+[Layer2 transit-router design](../../okeps/okep-5094-layer2-transit-router.md#rolling-upgrade-and-traffic-disruption)
+for the transition details.
+
+Controller startup now selects the current topology unconditionally; it no
+longer defers conversion based on existing workloads or tunnel-key readiness.
+Upgrading with an unmigrated topology is unsupported. The conversion and
+mixed-topology compatibility code has been removed, including temporary upgrade
+ports and EgressIP next-hop conversion. Complete migration and cleanup of its
+temporary topology on an intermediate release; this version cannot finish that
+transition or maintain connectivity to legacy nodes.
+
+The node annotation `k8s.ovn.org/layer2-topology-version: "2.0"` is still published
+for compatibility with older peers during rolling upgrades. The annotation
+records topology selection, not successful completion of all network
+reconciliation. Setting it manually does not migrate an existing network.
+
+This prerequisite concerns legacy primary Layer2 deployments. Secondary Layer2
+networks and the current EVPN topology retain their existing behavior.
+
+### Gateway identity during live migration
+
+Current primary Layer2 networks use a network-wide gateway MAC and IPv6
+link-local address, independent of the node hosting a VM. OVN-Kubernetes no
+longer sends synthetic gateway GARPs or Router Advertisements after Layer2 VM
+live migration. Native OVN Router Advertisements continue to provide IPv6
+default-router discovery and refresh; the CNI RA filter continues to allow the
+stable gateway identity. VM addressing and source/target logical-port handoff
+continue to be managed by the live-migration controllers.
+
+Before upgrading, surviving VMs must have completed legacy gateway-state repair,
+including removal of old node-specific IPv6 default routers and legacy join-subnet
+on-link prefix state. This release no longer sends the lifetime-zero RAs used
+to withdraw that state. Existing pod annotations and namespace filters are not
+rewritten by this cleanup.
+
+The cluster default network still refreshes IPv4 gateway neighbors after live
+migration because its gateway MAC can change between the subnet owner and
+foreign nodes. See [Live Migration](../live-migration.md) for that behavior.
+
+## Allocation annotations
+
+Cluster manager owns the network ID and tunnel key annotations on
+NetworkAttachmentDefinitions. Configure networks through the UDN/CUDN API or
+NAD network configuration; do not assign these allocation annotations manually.
+
+An admission policy permits only cluster manager to add, change, or remove
+`k8s.ovn.org/network-id` and `k8s.ovn.org/tunnel-keys`, including during NAD
+creation. When restoring a NAD from saved YAML, omit these annotations and let
+cluster manager regenerate them.
+Unchanged annotations, including legacy invalid values, do not block unrelated
+updates.
+
+Cluster manager preserves allocated tunnel keys across restarts and NAD
+configuration changes. A failed annotation update does not release the
+network's existing tunnel keys.
+
 ## Performance/Scale Optimizations for UDN
 
 UDN scale is currently constrained to a couple of hundred UDNs when every UDN is
@@ -601,6 +679,12 @@ left out, so ovnkube-node keeps running. The node reports a
 * the kubelet cgroup is not found, and no usable path is configured
 * the kernel is built without `CONFIG_NFT_SOCKET`, so it has no `socket`
   expression and the rule cannot load
+* ovnkube-node runs in unprivileged mode (`global.unprivilegedMode`). An
+  unprivileged container has its own cgroup namespace, and since kernel
+  6.12 the kernel reads the match's `level` relative to the cgroup
+  namespace of the process that loads the rule, so a rule loaded from the
+  container can never match kubelet's cgroup. Only a privileged container
+  shares the host cgroup namespace
 
 `httpGet`, `tcpSocket` and `grpc` probes to primary UDN pods are dropped
 in that case. The rules drop rather than reject, so a probe times out
@@ -680,6 +764,61 @@ along with preserving their IPs.
 
 ![overlapping-podips](images/Layer2VMMigration.png)
 
+### MAC Security
+
+By default, secondary UDNs restrict each pod interface to its assigned MAC address.
+Disabling MAC security allows traffic with other source and destination MAC
+addresses, supporting workloads such as nested virtualization, network functions
+that forward traffic for other MAC addresses, or workloads sharing a virtual MAC
+for high availability.
+
+MAC security can only be disabled on secondary `Layer2` and `Localnet` networks
+with IPAM disabled. Set `macSecurity.mode: Disabled` and `ipam.mode: Disabled`
+under the topology's configuration when creating the network. If `macSecurity`
+is omitted, MAC security remains enabled. Changing the mode after creation is
+not supported.
+
+For example, create a Layer2 `UserDefinedNetwork`:
+
+```yaml
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: virt-l2-net
+  namespace: blue
+spec:
+  topology: Layer2
+  layer2:
+    role: Secondary
+    ipam:
+      mode: Disabled
+    macSecurity:
+      mode: Disabled
+```
+
+For a Layer2 `ClusterUserDefinedNetwork`, use the same configuration under
+`spec.network.layer2`. Localnet is available through `ClusterUserDefinedNetwork`:
+
+```yaml
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: virt-localnet
+spec:
+  namespaceSelector:
+    matchLabels:
+      tenant: yellow
+  network:
+    topology: Localnet
+    localnet:
+      role: Secondary
+      physicalNetworkName: localnet1
+      ipam:
+        mode: Disabled
+      macSecurity:
+        mode: Disabled
+```
+
 ### Services on UDNs
 
 Creating a service on UDNs is same as creating them on default
@@ -736,6 +875,15 @@ replicates those generated by the default controller and replaces the IP address
 For host-networked pods, the controller retains the same IP addresses as the
 default controller. Custom EndpointSlices not created by the default controller
 are not processed.
+
+The mirror controller makes one exception for KubeVirt live migration. During
+a non-failed migration, the source and target `virt-launcher` pods can both be
+reported as not ready even though the virtual machine remains available on its
+persistent IP address. The controller keeps these VM-owned endpoints ready and
+serving, and reports them as not terminating, so the service load balancer does
+not remove the VM backend during the handoff. This override does not apply after
+a failed migration or to pods that are not owned by a virtual machine; those
+endpoints retain the conditions reported by the default EndpointSlice.
 
 The default EndpointSlices controller creates objects that contain the following labels:
 

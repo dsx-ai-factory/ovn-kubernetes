@@ -64,7 +64,7 @@ type NodeWatchFactory interface {
 
 	NodeInformer() cache.SharedIndexInformer
 	NodeCoreInformer() coreinformers.NodeInformer
-	LocalPodInformer() cache.SharedIndexInformer
+	PodInformer() cache.SharedIndexInformer
 	NamespaceInformer() coreinformers.NamespaceInformer
 	PodCoreInformer() coreinformers.PodInformer
 	APBRouteInformer() adminpolicybasedrouteinformer.AdminPolicyBasedExternalRouteInformer

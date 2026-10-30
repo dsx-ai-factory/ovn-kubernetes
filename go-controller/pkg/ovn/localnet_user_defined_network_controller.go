@@ -344,7 +344,3 @@ func (oc *LocalnetUserDefinedNetworkController) localnetPortNetworkNameOptions()
 	}
 	return localnetLSPOptions
 }
-
-func (oc *LocalnetUserDefinedNetworkController) GetNetworkInterConnectInfo() *networkmanager.NetworkInterConnectInfo {
-	return nil
-}

@@ -623,6 +623,15 @@ false
 			<td>comma separated list of default network services allowed to be accessed from UDN pods, e.g. "namespace1/service1,namespace2/service2"</td>
 		</tr>
 		<tr>
+			<td>global.unprivilegedMode</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>Run node agents without full container privileges and enable OVN-Kubernetes unprivileged CNI mode; localnet DHCP IPAM requires false</td>
+		</tr>
+		<tr>
 			<td>global.useImageDigest</td>
 			<td>bool</td>
 			<td><pre lang="json">
@@ -1834,4 +1843,3 @@ false
 		</tr>
 	</tbody>
 </table>
-

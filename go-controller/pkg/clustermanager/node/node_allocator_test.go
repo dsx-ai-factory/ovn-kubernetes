@@ -15,8 +15,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	listersv1 "k8s.io/client-go/listers/core/v1"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -948,6 +950,61 @@ func TestCleanupNode_TransitRouterMigration(t *testing.T) {
 // TestSyncNodeNetworkAnnotations_TunnelID verifies that tunnel ID allocation
 // is correctly skipped or performed based on the Layer2UsesTransitRouter configuration.
 func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
+	setup := func(t *testing.T) (*NodeAllocator, *corev1.Node, *fake.Clientset) {
+		t.Helper()
+		origLayerUsesTransitRouter := config.Layer2UsesTransitRouter
+		t.Cleanup(func() {
+			config.Layer2UsesTransitRouter = origLayerUsesTransitRouter
+		})
+
+		if err := config.PrepareTestConfig(); err != nil {
+			t.Fatal(err)
+		}
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.Layer2UsesTransitRouter = false
+
+		netConf := &ovncnitypes.NetConf{
+			NetConf: cnitypes.NetConf{
+				Name: "udn-l2",
+				Type: "ovn-k8s-cni-overlay",
+			},
+			Topology: types.Layer2Topology,
+			Role:     types.NetworkRolePrimary,
+			Subnets:  "10.1.0.0/16",
+		}
+		netInfo, err := util.NewNetInfo(netConf, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		node1 := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "node1",
+				Annotations: map[string]string{},
+			},
+		}
+
+		fakeClient := fake.NewClientset(node1)
+		kube := &kube.Kube{KClient: fakeClient}
+
+		idAlloc := id.NewIDAllocator("tunnel-ids", 1024)
+		// Reserve ID 0 as it's not usable (types.NoTunnelID)
+		if err := idAlloc.ReserveID("zero", types.NoTunnelID); err != nil {
+			t.Fatal(err)
+		}
+
+		na := &NodeAllocator{
+			nodeLister:             newFakeNodeLister([]*corev1.Node{node1}),
+			kube:                   kube,
+			netInfo:                netInfo,
+			networkID:              1,
+			clusterSubnetAllocator: NewSubnetAllocator(),
+			idAllocator:            idAlloc,
+		}
+		return na, node1, fakeClient
+	}
+
 	tests := []struct {
 		name            string
 		transitRouter   bool
@@ -970,57 +1027,8 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			origLayerUsesTransitRouter := config.Layer2UsesTransitRouter
-			t.Cleanup(func() {
-				config.Layer2UsesTransitRouter = origLayerUsesTransitRouter
-			})
-
-			if err := config.PrepareTestConfig(); err != nil {
-				t.Fatal(err)
-			}
-			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-			config.OVNKubernetesFeature.EnableMultiNetwork = true
-			config.Layer2UsesTransitRouter = false
-
-			netConf := &ovncnitypes.NetConf{
-				NetConf: cnitypes.NetConf{
-					Name: "udn-l2",
-					Type: "ovn-k8s-cni-overlay",
-				},
-				Topology: types.Layer2Topology,
-				Role:     types.NetworkRolePrimary,
-				Subnets:  "10.1.0.0/16",
-			}
-			netInfo, err := util.NewNetInfo(netConf, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			networkName := netInfo.GetNetworkName()
-
-			node1 := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "node1",
-					Annotations: map[string]string{},
-				},
-			}
-
-			fakeClient := fake.NewClientset(node1)
-			kube := &kube.Kube{KClient: fakeClient}
-
-			idAlloc := id.NewIDAllocator("tunnel-ids", 1024)
-			// Reserve ID 0 as it's not usable (types.NoTunnelID)
-			if err := idAlloc.ReserveID("zero", types.NoTunnelID); err != nil {
-				t.Fatal(err)
-			}
-
-			na := &NodeAllocator{
-				nodeLister:             newFakeNodeLister([]*corev1.Node{node1}),
-				kube:                   kube,
-				netInfo:                netInfo,
-				networkID:              1,
-				clusterSubnetAllocator: NewSubnetAllocator(),
-				idAllocator:            idAlloc,
-			}
+			na, node1, fakeClient := setup(t)
+			networkName := na.netInfo.GetNetworkName()
 
 			// Set the topology mode directly (setTopologyType is now in ClusterManager)
 			config.Layer2UsesTransitRouter = tt.transitRouter
@@ -1069,6 +1077,150 @@ func TestSyncNodeNetworkAnnotations_TunnelID(t *testing.T) {
 				if allocatorID != types.InvalidID {
 					t.Fatalf("tunnel ID should not be allocated in the allocator, got %d", allocatorID)
 				}
+			}
+		})
+	}
+
+	invalidIDTests := []struct {
+		name            string
+		invalidTunnelID string
+		recover         bool
+	}{
+		{name: "recover negative tunnel ID", invalidTunnelID: "-2", recover: true},
+		{name: "recover reserved zero tunnel ID", invalidTunnelID: "0", recover: true},
+		{name: "reject tunnel ID at allocator limit", invalidTunnelID: "1024"},
+	}
+	for _, tt := range invalidIDTests {
+		t.Run(tt.name, func(t *testing.T) {
+			na, node1, fakeClient := setup(t)
+			networkName := na.netInfo.GetNetworkName()
+			node1.Annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] = fmt.Sprintf(`{"%s":"%s"}`, networkName, tt.invalidTunnelID)
+			if _, err := fakeClient.CoreV1().Nodes().Update(context.Background(), node1, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			err := na.syncNodeNetworkAnnotations(node1)
+			if tt.recover {
+				if err != nil {
+					t.Fatalf("expected unusable tunnel ID to be replaced: %v", err)
+				}
+				updated, err := fakeClient.CoreV1().Nodes().Get(context.Background(), node1.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				tunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(updated, networkName)
+				if err != nil || tunnelID <= types.NoTunnelID || tunnelID >= 1024 {
+					t.Fatalf("invalid replacement tunnel ID %d: %v", tunnelID, err)
+				}
+				if got := na.idAllocator.GetID(networkName + "_" + node1.Name); got != tunnelID {
+					t.Fatalf("replacement annotation %d differs from reservation %d", tunnelID, got)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected invalid tunnel ID to be rejected")
+			}
+			if got := na.idAllocator.GetID(networkName + "_" + node1.Name); got != types.InvalidID {
+				t.Fatalf("invalid tunnel ID was reserved: %d", got)
+			}
+			if got, err := na.idAllocator.AllocateID("healthy-node"); err != nil || got != 1 {
+				t.Fatalf("allocator did not remain usable: id=%d, err=%v", got, err)
+			}
+		})
+	}
+}
+
+// TestSyncNodeNetworkAnnotations_ReleaseOnPatchFailure verifies that when the
+// annotation patch fails, a subnet already persisted on the node (as seen via a
+// live apiserver read) is NOT released back to the allocator, while a subnet that
+// was not persisted still is.
+func TestSyncNodeNetworkAnnotations_ReleaseOnPatchFailure(t *testing.T) {
+	const subnetCIDR = "10.1.0.0/24"
+
+	tests := []struct {
+		name              string
+		persistedOnServer bool
+		wantReleased      bool
+	}{
+		{
+			name:              "subnet persisted on server is not released",
+			persistedOnServer: true,
+			wantReleased:      false,
+		},
+		{
+			name:              "subnet not persisted on server is released",
+			persistedOnServer: false,
+			wantReleased:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := config.PrepareTestConfig(); err != nil {
+				t.Fatal(err)
+			}
+			ranges, err := rangesFromStrings([]string{"10.1.0.0/16"}, []int{24})
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.Default.ClusterSubnets = ranges
+
+			netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName},
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			networkName := netInfo.GetNetworkName()
+
+			// The node handed to the reconcile (from the informer cache) has no
+			// host-subnet annotation, so a fresh subnet gets allocated.
+			listerNode := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "node1",
+					Annotations: map[string]string{},
+				},
+			}
+
+			// The server copy optionally already has that same subnet persisted,
+			// simulating a prior reconcile that succeeded on the apiserver.
+			serverNode := listerNode.DeepCopy()
+			if tt.persistedOnServer {
+				anno, err := util.UpdateNodeHostSubnetAnnotation(serverNode.Annotations, []*net.IPNet{ovntest.MustParseIPNet(subnetCIDR)}, networkName)
+				if err != nil {
+					t.Fatal(err)
+				}
+				serverNode.Annotations = anno
+			}
+
+			fakeClient := fake.NewClientset(serverNode)
+			// Force the annotation patch to fail so the release path runs.
+			fakeClient.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, fmt.Errorf("injected patch failure")
+			})
+			kubeIface := &kube.Kube{KClient: fakeClient}
+
+			na := &NodeAllocator{
+				nodeLister:             newFakeNodeLister([]*corev1.Node{listerNode}),
+				kube:                   kubeIface,
+				nodeClient:             fakeClient,
+				netInfo:                netInfo,
+				networkID:              types.DefaultNetworkID,
+				clusterSubnetAllocator: NewSubnetAllocator(),
+			}
+			if err := na.Init(); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := na.syncNodeNetworkAnnotations(listerNode); err == nil {
+				t.Fatal("expected syncNodeNetworkAnnotations to fail due to injected patch failure")
+			}
+
+			v4used, _ := na.clusterSubnetAllocator.Usage()
+			if tt.wantReleased && v4used != 0 {
+				t.Fatalf("expected subnet to be released, got %d allocated", v4used)
+			}
+			if !tt.wantReleased && v4used != 1 {
+				t.Fatalf("expected subnet to remain allocated, got %d allocated", v4used)
 			}
 		})
 	}

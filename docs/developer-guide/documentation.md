@@ -59,8 +59,11 @@ to reduce the time it takes for iptables to sync up on startup? Think about writ
 around this! Open a commit adding it to our `docs/blog/posts/` folder.
 
 * **API Reference**: Did you introduce a new CRD? OR Did you add a watcher a new CRD? Include API
-Reference documentation changes to `docs/api-reference` folder. See [here](../api-reference/introduction.md)
-for more details.
+Reference documentation changes to `docs/api-reference` folder.
+```bash
+make -C docs/ generate-api-reference
+```
+See [here](../api-reference/introduction.md) for more details.
 
 ## Website Guide
 
@@ -191,6 +194,19 @@ the prefix is already `master`).
 Do not hand-edit `404.html` on `gh-pages`; change `hack/docs-site-404.html` on
 `master` and let the versioning workflow republish it.
 
+**Redirect validation (`safeRedirect` helper):** All `location.replace()` calls
+in the 404 page go through a `safeRedirect()` function that enforces two
+invariants before redirecting:
+
+1. **Leading-slash normalization** — multiple leading slashes are collapsed to
+   one (`//…` → `/…`) so the browser never interprets the URL as a
+   protocol-relative redirect (e.g. `//evil.com`).
+2. **Origin check** — the URL is parsed with the `URL` API against the current
+   origin; if the resolved origin differs the redirect falls back to `/master/`.
+
+Every redirect target is an origin-relative path by construction, so these
+checks are defense-in-depth rather than a fix for an exploitable bug.
+
 Shell coverage for the install helper (local/remote `gh-pages`, unchanged vs
 changed template, `PUSH=false`/`true`, push failure) and for the clean-worktree
 preflight lives in `hack/test-install-gh-pages-404.sh`
@@ -238,6 +254,79 @@ Then verify the first merge deploy:
 
 If Pages is still set to **GitHub Actions**, the workflow can succeed while the
 public site does not update — fix the Source setting above.
+
+## Markdown extensions and plugins
+
+The docs site enables several MkDocs plugins and pymdownx Markdown extensions
+beyond basic Markdown. Use them to make documentation clearer and more
+interactive.
+
+### Tabbed content (`pymdownx.tabbed`)
+
+Show alternatives (e.g. `kubectl` vs `oc`, IPv4 vs IPv6) side-by-side:
+
+```markdown
+=== "kubectl"
+
+    ```bash
+    kubectl get pods -A
+    ```
+
+=== "oc"
+
+    ```bash
+    oc get pods -A
+    ```
+```
+
+### Task lists (`pymdownx.tasklist`)
+
+Render GitHub-style checklists:
+
+```markdown
+- [x] Create the CRD types
+- [x] Run `make codegen`
+- [ ] Add feature documentation
+```
+
+### Keyboard shortcuts (`pymdownx.keys`)
+
+Render keyboard keys with the `++` syntax:
+
+```markdown
+Press ++ctrl+c++ to copy, ++ctrl+v++ to paste.
+```
+
+### Text highlighting (`pymdownx.mark`)
+
+Highlight important text with double equals:
+
+```markdown
+This is ==highlighted text== in a sentence.
+```
+
+### Page revision dates (`git-revision-date-localized`)
+
+Each page automatically shows a "Last updated" date at the bottom, pulled
+from git history. No author action is needed. The plugin falls back to the
+build date when full git history is unavailable (e.g. CI shallow clones).
+
+### Redirects (`mkdocs-redirects`)
+
+When a page is moved or renamed, add an entry to the `redirect_maps` in
+`mkdocs.yml` so old URLs do not 404:
+
+```yaml
+plugins:
+  - redirects:
+      redirect_maps:
+        'old/path.md': 'new/path.md'
+```
+
+### HTML minification (`mkdocs-minify-plugin`)
+
+The built site HTML is automatically minified for faster page loads. No
+author action is needed.
 
 ## How to test your documentation changes?
 

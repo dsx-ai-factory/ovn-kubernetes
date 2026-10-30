@@ -7,6 +7,7 @@ package cni
 import (
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
@@ -16,14 +17,9 @@ import (
 
 // updatePodDPUConnDetailsWithRetry update the pod annotation with the given connection details for the NAD in
 // the PodRequest. If the dpuConnDetails argument is nil, delete the NAD's DPU connection details annotation instead.
-func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podLister corev1listers.PodLister, dpuConnDetails *util.DPUConnectionDetails) error {
-	klog.Infof("Updating pod %s/%s with connection details (%+v) for NAD %s", pr.PodNamespace, pr.PodName,
-		dpuConnDetails, pr.nadName)
-	pod, err := podLister.Pods(pr.PodNamespace).Get(pr.PodName)
-	if err != nil {
-		return fmt.Errorf("failed to get pod %s/%s to update connection details for NAD %s: %v", pr.PodNamespace, pr.PodName, pr.nadName, err)
-	}
-	err = util.UpdatePodDPUConnDetailsWithRetry(
+func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podLister corev1listers.PodLister, pod *corev1.Pod, dpuConnDetails *util.DPUConnectionDetails) error {
+	klog.Infof("Updating pod %s/%s with connection details (%+v) for NAD %s", pod.Namespace, pod.Name, dpuConnDetails, pr.nadKey)
+	err := util.UpdatePodDPUConnDetailsWithRetry(
 		pr.ctx,
 		podLister,
 		kube,

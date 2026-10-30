@@ -78,6 +78,10 @@
     "global": {
       "type": "object",
       "properties": {
+        "unprivilegedMode": {
+          "type": "boolean",
+          "description": "Run node agents without full container privileges and enable OVN-Kubernetes unprivileged CNI mode; localnet DHCP IPAM requires false"
+        },
         "namespace": {
           "type": "string",
           "description": "namespace where all the OVN K8s components' resources must be deployed"

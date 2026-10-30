@@ -161,6 +161,7 @@ func NewForCluster(
 		recorder,
 		tunnelKeysAllocator,
 		"",
+		false,
 	)
 }
 
@@ -179,6 +180,28 @@ func NewForNode(
 		nil,
 		nil,
 		node,
+		false,
+	)
+}
+
+// NewForController builds a controller for ovnkube-controller. Existing networks
+// are started asynchronously with bounded concurrency so bulk UDN start does not
+// block controller readiness.
+func NewForController(
+	node string,
+	cm ControllerManager,
+	wf watchFactory,
+) (Controller, error) {
+	return new(
+		"ovnkube-controller-nad-controller",
+		node,
+		cm,
+		wf,
+		nil,
+		nil,
+		nil,
+		node,
+		true,
 	)
 }
 
@@ -194,8 +217,9 @@ func new(
 	recorder record.EventRecorder,
 	tunnelKeysAllocator *id.TunnelKeysAllocator,
 	filterNADsOnNode string,
+	asyncNetworkStart bool,
 ) (Controller, error) {
-	return newController(name, node, cm, wf, ovnClient, recorder, tunnelKeysAllocator, filterNADsOnNode)
+	return newController(name, node, cm, wf, ovnClient, recorder, tunnelKeysAllocator, filterNADsOnNode, asyncNetworkStart)
 }
 
 // ControllerManager manages controllers. Needs to be provided in order to build
@@ -230,10 +254,6 @@ type BaseNetworkController interface {
 	ReconcilableNetworkController
 	Start(ctx context.Context) error
 	Stop()
-	// Network Controller capable of network inter-connect will return non-nil NetworkInterConnectInfo
-	// Active side return non-nil NetworkInterConnectInfo.StartInterConnect() and
-	// NetworkInterConnectInfo.StopInterConnect()
-	GetNetworkInterConnectInfo() *NetworkInterConnectInfo
 }
 
 // NetworkController is a BaseNetworkController that can also clean up after

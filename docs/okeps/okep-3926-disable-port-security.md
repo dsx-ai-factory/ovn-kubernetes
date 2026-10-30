@@ -25,8 +25,8 @@ backends.
   CNI's `macspoofchk` capability.
 - Enable unknown MAC address delivery.
 - Avoid using ARP/NDP flooding as much as possible when MAC spoof protection is disabled.
-- Support configuration through the NAD JSON config and the ClusterUserDefinedNetwork (CUDN) CRD
-  API only.
+- Support configuration through the NAD JSON, UserDefinedNetwork (UDN) and
+  ClusterUserDefinedNetwork (CUDN) CRD APIs only.
 
 ## Non-Goals
 
@@ -43,9 +43,6 @@ backends.
   IP-level port security as a side effect.
 - MAC learning or dynamic FDB management at the OVN-Kubernetes level; OVN manages its own FDB
   natively.
-- Namespace-scoped UserDefinedNetwork (UDN) resources cannot enable this feature, as
-  disabling MAC spoof protection is a cluster-admin decision that should not be available to
-  namespace users.
 
 ## Future Goals
 
@@ -89,19 +86,12 @@ This mechanism is essential for nested virtualization: the hypervisor inside the
 traffic from VMs whose MAC addresses are not known to OVN. Without `unknown`, unicast frames
 destined for those VM MAC addresses would be silently dropped by the logical switch.
 
-### The `force_fdb_lookup` Option
+### FDB Lookup for unknown MAC Addresses
 
-OVN 24.03 introduced the `force_fdb_lookup` option on logical switch ports. When set to `true`
-on a port with `unknown` in its addresses, OVN uses the Forwarding Database (FDB) to look up
-the destination MAC before delivering the frame, rather than flooding it to all `unknown` ports.
-
-This optimization is critical for production deployments: without it, every frame destined for a
-MAC not in OVN's address tables would be flooded to all ports marked `unknown`, creating
-significant unnecessary traffic. With FDB lookups, OVN learns where each MAC resides (via
-source MAC observation) and delivers subsequent frames directly.
-
-OVN-Kubernetes already pins to OVN version 24.03 or later, so `force_fdb_lookup` is available
-in all supported configurations.
+For frames destined to unknown MAC address (destination MAC not matching port MAC),
+OVN uses the Forwarding Database (FDB) before flooding the frame to all `unknown` ports:
+- If a MAC-to-port association exists, the frame is sent the associated port.
+- If no association exists, the frame is sent to all `unknown` ports (flooding).
 
 ### Existing Port Security Behavior with IPAM Disabled
 
@@ -180,8 +170,8 @@ reachable by their MAC addresses on the layer2 network, so that other workloads 
 network can send unicast traffic to specific VMs without flooding.
 
 **Example scenario:** A pod runs three VMs, each with a distinct MAC address. Another pod on the
-same L2 secondary network sends a unicast frame to one of those VMs by MAC. With `force_fdb_lookup`
-enabled, OVN learns the MAC-to-port association and delivers the frame directly to the hosting
+same L2 secondary network sends a unicast frame to one of those VMs by MAC.
+OVN uses the FDB and learns the MAC-to-port association and delivers the frame directly to the hosting
 pod's LSP, rather than flooding it to all `unknown` ports on the switch.
 
 ### Story 5: VM Bridging Between Localnet and Layer2 Overlay Networks
@@ -202,7 +192,6 @@ discriminator that, when set to `Disabled`:
 
 1. Leaves the `port_security` column empty on all LSPs attached to the network.
 2. Appends `unknown` to the `addresses` column of each LSP.
-3. Sets `force_fdb_lookup=true` in the `options` column of each LSP.
 
 The `macSecurity` sub-struct with a `mode` enum discriminator follows the established CRD
 pattern used by `VLANConfig` (mode + sub-struct) and `IPAMConfig` (mode + lifecycle).
@@ -230,16 +219,15 @@ and `localnet` topologies only, requires `ipam.mode` to be `Disabled` (i.e., sub
 specified), and the network role must be `"secondary"`. Setting it on a `layer3` topology or
 with IPAM enabled results in a validation error.
 
-#### ClusterUserDefinedNetwork CRD
+#### user-defined network CRDs
 
-Add a `macSecurity` sub-struct with a `mode` enum discriminator to `Layer2Config` and
-`LocalnetConfig` in the CUDN CRD API, following the pattern established by
+Add a `macSecurity` sub-struct with a `mode` enum discriminator to `Layer2Config` in both
+the UserDefinedNetwork and ClusterUserDefinedNetwork CRD APIs, and to `LocalnetConfig`
+in the CUDN CRD API. Localnet topology remains CUDN-only. This follows the pattern established by
 [OKEP-5085](okep-5085-localnet-api.md) for extending the CUDN CRD and the discriminated
-union pattern used by `VLANConfig` and `IPAMConfig`. This field is only supported on
-ClusterUserDefinedNetwork (cluster-scoped); namespace-scoped UserDefinedNetwork resources
-cannot set this field.
+union pattern used by `VLANConfig` and `IPAMConfig`.
 
-**Layer2 example:**
+**Layer2 examples:**
 
 ```yaml
 apiVersion: k8s.ovn.org/v1
@@ -258,6 +246,22 @@ spec:
         mode: Disabled
       macSecurity:
         mode: Disabled
+```
+
+```yaml
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: kubevirt-l2-net
+  namespace: blue
+spec:
+  topology: Layer2
+  layer2:
+    role: Secondary
+    ipam:
+      mode: Disabled
+    macSecurity:
+      mode: Disabled
 ```
 
 **Localnet example:**
@@ -297,8 +301,7 @@ const (
 	MACSecurityModeEnabled MACSecurityMode = "Enabled"
 
 	// MACSecurityModeDisabled removes MAC spoof protection restrictions and enables unknown MAC
-	// address handling via the OVN `unknown` address keyword with `force_fdb_lookup` for
-	// FDB-based unicast delivery.
+	// address handling via the OVN `unknown` address keyword.
 	MACSecurityModeDisabled MACSecurityMode = "Disabled"
 )
 
@@ -324,27 +327,21 @@ For both `Layer2Config` and `LocalnetConfig`:
 ```go
 // MACSecurity configures MAC spoof protection behavior on logical switch ports attached to this
 // network. When omitted, MAC spoof protection defaults to Enabled (the current default behavior).
-// Only applicable to Secondary role networks on ClusterUserDefinedNetwork resources.
+// Only applicable to Secondary role networks on UserDefinedNetwork and
+// ClusterUserDefinedNetwork resources, for their supported topologies.
 // +optional
 MACSecurity *MACSecurityConfig `json:"macSecurity,omitempty"`
 ```
 
 #### CRD Validation Rules
 
-The following CEL validations should be added:
+The following CEL validations should be added for both UDN and CUDN resources, for their
+supported topologies:
 
 - `macSecurity.mode: Disabled` is only allowed when `role` is `Secondary`:
   ```text
   rule: "!has(self.macSecurity) || self.macSecurity.mode != 'Disabled' || self.role == 'Secondary'"
   message: "macSecurity.mode Disabled is only supported for Secondary networks"
-  ```
-
-- `macSecurity` is not allowed on namespace-scoped `UserDefinedNetwork` resources.
-  Since `UserDefinedNetworkSpec` and `ClusterUserDefinedNetworkSpec` share the same
-  `Layer2Config` type, this constraint must be enforced at the `UserDefinedNetworkSpec` level:
-  ```text
-  rule: "!has(self.layer2) || !has(self.layer2.macSecurity)"
-  message: "macSecurity is only supported on ClusterUserDefinedNetwork"
   ```
 
 - `macSecurity.mode: Disabled` requires `ipam.mode` to be `Disabled`:
@@ -368,7 +365,7 @@ The following CEL validations should be added:
 
 #### NAD Generation from CRD
 
-The CUDN controller that generates NADs from CRD specs must translate the
+The user-defined resource controller that generates NADs from CRD specs must translate the
 `macSecurity.mode` field to the NAD JSON config `macSecurityMode` field, following the
 same pattern used for other fields like `physicalNetworkName`, `allowPersistentIPs`, etc.
 When `macSecurity` is omitted in the CRD, the NAD should either omit `macSecurityMode`
@@ -376,10 +373,10 @@ or set it to `"Enabled"` (both are equivalent).
 
 #### Interaction with IPAM Mode
 
-| IPAM Mode  | macSecurity.mode       | MAC Port Security | Unknown Addresses | Notes                                |
-|------------|------------------------|-------------------|-------------------|--------------------------------------|
-| `Disabled` | `Enabled` (default)   | Enabled           | Disabled          | MAC-only security, no IPs assigned   |
-| `Disabled` | `Disabled`             | Disabled          | Enabled           | Full L2 flexibility, no restrictions |
+| IPAM Mode  | macSecurity.mode    | MAC Port Security | Unknown Addresses | Notes                                |
+|------------|---------------------|-------------------|-------------------|--------------------------------------|
+| `Disabled` | `Enabled` (default) | Enabled           | Disabled          | MAC-only security, no IPs assigned   |
+| `Disabled` | `Disabled`          | Disabled          | Enabled           | Full L2 flexibility, no restrictions |
 
 #### Future: Per-Attachment MAC Spoof Protection
 
@@ -428,7 +425,6 @@ The following diagram illustrates how MAC spoof protection affects traffic flow:
    |
    | OVN LSP (port_security: [] if macSecurity.mode: Disabled)
    |          (addresses: ["0a:58:...", "unknown"])
-   |          (options: {force_fdb_lookup: "true"})
    |
  OVN Logical Switch (L2 secondary network)
    |
@@ -442,12 +438,11 @@ The following diagram illustrates how MAC spoof protection affects traffic flow:
 When `macSecurity.mode` is `Enabled` (default), the LSP has:
 - `addresses: ["0a:58:c0:a8:01:03"]`
 - `port_security: ["0a:58:c0:a8:01:03"]`
-- No `unknown` in addresses, no `force_fdb_lookup`
+- No `unknown` in addresses
 
 When `macSecurity.mode` is `Disabled` (requires `ipam.mode: Disabled`), the LSP has:
 - `addresses: ["0a:58:c0:a8:01:03", "unknown"]` (MAC only, no IP — IPAM is disabled)
 - `port_security: []` (empty)
-- `options: {"force_fdb_lookup": "true", ...}`
 
 ### Testing Details
 
@@ -458,14 +453,15 @@ When `macSecurity.mode` is `Disabled` (requires `ipam.mode: Disabled`), the LSP 
 - From pod A, send traffic with a spoofed source MAC address.
 - Verify pod B receives the traffic (it would be dropped without the feature).
 - Repeat for localnet topology.
-- Test with CUDN CRD (not just raw NAD).
+- Test with both UserDefinedNetwork and ClusterUserDefinedNetwork CRDs for layer2,
+  and ClusterUserDefinedNetwork for localnet (not just raw NAD).
 
 #### Cross Feature Testing
 
 - Verify that `allowPersistentIPs` and `macSecurity.mode: Disabled` are mutually exclusive:
   `allowPersistentIPs` requires IPAM enabled (to assign and persist IPs across live migrations),
   while `macSecurity.mode: Disabled` requires `ipam.mode: Disabled`. Validation should reject
-  a CUDN that specifies both.
+  user-defined network CRDs that specify both.
 
 ### Documentation Details
 
@@ -480,20 +476,18 @@ When `macSecurity.mode` is `Disabled` (requires `ipam.mode: Disabled`), the LSP 
    spoofing, ARP spoofing/poisoning (allowing MITM attacks on the L2 segment), and potentially
    IP spoofing attacks.
    - **Mitigation**: The feature is opt-in, per-network, restricted to secondary networks with
-     `Secondary` role only, and only available on cluster-scoped `ClusterUserDefinedNetwork`
-     resources. Namespace-scoped `UserDefinedNetwork` resources cannot enable this feature,
-     ensuring that only cluster administrators can disable MAC spoof protection. The default
-     remains secure (MAC spoof protection enabled). Administrators deploying this feature should
-     use encrypted transports on networks with MAC spoof protection disabled when sensitive
-     traffic is present.
+     `Secondary` role only. The default remains secure (MAC spoof protection is enabled). 
+     Administrators deploying this feature should use encrypted transport on networks with MAC
+     spoof protection disabled when sensitive traffic is present.
 
 2. **Broadcast storm risk with unknown addresses**: Adding `unknown` to LSP addresses means
-   unicast frames for unknown MACs are delivered to all `unknown` ports, which can create
-   significant traffic amplification.
-   - **Mitigation**: `force_fdb_lookup` is always enabled alongside `unknown` addresses. The FDB
-     learns MAC-to-port associations from observed source MACs, so after initial discovery, frames
-     are delivered directly. OVN 24.03+, which is the minimum version used by OVN-Kubernetes,
-     supports this option.
+   unicast frames for unknown MACs may be delivered to all `unknown` ports, which can create
+   traffic amplification.
+   - **Mitigation**: OVN performs FDB lookup for unicast frames destined to MAC addresses not
+     found in any port's `addresses` column. 
+     Flooding to all `unknown` ports occurs only when no FDB association exists. 
+     After OVN learns the MAC-to-port mapping from observed source traffic, subsequent frames are
+     delivered directly.
 
 3. **Immutability constraint**: The field is immutable after creation in the initial
    implementation, meaning administrators cannot toggle MAC spoof protection on an existing
@@ -504,9 +498,7 @@ When `macSecurity.mode` is `Disabled` (requires `ipam.mode: Disabled`), the LSP 
 
 ## OVN-Kubernetes Version Skew
 
-This feature is planned for introduction in the next OVN-Kubernetes release. It requires
-OVN 24.03 or later for the `force_fdb_lookup` optimization, which is already the minimum OVN
-version supported by OVN-Kubernetes.
+This feature is planned for introduction in the next OVN-Kubernetes release.
 
 No special version skew handling is required: the feature is a per-network configuration option.
 Controllers running older versions that do not recognize the `macSecurity` sub-struct will
@@ -519,8 +511,9 @@ with MAC spoof protection enabled.
   preserving the current behavior of enforcing port security on all LSPs.
 - The NAD JSON config `macSecurityMode` field is additive and optional. Existing NAD
   configurations without the field continue to work identically.
-- The CRD field is an optional pointer with nil default. Existing CUDN resources are unaffected.
-  UDN resources cannot use this field with `mode: Disabled`.
+- The CRD field is an optional pointer with nil default. Existing UserDefinedNetwork and
+  ClusterUserDefinedNetwork resources are unaffected. Both resources can opt in to
+  `mode: Disabled` on supported secondary networks with `ipam.mode: Disabled`.
 - No migration or upgrade steps are required.
 
 ## Alternatives
@@ -530,8 +523,8 @@ with MAC spoof protection enabled.
 The original implementation in [PR #4377](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/4377)
 proposed two independent boolean fields:
 - `disablePortSecurity`: controls the `port_security` column on LSPs.
-- `enableL2Unknown`: controls whether `unknown` is added to `addresses` and whether
-  `force_fdb_lookup` is set.
+- `enableL2Unknown`: controls whether `unknown` is added to `addresses` (the original PR also
+  set `force_fdb_lookup`, which is no longer proposed — see Alternative 7).
 
 **Why rejected:** There is no identified use case for controlling these behaviors independently.
 If MAC spoof protection is disabled (allowing arbitrary source MACs), the network must also handle
@@ -549,8 +542,8 @@ annotation (e.g., `k8s.ovn.org/allow-mac-spoofing: "true"`).
 
 **Why rejected:**
 - **Security**: Any pod (or user with pod-create access) could potentially set the annotation,
-  widening the attack surface. A per-network setting on the cluster-scoped CUDN resource
-  requires cluster-admin intervention.
+  widening the attack surface. A per-network setting requires permission to configure the
+  namespace-scoped UDN or cluster-scoped CUDN resource, rather than just pod-create access.
 - **Consistency**: The bridge CNI's `macspoofchk` is per-network, and OVN-Kubernetes should
   follow the same granularity for consistency.
 - **Semantics**: MAC spoof protection is a property of the network infrastructure, not of
@@ -560,12 +553,12 @@ annotation (e.g., `k8s.ovn.org/allow-mac-spoofing: "true"`).
 
 ### Alternative 3: NAD-Only (No CRD Integration)
 
-Keep the feature in the NAD JSON configuration only, without adding a field to the CUDN CRD.
+Keep the feature in the NAD JSON configuration only, without adding a field to the UDN or CUDN CRDs.
 
 **Why rejected:** The OVN-Kubernetes community is moving toward structured CRD APIs for network
 configuration. [OKEP-5085](okep-5085-localnet-api.md) established the pattern of defining
 features in the CUDN CRD with automatic NAD generation. Adding a feature only to NADs creates
-a management gap where CUDN-managed networks cannot use the feature without manual NAD editing,
+a management gap where UDN- or CUDN-managed networks cannot use the feature without manual NAD editing,
 which defeats the purpose of the CRD controller.
 
 ### Alternative 4: Three-Valued Enum
@@ -615,6 +608,22 @@ as "MAC security is on," which matches the field's default value and secure-by-d
 and `macSecurity.mode: Disabled` reads just as naturally as "MAC security is off." The
 `macSecurity` name still aligns with the bridge CNI's `macspoofchk` terminology that users are
 already familiar with, while removing the double-negative naming issue.
+
+### Alternative 7: Use `force_fdb_lookup` LSP Option to optimize flooding
+
+OVN 24.03 introduced the `force_fdb_lookup` option on logical switch ports, which was originally
+considered as part of the proposed solution to reduce flooding frames destined to unknown MAC addresses
+(destination MAC address not present in any port's `addresses` column), for ports set to handle unknown MACs
+(`unknown` set in the port's `addresses` column).
+
+**Why not used:** 
+The `force_fdb_lookup` option does not change behavior for such packets.
+OVN already performs FDB lookup for frames whose destination MAC is unknown.
+Flooding to all `unknown` ports occurs only when no FDB association is found. 
+Setting the `force_fdb_lookup` option adds no benefit for this use case.
+Moreover, it would cause unnecessary FDB lookups for frames destined to known MACs (destination MAC match the port MAC)
+which is handled by the existing flows.
+Hence, omitted from the proposed solution.
 
 ## References
 

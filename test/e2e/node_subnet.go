@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -25,8 +27,10 @@ import (
 var _ = ginkgo.Describe("Node subnet claims", func() {
 	f := wrappedTestFramework("node-subnet-claim")
 
-	ginkgo.It("rejects a node claiming a sub-prefix of another node's subnet", func() {
-		ctx := context.Background()
+	ginkgo.It("rejects a node claiming controller-owned network allocations", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(ctx, f.ClientSet, 1)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(nodes.Items).NotTo(gomega.BeEmpty())
@@ -44,8 +48,10 @@ var _ = ginkgo.Describe("Node subnet claims", func() {
 		}
 		annotations, err := util.UpdateNodeHostSubnetAnnotation(nil, []*net.IPNet{claimedSubnet}, ovntypes.DefaultNetworkName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		annotations[util.OvnNodeID] = nodes.Items[0].Annotations[util.OvnNodeID]
+		annotations[ovntypes.UDNLayer2NodeGRLRPTunnelIDAnnotation] = `{"test-network":"1"}`
 
-		const remoteNodeName = "node-subnet-claim-test"
+		remoteNodeName := "node-subnet-claim-" + framework.RandomSuffix()
 		config := rest.CopyConfig(f.ClientConfig())
 		config.Impersonate = rest.ImpersonationConfig{
 			UserName: "system:node:" + remoteNodeName,
@@ -54,50 +60,44 @@ var _ = ginkgo.Describe("Node subnet claims", func() {
 		remoteNodeClient, err := kubernetes.NewForConfig(config)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		maliciousNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name:        remoteNodeName,
-			Annotations: annotations,
-		}}
-		_, err = remoteNodeClient.CoreV1().Nodes().Create(ctx, maliciousNode, metav1.CreateOptions{})
-		if err == nil {
-			gomega.Expect(f.ClientSet.CoreV1().Nodes().Delete(ctx, remoteNodeName,
-				metav1.DeleteOptions{})).To(gomega.Succeed())
+		// Test each annotation separately so one rejection cannot mask a missing rule.
+		for annotation, value := range annotations {
+			maliciousNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name:        remoteNodeName,
+				Annotations: map[string]string{annotation: value},
+			}}
+			_, err = remoteNodeClient.CoreV1().Nodes().Create(ctx, maliciousNode, metav1.CreateOptions{})
+			if err == nil {
+				gomega.Expect(f.ClientSet.CoreV1().Nodes().Delete(ctx, remoteNodeName,
+					metav1.DeleteOptions{})).To(gomega.Succeed())
+			}
+			gomega.Expect(apierrors.IsForbidden(err)).To(gomega.BeTrue(),
+				"allocation claim %s during node creation was not forbidden: %v", annotation, err)
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+				"not allowed to modify the following controller-owned annotations")))
 		}
-		gomega.Expect(apierrors.IsForbidden(err)).To(gomega.BeTrue(),
-			"node subnet claim during node creation was not forbidden: %v", err)
-		gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
-			"not allowed to modify the following controller-owned annotations")))
 
 		_, err = f.ClientSet.CoreV1().Nodes().Create(ctx, &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{Name: remoteNodeName},
 		}, metav1.CreateOptions{})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		ginkgo.DeferCleanup(func() {
-			gomega.Expect(f.ClientSet.CoreV1().Nodes().Delete(ctx, remoteNodeName,
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+
+			gomega.Expect(f.ClientSet.CoreV1().Nodes().Delete(cleanupCtx, remoteNodeName,
 				metav1.DeleteOptions{})).To(gomega.Succeed())
 		})
 
-		annotationPatch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`,
-			ovntypes.NodeSubnetsAnnotation, annotations[ovntypes.NodeSubnetsAnnotation]))
-		for _, subresource := range []string{"", "status"} {
-			_, err = remoteNodeClient.CoreV1().Nodes().Patch(ctx, remoteNodeName,
-				types.MergePatchType, annotationPatch, metav1.PatchOptions{}, subresource)
-			gomega.Expect(apierrors.IsForbidden(err)).To(gomega.BeTrue(),
-				"node subnet claim through nodes/%s was not forbidden: %v", subresource, err)
-			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
-				"not allowed to modify the following controller-owned annotations")))
-		}
-
-		updatedNode, err := f.ClientSet.CoreV1().Nodes().Get(ctx, remoteNodeName, metav1.GetOptions{})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		// Cluster-manager can assign a subnet independently of the rejected claim.
-		if _, hasSubnets := updatedNode.Annotations[ovntypes.NodeSubnetsAnnotation]; hasSubnets {
-			var assignedSubnets []*net.IPNet
-			assignedSubnets, err = util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			for _, assignedSubnet := range assignedSubnets {
-				gomega.Expect(assignedSubnet.String()).NotTo(gomega.Equal(claimedSubnet.String()))
+		for annotation, value := range annotations {
+			annotationPatch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, annotation, value))
+			for _, subresource := range []string{"", "status"} {
+				_, err = remoteNodeClient.CoreV1().Nodes().Patch(ctx, remoteNodeName,
+					types.MergePatchType, annotationPatch, metav1.PatchOptions{}, subresource)
+				gomega.Expect(apierrors.IsForbidden(err)).To(gomega.BeTrue(),
+					"allocation claim %s through nodes/%s was not forbidden: %v", annotation, subresource, err)
+				gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+					"not allowed to modify the following controller-owned annotations")))
 			}
 		}
 	})
