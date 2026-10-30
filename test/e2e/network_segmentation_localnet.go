@@ -187,6 +187,8 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 
 		cudnYAML := newLocalnetIPAMLessCUDNYaml(netConf, f.Namespace.Name)
 		if cidr != "" {
+			// Reserve the gateway addresses used by downstream localnet routes.
+			netConf.excludeCIDRs = []string{"192.168.102.1/32", "2001:dbc::1/128"}
 			cudnYAML = newLocalnetCUDNYaml(netConf, f.Namespace.Name)
 		}
 		cleanup, err := createManifest("", cudnYAML)
