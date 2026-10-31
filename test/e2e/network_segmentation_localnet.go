@@ -153,7 +153,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 	// so a restart must keep the port of every running localnet pod: with no
 	// IPAM, ovnkube-node writes the pod annotation; with subnets, the cluster
 	// manager does.
-	DescribeTable("should preserve the LSP of a localnet pod after ovnkube-node restart", func(vlan int, ovsBrName, cidr string) {
+	DescribeTable("should preserve the LSP of a localnet pod after ovnkube-node restart", func(vlan int, ovsBrName, cidr string, excludeCIDRs []string) {
 		var (
 			cudnName            = uniqueMetaName("restart-localnet")
 			physicalNetworkName = uniqueMetaName("physnet-restart")
@@ -182,7 +182,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 			physicalNetworkName: physicalNetworkName,
 			vlanID:              vlan,
 			cidr:                cidr, // empty: IPAM-less
-			excludeCIDRs:        []string{},
+			excludeCIDRs:        excludeCIDRs,
 		}
 
 		cudnYAML := newLocalnetIPAMLessCUDNYaml(netConf, f.Namespace.Name)
@@ -294,8 +294,14 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		_, hasAnnotation := pod.Annotations["k8s.ovn.org/pod-networks"]
 		Expect(hasAnnotation).To(BeTrue(), "pod should still have network annotation")
 	},
-		Entry("with no IPAM", 201, "ovsbr-ipamless", ""),
-		Entry("with subnets", 202, "ovsbr-subnets", joinStrings("192.168.102.0/24", "2001:dbc::/64")),
+		Entry("with no IPAM", 201, "ovsbr-ipamless", "", nil),
+		// The first address of each subnet is the next hop of the routes OVN-K
+		// writes in the pod annotation, so it has to stay out of the pool: a pod
+		// allocated it would get a route via its own address, which the kernel
+		// rejects for IPv6.
+		Entry("with subnets", 202, "ovsbr-subnets",
+			joinStrings("192.168.102.0/24", "2001:dbc::/64"),
+			[]string{"192.168.102.1/32", "2001:dbc::1/128"}),
 	)
 })
 
