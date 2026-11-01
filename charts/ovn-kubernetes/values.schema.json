@@ -166,6 +166,9 @@
             "array",
             "null"
           ],
+          "items": {
+            "type": "string"
+          },
           "description": "Users other than ovnkube-cluster-manager allowed to write the hybrid overlay node subnet annotation"
         },
         "enableNetworkSegmentation": {
