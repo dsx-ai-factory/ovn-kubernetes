@@ -11,6 +11,7 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 
 	corev1 "k8s.io/api/core/v1"
@@ -29,12 +30,17 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+// dpuTestCtxKey tags the request context so it is distinguishable from a fresh
+// root, letting the kube mock assert the request's own context reaches the API.
+type dpuTestCtxKey struct{}
+
 var _ = Describe("cni_dpu tests", func() {
 	var fakeKubeInterface kubeMocks.Interface
 	var fakeSriovnetOps utilMocks.SriovnetOps
 	var mockNetLinkOps *utilMocks.NetLinkOps
 	var existingMockLink *netlink_mocks.Link
 	var pr PodRequest
+	var prCtx context.Context
 	var pod *corev1.Pod
 	var podLister v1mocks.PodLister
 	var podNamespaceLister v1mocks.PodNamespaceLister
@@ -48,8 +54,9 @@ var _ = Describe("cni_dpu tests", func() {
 		util.SetSriovnetOpsInst(&fakeSriovnetOps)
 		existingMockLink.On("Attrs").Return(&netlink.LinkAttrs{HardwareAddr: ovntest.MustParseMAC("00:00:00:01:02:03")})
 
+		prCtx = context.WithValue(context.Background(), dpuTestCtxKey{}, "cni_dpu")
 		pr = PodRequest{
-			ctx:          context.Background(),
+			ctx:          prCtx,
 			Command:      CNIAdd,
 			PodNamespace: "foo-ns",
 			PodName:      "bar-pod",
@@ -121,6 +128,9 @@ var _ = Describe("cni_dpu tests", func() {
 	})
 
 	Context("updatePodDPUConnDetailsWithRetry", func() {
+		requestContext := mock.MatchedBy(func(ctx context.Context) bool {
+			return ctx.Value(dpuTestCtxKey{}) == "cni_dpu"
+		})
 		dpuCd := util.DPUConnectionDetails{
 			PfId:      "0",
 			VfId:      "2",
@@ -134,7 +144,7 @@ var _ = Describe("cni_dpu tests", func() {
 			cpod := pod.DeepCopy()
 			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("PatchPodStatusAnnotations", pod, cpod).Return(nil)
+			fakeKubeInterface.On("PatchPodStatusAnnotations", requestContext, pod, cpod).Return(nil)
 			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, pod, &dpuCd)
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -148,7 +158,7 @@ var _ = Describe("cni_dpu tests", func() {
 			cpod := pod.DeepCopy()
 			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, nil, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("PatchPodStatusAnnotations", pod, cpod).Return(nil)
+			fakeKubeInterface.On("PatchPodStatusAnnotations", requestContext, pod, cpod).Return(nil)
 			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, pod, nil)
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -160,7 +170,7 @@ var _ = Describe("cni_dpu tests", func() {
 			cpod := pod.DeepCopy()
 			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("PatchPodStatusAnnotations", pod, cpod).Return(fmt.Errorf("failed to set annotation"))
+			fakeKubeInterface.On("PatchPodStatusAnnotations", requestContext, pod, cpod).Return(fmt.Errorf("failed to set annotation"))
 			err = pr.updatePodDPUConnDetailsWithRetry(&fakeKubeInterface, &podLister, pod, &dpuCd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to set annotation"))

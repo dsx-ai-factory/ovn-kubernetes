@@ -118,7 +118,7 @@ func UpdatePodWithRetryOrRollback(ctx context.Context, podLister listers.PodList
 			patchSpan.End()
 		}()
 
-		err = kube.PatchPodStatusAnnotations(oldPod, updatedPod)
+		err = kube.PatchPodStatusAnnotations(ctx, oldPod, updatedPod)
 		if err != nil && rollback != nil {
 			rollback()
 		}

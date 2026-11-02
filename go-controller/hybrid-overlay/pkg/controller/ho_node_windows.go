@@ -7,6 +7,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -341,7 +342,7 @@ func (n *NodeController) initSelf(node *corev1.Node, nodeSubnet *net.IPNet) erro
 			if len(policySettings.Address) == 0 {
 				return fmt.Errorf("error creating the network: no DRMAC address")
 			}
-			if err := n.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{
+			if err := n.kube.SetAnnotationsOnNode(context.TODO(), node.Name, map[string]interface{}{
 				hotypes.HybridOverlayDRMAC: policySettings.Address,
 			}); err != nil {
 				klog.Errorf("Failed to set DRMAC annotation on node: %v", err)

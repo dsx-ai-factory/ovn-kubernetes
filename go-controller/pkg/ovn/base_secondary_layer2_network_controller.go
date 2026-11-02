@@ -5,6 +5,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"time"
@@ -112,7 +113,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 	return nil
 }
 
-func (oc *BaseLayer2UserDefinedNetworkController) run() error {
+func (oc *BaseLayer2UserDefinedNetworkController) run(_ context.Context) error {
 	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
 	start := time.Now()
 

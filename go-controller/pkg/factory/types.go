@@ -5,6 +5,8 @@
 package factory
 
 import (
+	"context"
+
 	nadinformer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 
 	corev1 "k8s.io/api/core/v1"
@@ -48,18 +50,18 @@ type NodeWatchFactory interface {
 
 	Start() error
 
-	AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
-	AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+	AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error)
+	AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error)
 	RemoveServiceHandler(handler *Handler)
 
-	AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+	AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error)
 	RemoveEndpointSliceHandler(handler *Handler)
 
-	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
-	AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error)
+	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error)
+	AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error, priority int) (*Handler, error)
 	RemovePodHandler(handler *Handler)
 
-	AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+	AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*Handler, error)
 	RemoveNamespaceHandler(handler *Handler)
 
 	NodeInformer() cache.SharedIndexInformer

@@ -121,6 +121,16 @@ func (oc *DefaultNetworkController) startTrace(ctx context.Context, pod *corev1.
 	return ctx, span
 }
 
+// reconcilePod coordinates logical port setup and policy membership for the
+// existing pod event/retry framework.
+func (oc *DefaultNetworkController) reconcilePod(ctx context.Context, oldPod, pod *corev1.Pod, inRetryCache bool) error {
+	addPort := oldPod == nil || inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(pod)
+	if err := oc.ensurePod(ctx, oldPod, pod, addPort); err != nil {
+		return err
+	}
+	return oc.reconcileNetworkPolicyPortGroups(pod)
+}
+
 // ensurePod tries to set up a pod. It returns nil on success and error on failure; failure
 // indicates the pod set up should be retried later.
 func (oc *DefaultNetworkController) ensurePod(ctx context.Context, oldPod, pod *corev1.Pod, addPort bool) (err error) {
@@ -232,6 +242,12 @@ func (oc *DefaultNetworkController) ensureRemoteZonePod(_ context.Context, _, po
 	return nil
 }
 
+// deletePod is the pod delete entry point for the default network. It currently
+// delegates to the legacy remove path.
+func (oc *DefaultNetworkController) deletePod(ctx context.Context, pod *corev1.Pod, portInfo *lpInfo) error {
+	return oc.removePod(ctx, pod, portInfo)
+}
+
 // removePod tries to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(ctx context.Context, pod *corev1.Pod, portInfo *lpInfo) (err error) {
@@ -286,6 +302,10 @@ func (oc *DefaultNetworkController) removeLocalZonePod(ctx context.Context, pod 
 	if err := oc.deleteLogicalPort(pod, portInfo); err != nil {
 		return fmt.Errorf("deleteLogicalPort failed for pod %s: %w",
 			getPodNamespacedName(pod), err)
+	}
+
+	if err := oc.deletePodNetworkPolicyMembership(pod); err != nil {
+		return fmt.Errorf("failed to delete network policy membership for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
 
 	return nil
@@ -355,8 +375,7 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
 		return fmt.Errorf("error getting gateway config for node %s: %v", node.Name, err)
 	}
 
-	if err := oc.newGatewayManager(node.Name).SyncGateway(
-		node,
+	if err := oc.newGatewayManager(node.Name).SyncGateway(node,
 		gwConfig,
 	); err != nil {
 		return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
@@ -412,7 +431,7 @@ func shouldUpdateNode(node, oldNode *corev1.Node) bool {
 	return true
 }
 
-func (oc *DefaultNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
+func (oc *DefaultNetworkController) StartServiceController(_ context.Context, wg *sync.WaitGroup, runRepair bool) error {
 	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
 	// use 5 workers like most of the kubernetes controllers in the
 	// kubernetes controller-manager

@@ -33,7 +33,7 @@ import (
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
-func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
+func (oc *DefaultNetworkController) syncPods(ctx context.Context, pods []interface{}) error {
 	orderedPods, err := logicalswitchmanager.SortPodsForIPAM(pods)
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 				}
 			}
 			if syncPodAnnotations {
-				ctx := tracing.ContextWithSpansDisabled(context.Background())
+				ctx := tracing.ContextWithSpansDisabled(ctx)
 				err = oc.updatePodAnnotationWithRetry(ctx, pod, annotations, types.DefaultNetworkName)
 				if err != nil {
 					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)

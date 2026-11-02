@@ -4,6 +4,7 @@
 package nadconfig
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -49,7 +50,7 @@ func NewController(name string, nadInformer nadinformers.NetworkAttachmentDefini
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 		Informer:       nadInformer.Informer(),
 		Lister:         c.nadLister.List,
-		Reconcile:      c.reconcile,
+		Reconcile:      func(_ context.Context, key string) error { return c.reconcile(key) },
 		ObjNeedsUpdate: c.needsUpdate,
 		Threadiness:    1,
 	}

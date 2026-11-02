@@ -5,6 +5,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -224,6 +225,7 @@ enable-ovs-native-metrics=false
 [tls]
 tls-min-version=VersionTLS12
 tls-cipher-suites=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+tls-curve-preferences=23,24
 
 [logging]
 loglevel=5
@@ -466,6 +468,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal(""))
 			gomega.Expect(TLS.MinVersion).To(gomega.Equal(""))
 			gomega.Expect(TLS.ParseCipherSuites()).To(gomega.BeEmpty())
+			gomega.Expect(TLS.ParseCurvePreferences()).To(gomega.BeEmpty())
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.128.0.0/14"), 23},
 			}))
@@ -707,11 +710,18 @@ routing-table-id-start=2002
 			gomega.Expect(Metrics.EnableScaleMetrics).To(gomega.BeTrue())
 			gomega.Expect(Metrics.EnableOvsNativeMetrics).To(gomega.BeTrue())
 
-			gomega.Expect(TLS.MinVersion).To(gomega.Equal("VersionTLS12"))
-			gomega.Expect(TLS.ParseCipherSuites()).To(gomega.Equal([]string{
-				"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-				"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-			}))
+			// Verify TLS.ApplyOptions produces the correct tls.Config
+			tlsConfig := &tls.Config{}
+			TLS.ApplyOptions(tlsConfig)
+			gomega.Expect(tlsConfig.MinVersion).To(gomega.Equal(uint16(tls.VersionTLS12)))
+			gomega.Expect(tlsConfig.CipherSuites).To(gomega.ConsistOf(
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			))
+			gomega.Expect(tlsConfig.CurvePreferences).To(gomega.ConsistOf(
+				tls.CurveP256,
+				tls.CurveP384,
+			))
 
 			gomega.Expect(EgressIPHealthCheckTLS.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
 			gomega.Expect(EgressIPHealthCheckTLS.Cert).To(gomega.Equal("/path/to/nb-client.crt"))
@@ -827,11 +837,18 @@ routing-table-id-start=2002
 			gomega.Expect(Metrics.EnableScaleMetrics).To(gomega.BeTrue())
 			gomega.Expect(Metrics.EnableOvsNativeMetrics).To(gomega.BeTrue())
 
-			gomega.Expect(TLS.MinVersion).To(gomega.Equal("VersionTLS13"))
-			gomega.Expect(TLS.ParseCipherSuites()).To(gomega.Equal([]string{
-				"TLS_AES_128_GCM_SHA256",
-				"TLS_AES_256_GCM_SHA384",
-			}))
+			// Verify TLS.ApplyOptions produces the correct tls.Config
+			tlsConfig := &tls.Config{}
+			TLS.ApplyOptions(tlsConfig)
+			gomega.Expect(tlsConfig.MinVersion).To(gomega.Equal(uint16(tls.VersionTLS13)))
+			gomega.Expect(tlsConfig.CipherSuites).To(gomega.ConsistOf(
+				tls.TLS_AES_128_GCM_SHA256,
+				tls.TLS_AES_256_GCM_SHA384,
+			))
+			gomega.Expect(tlsConfig.CurvePreferences).To(gomega.ConsistOf(
+				tls.CurveP521,
+				tls.X25519MLKEM768,
+			))
 
 			gomega.Expect(EgressIPHealthCheckTLS.PrivKey).To(gomega.Equal("/client/privkey"))
 			gomega.Expect(EgressIPHealthCheckTLS.Cert).To(gomega.Equal("/client/cert"))
@@ -925,6 +942,7 @@ routing-table-id-start=2002
 			"-metrics-enable-config-duration=true",
 			"-tls-min-version=VersionTLS13",
 			"-tls-cipher-suites=TLS_AES_128_GCM_SHA256,TLS_AES_256_GCM_SHA384",
+			"-tls-curve-preferences=25,4588",
 			"-egressip-reachability-total-timeout=5",
 			"-egressip-node-healthcheck-port=4321",
 			"-enable-multi-network=true",
