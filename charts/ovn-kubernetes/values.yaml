@@ -207,7 +207,7 @@ ovs-node:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: 99589a5cfca98deab6603d94fd9f6b7aa80dafffb1d9e5d7fdbedb98b3483713
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
 ovnkube-node-dpu-host:
   image:
     repository: ovnkube
@@ -216,7 +216,7 @@ ovnkube-node-dpu-host:
     tag: c068c14f
     # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
     # @default -- `""`
-    sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+    sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
 ovnkube-identity:
   ovnkubeIdentity:
     image:
@@ -226,7 +226,7 @@ ovnkube-identity:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
 ovnkube-control-plane:
   ovnkubeControlPlane:
     image:
@@ -236,7 +236,7 @@ ovnkube-control-plane:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
 ovnkube-single-node-zone:
   ovnkubeSingleNodeZone:
     image:
@@ -246,7 +246,7 @@ ovnkube-single-node-zone:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
   ovnkubeSingleNodeZoneNbdb:
     image:
       repository: ovnkube
@@ -255,7 +255,7 @@ ovnkube-single-node-zone:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
   ovnkubeSingleNodeZoneSbdb:
     image:
       repository: ovnkube
@@ -264,7 +264,7 @@ ovnkube-single-node-zone:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
   ovnkubeSingleNodeZoneNorthd:
     image:
       repository: ovnkube
@@ -273,7 +273,7 @@ ovnkube-single-node-zone:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
   ovnkubeSingleNodeZoneOvnHost:
     image:
       repository: ovnkube
@@ -282,7 +282,7 @@ ovnkube-single-node-zone:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
 ovnkube-single-node-zone-dpu:
   ovnkubeSingleNodeZone:
     image:
@@ -292,7 +292,7 @@ ovnkube-single-node-zone-dpu:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
   ovnkubeSingleNodeZoneNbdb:
     image:
       repository: ovnkube
@@ -301,7 +301,7 @@ ovnkube-single-node-zone-dpu:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
   ovnkubeSingleNodeZoneSbdb:
     image:
       repository: ovnkube
@@ -310,7 +310,7 @@ ovnkube-single-node-zone-dpu:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
   ovnkubeSingleNodeZoneNorthd:
     image:
       repository: ovnkube
@@ -319,7 +319,7 @@ ovnkube-single-node-zone-dpu:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
   ovnkubeSingleNodeZoneOvnHost:
     image:
       repository: ovnkube
@@ -328,4 +328,4 @@ ovnkube-single-node-zone-dpu:
       tag: c068c14f
       # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
       # @default -- `""`
-      sha256: f0e6fe42a70729f9945d09f060bc9cf61a004de6a834bded8b577337660d15b0
+      sha256: bde4ebfcbc46aea531a3bcf0fa5811cdf6d8a66c089ce2886f3c4f67c0aad149
