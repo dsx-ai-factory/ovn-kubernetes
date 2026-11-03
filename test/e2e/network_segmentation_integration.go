@@ -199,6 +199,17 @@ var _ = Describe("Network Segmentation: integration", feature.NetworkSegmentatio
 
 		By("restarting each ovnkube pod and ensuring all pods recover without crash loops")
 		Expect(restartAllOVNKubePodsAndAssertHealthy(f)).To(Succeed())
+
+		// Ready pods may still be waiting for the previous leader's lease to expire.
+		// A new UDN proves that the replacement cluster manager is reconciling again;
+		// existing UDNs can retain their pre-restart NetworkCreated condition.
+		By("creating a new UDN to verify cluster-manager recovery after restart")
+		postRestartUDNName := "post-restart-udn"
+		cleanupPostRestartUDN, err := createManifest(primaryNamespace, newL2SecondaryUDNManifest(postRestartUDNName))
+		Expect(err).NotTo(HaveOccurred())
+		defer cleanupPostRestartUDN()
+		Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, primaryNamespace, postRestartUDNName), 5*time.Minute, time.Second).
+			Should(Succeed(), "cluster manager did not resume UDN reconciliation after restart")
 	})
 })
 
