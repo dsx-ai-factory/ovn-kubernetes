@@ -245,14 +245,16 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 		var addPod func(*corev1.Pod) error
 		if defaultNetwork {
 			bnc = &fakeOVN.controller.BaseNetworkController
-			syncPods = fakeOVN.controller.syncPods
+			syncPods = func(pods []interface{}) error { return fakeOVN.controller.syncPods(context.Background(), pods) }
 			removePod = func(p *corev1.Pod) error { return fakeOVN.controller.removePod(context.Background(), p, nil) }
 			addPod = func(p *corev1.Pod) error { return fakeOVN.controller.addLogicalPort(context.Background(), p) }
 			Expect(fakeOVN.controller.WatchNamespaces()).To(Succeed())
 		} else {
 			controller := fakeOVN.userDefinedNetworkControllers[networkName].bnc
 			bnc = &controller.BaseNetworkController
-			syncPods = controller.syncPodsForUserDefinedNetwork
+			syncPods = func(pods []interface{}) error {
+				return controller.syncPodsForUserDefinedNetwork(context.Background(), pods)
+			}
 			removePod = func(p *corev1.Pod) error {
 				return controller.removePodForUserDefinedNetwork(context.Background(), p, nil)
 			}
@@ -686,7 +688,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 		var initialPodList []interface{}
 		initialPodList = append(initialPodList, podWithNoNamespace)
 
-		err = controller.bnc.syncPodsForUserDefinedNetwork(initialPodList)
+		err = controller.bnc.syncPodsForUserDefinedNetwork(context.Background(), initialPodList)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -735,7 +737,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 		initialPodList = append(initialPodList, podInLabeledNamespace)
 
 		// Should skip pod without error when GetActiveNetworkForNamespace returns InvalidPrimaryNetworkError
-		err = controller.bnc.syncPodsForUserDefinedNetwork(initialPodList)
+		err = controller.bnc.syncPodsForUserDefinedNetwork(context.Background(), initialPodList)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -770,7 +772,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 		// bluenet now also picks up greenamespace, where remotePod is already Running
 		afterInfo := util.NewMutableNetInfo(bnc.GetNetInfo())
 		afterInfo.AddNADs(util.GetNADName(newNamespace, "rednad"))
-		Expect(bnc.reconcile(afterInfo, func(string) {})).To(Succeed())
+		Expect(bnc.reconcile(context.Background(), afterInfo, func(string) {})).To(Succeed())
 
 		key, err := retry.GetResourceKey(remotePod)
 		Expect(err).NotTo(HaveOccurred())
@@ -1052,8 +1054,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 				pod, foreignSwitch, foreignNADKey,
 				foreignLSP.UUID, podMAC, podIPs),
 		}
-		Expect(controller.bnc.removePodForUserDefinedNetwork(
-			context.Background(), pod, portInfoMap)).To(Succeed())
+		Expect(controller.bnc.removePodForUserDefinedNetwork(context.Background(), pod, portInfoMap)).To(Succeed())
 
 		expectedSwitch := logicalSwitch.DeepCopy()
 		expectedSwitch.Ports = nil
@@ -1124,8 +1125,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 			return err
 		}).Should(Succeed())
 
-		Expect(libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(
-			fakeOVN.nbClient, &nbdb.LogicalSwitch{Name: switchName}, lsp)).To(Succeed())
+		Expect(libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(fakeOVN.nbClient, &nbdb.LogicalSwitch{Name: switchName}, lsp)).To(Succeed())
 		fakeOVN.portCache.add(pod, switchName, nadKey, lsp.UUID, podMAC, podIPs)
 		_, err = fakeNetworkManager.GetPrimaryNADForNamespace(pod.Namespace)
 		Expect(err).To(MatchError(util.IsInvalidPrimaryNetworkError, "IsInvalidPrimaryNetworkError"))
@@ -1680,7 +1680,7 @@ var _ = Describe("localnet pod sync at startup", func() {
 		if pod != nil {
 			pods = append(pods, pod)
 		}
-		Expect(controller.bnc.syncPodsForUserDefinedNetwork(pods)).To(Succeed())
+		Expect(controller.bnc.syncPodsForUserDefinedNetwork(context.Background(), pods)).To(Succeed())
 
 		return before[0].UUID, findPort()
 	}

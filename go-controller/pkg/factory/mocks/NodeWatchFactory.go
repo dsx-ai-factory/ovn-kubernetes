@@ -6,6 +6,8 @@
 package mocks
 
 import (
+	context "context"
+
 	k8s_cni_cncf_iov1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	v1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 	clusternetworkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions/clusternetworkconnect/v1"
@@ -16,10 +18,10 @@ import (
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
 	factory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	mock "github.com/stretchr/testify/mock"
-	corev1 "k8s.io/api/core/v1"
+	apicorev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
-	informerscorev1 "k8s.io/client-go/informers/core/v1"
+	corev1 "k8s.io/client-go/informers/core/v1"
 	cache "k8s.io/client-go/tools/cache"
 )
 
@@ -49,7 +51,7 @@ func (_m *NodeWatchFactory) APBRouteInformer() v1.AdminPolicyBasedExternalRouteI
 }
 
 // AddFilteredEndpointSliceHandler provides a mock function with given fields: namespace, sel, handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(namespace, sel, handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -58,10 +60,10 @@ func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, se
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(namespace, sel, handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(namespace, sel, handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -69,7 +71,7 @@ func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, se
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(namespace, sel, handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
@@ -79,7 +81,7 @@ func (_m *NodeWatchFactory) AddFilteredEndpointSliceHandler(namespace string, se
 }
 
 // AddFilteredPodHandler provides a mock function with given fields: namespace, sel, handlerFuncs, processExisting, priority
-func (_m *NodeWatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error, priority int) (*factory.Handler, error) {
 	ret := _m.Called(namespace, sel, handlerFuncs, processExisting, priority)
 
 	if len(ret) == 0 {
@@ -88,10 +90,10 @@ func (_m *NodeWatchFactory) AddFilteredPodHandler(namespace string, sel labels.S
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error, int) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error, int) (*factory.Handler, error)); ok {
 		return rf(namespace, sel, handlerFuncs, processExisting, priority)
 	}
-	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error, int) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error, int) *factory.Handler); ok {
 		r0 = rf(namespace, sel, handlerFuncs, processExisting, priority)
 	} else {
 		if ret.Get(0) != nil {
@@ -99,7 +101,7 @@ func (_m *NodeWatchFactory) AddFilteredPodHandler(namespace string, sel labels.S
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, labels.Selector, cache.ResourceEventHandler, func([]interface{}) error, int) error); ok {
+	if rf, ok := ret.Get(1).(func(string, labels.Selector, cache.ResourceEventHandler, func(context.Context, []interface{}) error, int) error); ok {
 		r1 = rf(namespace, sel, handlerFuncs, processExisting, priority)
 	} else {
 		r1 = ret.Error(1)
@@ -109,7 +111,7 @@ func (_m *NodeWatchFactory) AddFilteredPodHandler(namespace string, sel labels.S
 }
 
 // AddFilteredServiceHandler provides a mock function with given fields: namespace, handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(namespace, handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -118,10 +120,10 @@ func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerF
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(namespace, handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(string, cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(namespace, handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -129,7 +131,7 @@ func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerF
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(string, cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(namespace, handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
@@ -139,7 +141,7 @@ func (_m *NodeWatchFactory) AddFilteredServiceHandler(namespace string, handlerF
 }
 
 // AddNamespaceHandler provides a mock function with given fields: handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -148,10 +150,10 @@ func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEvent
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -159,7 +161,7 @@ func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEvent
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
@@ -169,7 +171,7 @@ func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEvent
 }
 
 // AddPodHandler provides a mock function with given fields: handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -178,10 +180,10 @@ func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandle
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -189,7 +191,7 @@ func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandle
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
@@ -199,7 +201,7 @@ func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandle
 }
 
 // AddServiceHandler provides a mock function with given fields: handlerFuncs, processExisting
-func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func(context.Context, []interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(handlerFuncs, processExisting)
 
 	if len(ret) == 0 {
@@ -208,10 +210,10 @@ func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHa
 
 	var r0 *factory.Handler
 	var r1 error
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) (*factory.Handler, error)); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) (*factory.Handler, error)); ok {
 		return rf(handlerFuncs, processExisting)
 	}
-	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) *factory.Handler); ok {
 		r0 = rf(handlerFuncs, processExisting)
 	} else {
 		if ret.Get(0) != nil {
@@ -219,33 +221,13 @@ func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHa
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func(context.Context, []interface{}) error) error); ok {
 		r1 = rf(handlerFuncs, processExisting)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	return r0, r1
-}
-
-// ConfigMapCoreInformer provides a mock function with given fields:
-func (_m *NodeWatchFactory) ConfigMapCoreInformer() informerscorev1.ConfigMapInformer {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for ConfigMapCoreInformer")
-	}
-
-	var r0 informerscorev1.ConfigMapInformer
-	if rf, ok := ret.Get(0).(func() informerscorev1.ConfigMapInformer); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(informerscorev1.ConfigMapInformer)
-		}
-	}
-
-	return r0
 }
 
 // ClusterNetworkConnectInformer provides a mock function with no fields
@@ -288,6 +270,26 @@ func (_m *NodeWatchFactory) ClusterUserDefinedNetworkInformer() userdefinednetwo
 	return r0
 }
 
+// ConfigMapCoreInformer provides a mock function with no fields
+func (_m *NodeWatchFactory) ConfigMapCoreInformer() corev1.ConfigMapInformer {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ConfigMapCoreInformer")
+	}
+
+	var r0 corev1.ConfigMapInformer
+	if rf, ok := ret.Get(0).(func() corev1.ConfigMapInformer); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(corev1.ConfigMapInformer)
+		}
+	}
+
+	return r0
+}
+
 // EgressIPInformer provides a mock function with no fields
 func (_m *NodeWatchFactory) EgressIPInformer() egressipv1.EgressIPInformer {
 	ret := _m.Called()
@@ -309,23 +311,23 @@ func (_m *NodeWatchFactory) EgressIPInformer() egressipv1.EgressIPInformer {
 }
 
 // GetAllPods provides a mock function with no fields
-func (_m *NodeWatchFactory) GetAllPods() ([]*corev1.Pod, error) {
+func (_m *NodeWatchFactory) GetAllPods() ([]*apicorev1.Pod, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAllPods")
 	}
 
-	var r0 []*corev1.Pod
+	var r0 []*apicorev1.Pod
 	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]*corev1.Pod, error)); ok {
+	if rf, ok := ret.Get(0).(func() ([]*apicorev1.Pod, error)); ok {
 		return rf()
 	}
-	if rf, ok := ret.Get(0).(func() []*corev1.Pod); ok {
+	if rf, ok := ret.Get(0).(func() []*apicorev1.Pod); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Pod)
+			r0 = ret.Get(0).([]*apicorev1.Pod)
 		}
 	}
 
@@ -369,23 +371,23 @@ func (_m *NodeWatchFactory) GetEndpointSlice(namespace string, name string) (*di
 }
 
 // GetNamespace provides a mock function with given fields: name
-func (_m *NodeWatchFactory) GetNamespace(name string) (*corev1.Namespace, error) {
+func (_m *NodeWatchFactory) GetNamespace(name string) (*apicorev1.Namespace, error) {
 	ret := _m.Called(name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetNamespace")
 	}
 
-	var r0 *corev1.Namespace
+	var r0 *apicorev1.Namespace
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (*corev1.Namespace, error)); ok {
+	if rf, ok := ret.Get(0).(func(string) (*apicorev1.Namespace, error)); ok {
 		return rf(name)
 	}
-	if rf, ok := ret.Get(0).(func(string) *corev1.Namespace); ok {
+	if rf, ok := ret.Get(0).(func(string) *apicorev1.Namespace); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.Namespace)
+			r0 = ret.Get(0).(*apicorev1.Namespace)
 		}
 	}
 
@@ -399,23 +401,23 @@ func (_m *NodeWatchFactory) GetNamespace(name string) (*corev1.Namespace, error)
 }
 
 // GetNamespaces provides a mock function with no fields
-func (_m *NodeWatchFactory) GetNamespaces() ([]*corev1.Namespace, error) {
+func (_m *NodeWatchFactory) GetNamespaces() ([]*apicorev1.Namespace, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetNamespaces")
 	}
 
-	var r0 []*corev1.Namespace
+	var r0 []*apicorev1.Namespace
 	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]*corev1.Namespace, error)); ok {
+	if rf, ok := ret.Get(0).(func() ([]*apicorev1.Namespace, error)); ok {
 		return rf()
 	}
-	if rf, ok := ret.Get(0).(func() []*corev1.Namespace); ok {
+	if rf, ok := ret.Get(0).(func() []*apicorev1.Namespace); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Namespace)
+			r0 = ret.Get(0).([]*apicorev1.Namespace)
 		}
 	}
 
@@ -429,23 +431,23 @@ func (_m *NodeWatchFactory) GetNamespaces() ([]*corev1.Namespace, error) {
 }
 
 // GetNode provides a mock function with given fields: name
-func (_m *NodeWatchFactory) GetNode(name string) (*corev1.Node, error) {
+func (_m *NodeWatchFactory) GetNode(name string) (*apicorev1.Node, error) {
 	ret := _m.Called(name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetNode")
 	}
 
-	var r0 *corev1.Node
+	var r0 *apicorev1.Node
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (*corev1.Node, error)); ok {
+	if rf, ok := ret.Get(0).(func(string) (*apicorev1.Node, error)); ok {
 		return rf(name)
 	}
-	if rf, ok := ret.Get(0).(func(string) *corev1.Node); ok {
+	if rf, ok := ret.Get(0).(func(string) *apicorev1.Node); ok {
 		r0 = rf(name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.Node)
+			r0 = ret.Get(0).(*apicorev1.Node)
 		}
 	}
 
@@ -459,23 +461,23 @@ func (_m *NodeWatchFactory) GetNode(name string) (*corev1.Node, error) {
 }
 
 // GetNodes provides a mock function with no fields
-func (_m *NodeWatchFactory) GetNodes() ([]*corev1.Node, error) {
+func (_m *NodeWatchFactory) GetNodes() ([]*apicorev1.Node, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetNodes")
 	}
 
-	var r0 []*corev1.Node
+	var r0 []*apicorev1.Node
 	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]*corev1.Node, error)); ok {
+	if rf, ok := ret.Get(0).(func() ([]*apicorev1.Node, error)); ok {
 		return rf()
 	}
-	if rf, ok := ret.Get(0).(func() []*corev1.Node); ok {
+	if rf, ok := ret.Get(0).(func() []*apicorev1.Node); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Node)
+			r0 = ret.Get(0).([]*apicorev1.Node)
 		}
 	}
 
@@ -489,23 +491,23 @@ func (_m *NodeWatchFactory) GetNodes() ([]*corev1.Node, error) {
 }
 
 // GetPod provides a mock function with given fields: namespace, name
-func (_m *NodeWatchFactory) GetPod(namespace string, name string) (*corev1.Pod, error) {
+func (_m *NodeWatchFactory) GetPod(namespace string, name string) (*apicorev1.Pod, error) {
 	ret := _m.Called(namespace, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPod")
 	}
 
-	var r0 *corev1.Pod
+	var r0 *apicorev1.Pod
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*corev1.Pod, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, string) (*apicorev1.Pod, error)); ok {
 		return rf(namespace, name)
 	}
-	if rf, ok := ret.Get(0).(func(string, string) *corev1.Pod); ok {
+	if rf, ok := ret.Get(0).(func(string, string) *apicorev1.Pod); ok {
 		r0 = rf(namespace, name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.Pod)
+			r0 = ret.Get(0).(*apicorev1.Pod)
 		}
 	}
 
@@ -519,23 +521,23 @@ func (_m *NodeWatchFactory) GetPod(namespace string, name string) (*corev1.Pod, 
 }
 
 // GetPods provides a mock function with given fields: namespace
-func (_m *NodeWatchFactory) GetPods(namespace string) ([]*corev1.Pod, error) {
+func (_m *NodeWatchFactory) GetPods(namespace string) ([]*apicorev1.Pod, error) {
 	ret := _m.Called(namespace)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPods")
 	}
 
-	var r0 []*corev1.Pod
+	var r0 []*apicorev1.Pod
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) ([]*corev1.Pod, error)); ok {
+	if rf, ok := ret.Get(0).(func(string) ([]*apicorev1.Pod, error)); ok {
 		return rf(namespace)
 	}
-	if rf, ok := ret.Get(0).(func(string) []*corev1.Pod); ok {
+	if rf, ok := ret.Get(0).(func(string) []*apicorev1.Pod); ok {
 		r0 = rf(namespace)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Pod)
+			r0 = ret.Get(0).([]*apicorev1.Pod)
 		}
 	}
 
@@ -549,23 +551,23 @@ func (_m *NodeWatchFactory) GetPods(namespace string) ([]*corev1.Pod, error) {
 }
 
 // GetPodsOnNode provides a mock function with given fields: namespace, nodeName
-func (_m *NodeWatchFactory) GetPodsOnNode(namespace string, nodeName string) ([]*corev1.Pod, error) {
+func (_m *NodeWatchFactory) GetPodsOnNode(namespace string, nodeName string) ([]*apicorev1.Pod, error) {
 	ret := _m.Called(namespace, nodeName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPodsOnNode")
 	}
 
-	var r0 []*corev1.Pod
+	var r0 []*apicorev1.Pod
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) ([]*corev1.Pod, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, string) ([]*apicorev1.Pod, error)); ok {
 		return rf(namespace, nodeName)
 	}
-	if rf, ok := ret.Get(0).(func(string, string) []*corev1.Pod); ok {
+	if rf, ok := ret.Get(0).(func(string, string) []*apicorev1.Pod); ok {
 		r0 = rf(namespace, nodeName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Pod)
+			r0 = ret.Get(0).([]*apicorev1.Pod)
 		}
 	}
 
@@ -579,23 +581,23 @@ func (_m *NodeWatchFactory) GetPodsOnNode(namespace string, nodeName string) ([]
 }
 
 // GetService provides a mock function with given fields: namespace, name
-func (_m *NodeWatchFactory) GetService(namespace string, name string) (*corev1.Service, error) {
+func (_m *NodeWatchFactory) GetService(namespace string, name string) (*apicorev1.Service, error) {
 	ret := _m.Called(namespace, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetService")
 	}
 
-	var r0 *corev1.Service
+	var r0 *apicorev1.Service
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*corev1.Service, error)); ok {
+	if rf, ok := ret.Get(0).(func(string, string) (*apicorev1.Service, error)); ok {
 		return rf(namespace, name)
 	}
-	if rf, ok := ret.Get(0).(func(string, string) *corev1.Service); ok {
+	if rf, ok := ret.Get(0).(func(string, string) *apicorev1.Service); ok {
 		r0 = rf(namespace, name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*corev1.Service)
+			r0 = ret.Get(0).(*apicorev1.Service)
 		}
 	}
 
@@ -639,23 +641,23 @@ func (_m *NodeWatchFactory) GetServiceEndpointSlices(namespace string, svcName s
 }
 
 // GetServices provides a mock function with no fields
-func (_m *NodeWatchFactory) GetServices() ([]*corev1.Service, error) {
+func (_m *NodeWatchFactory) GetServices() ([]*apicorev1.Service, error) {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetServices")
 	}
 
-	var r0 []*corev1.Service
+	var r0 []*apicorev1.Service
 	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]*corev1.Service, error)); ok {
+	if rf, ok := ret.Get(0).(func() ([]*apicorev1.Service, error)); ok {
 		return rf()
 	}
-	if rf, ok := ret.Get(0).(func() []*corev1.Service); ok {
+	if rf, ok := ret.Get(0).(func() []*apicorev1.Service); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Service)
+			r0 = ret.Get(0).([]*apicorev1.Service)
 		}
 	}
 
@@ -669,23 +671,23 @@ func (_m *NodeWatchFactory) GetServices() ([]*corev1.Service, error) {
 }
 
 // ListNodes provides a mock function with given fields: selector
-func (_m *NodeWatchFactory) ListNodes(selector labels.Selector) ([]*corev1.Node, error) {
+func (_m *NodeWatchFactory) ListNodes(selector labels.Selector) ([]*apicorev1.Node, error) {
 	ret := _m.Called(selector)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListNodes")
 	}
 
-	var r0 []*corev1.Node
+	var r0 []*apicorev1.Node
 	var r1 error
-	if rf, ok := ret.Get(0).(func(labels.Selector) ([]*corev1.Node, error)); ok {
+	if rf, ok := ret.Get(0).(func(labels.Selector) ([]*apicorev1.Node, error)); ok {
 		return rf(selector)
 	}
-	if rf, ok := ret.Get(0).(func(labels.Selector) []*corev1.Node); ok {
+	if rf, ok := ret.Get(0).(func(labels.Selector) []*apicorev1.Node); ok {
 		r0 = rf(selector)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Node)
+			r0 = ret.Get(0).([]*apicorev1.Node)
 		}
 	}
 
@@ -719,19 +721,19 @@ func (_m *NodeWatchFactory) NADInformer() k8s_cni_cncf_iov1.NetworkAttachmentDef
 }
 
 // NamespaceInformer provides a mock function with no fields
-func (_m *NodeWatchFactory) NamespaceInformer() informerscorev1.NamespaceInformer {
+func (_m *NodeWatchFactory) NamespaceInformer() corev1.NamespaceInformer {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for NamespaceInformer")
 	}
 
-	var r0 informerscorev1.NamespaceInformer
-	if rf, ok := ret.Get(0).(func() informerscorev1.NamespaceInformer); ok {
+	var r0 corev1.NamespaceInformer
+	if rf, ok := ret.Get(0).(func() corev1.NamespaceInformer); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(informerscorev1.NamespaceInformer)
+			r0 = ret.Get(0).(corev1.NamespaceInformer)
 		}
 	}
 
@@ -739,19 +741,19 @@ func (_m *NodeWatchFactory) NamespaceInformer() informerscorev1.NamespaceInforme
 }
 
 // NodeCoreInformer provides a mock function with no fields
-func (_m *NodeWatchFactory) NodeCoreInformer() informerscorev1.NodeInformer {
+func (_m *NodeWatchFactory) NodeCoreInformer() corev1.NodeInformer {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for NodeCoreInformer")
 	}
 
-	var r0 informerscorev1.NodeInformer
-	if rf, ok := ret.Get(0).(func() informerscorev1.NodeInformer); ok {
+	var r0 corev1.NodeInformer
+	if rf, ok := ret.Get(0).(func() corev1.NodeInformer); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(informerscorev1.NodeInformer)
+			r0 = ret.Get(0).(corev1.NodeInformer)
 		}
 	}
 
@@ -779,19 +781,19 @@ func (_m *NodeWatchFactory) NodeInformer() cache.SharedIndexInformer {
 }
 
 // PodCoreInformer provides a mock function with no fields
-func (_m *NodeWatchFactory) PodCoreInformer() informerscorev1.PodInformer {
+func (_m *NodeWatchFactory) PodCoreInformer() corev1.PodInformer {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for PodCoreInformer")
 	}
 
-	var r0 informerscorev1.PodInformer
-	if rf, ok := ret.Get(0).(func() informerscorev1.PodInformer); ok {
+	var r0 corev1.PodInformer
+	if rf, ok := ret.Get(0).(func() corev1.PodInformer); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(informerscorev1.PodInformer)
+			r0 = ret.Get(0).(corev1.PodInformer)
 		}
 	}
 
@@ -858,20 +860,20 @@ func (_m *NodeWatchFactory) RouteAdvertisementsInformer() routeadvertisementsv1.
 	return r0
 }
 
-// SecretCoreInformer provides a mock function with given fields:
-func (_m *NodeWatchFactory) SecretCoreInformer() informerscorev1.SecretInformer {
+// SecretCoreInformer provides a mock function with no fields
+func (_m *NodeWatchFactory) SecretCoreInformer() corev1.SecretInformer {
 	ret := _m.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for SecretCoreInformer")
 	}
 
-	var r0 informerscorev1.SecretInformer
-	if rf, ok := ret.Get(0).(func() informerscorev1.SecretInformer); ok {
+	var r0 corev1.SecretInformer
+	if rf, ok := ret.Get(0).(func() corev1.SecretInformer); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(informerscorev1.SecretInformer)
+			r0 = ret.Get(0).(corev1.SecretInformer)
 		}
 	}
 

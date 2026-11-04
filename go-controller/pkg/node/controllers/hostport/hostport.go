@@ -82,7 +82,7 @@ func NewController(nodeName string, informer cache.SharedIndexInformer, nft knft
 func (c *Controller) Start(stopCh <-chan struct{}, wg *sync.WaitGroup) error {
 	ctx := wait.ContextForChannel(stopCh)
 	c.reconciler = controller.NewReconciler("hostports", &controller.ReconcilerConfig{
-		Reconcile:   func(string) error { return c.sync(ctx) },
+		Reconcile:   func(context.Context, string) error { return c.sync(ctx) },
 		Threadiness: 1,
 		MaxAttempts: controller.InfiniteAttempts,
 	})

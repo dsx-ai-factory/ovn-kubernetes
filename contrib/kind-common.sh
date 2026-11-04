@@ -208,6 +208,7 @@ set_common_default_params() {
   KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
 
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
+  OVN_ENABLE_PERSISTENT_IPS=${OVN_ENABLE_PERSISTENT_IPS:-true}
   ENABLE_NETWORK_SEGMENTATION=${ENABLE_NETWORK_SEGMENTATION:-false}
   if [ "$ENABLE_NETWORK_SEGMENTATION" == true ] && [ "$ENABLE_MULTI_NET" != true ]; then
     echo "Network segmentation (UDN) requires multi-network to be enabled (-mne)"
@@ -1104,7 +1105,7 @@ wait_for_ovn_daemonset() {
   timeout=$(calculate_timeout ${endtime})
   echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
   # `kubectl rollout status` errors on DaemonSets with updateStrategy=OnDelete
-  # (upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
+  # (staged-upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
   # OVS out from under still-running ovnkube-node pods). For OnDelete DSes
   # we can't observe rollout progress; just wait for pods to be Ready.
   local strategy

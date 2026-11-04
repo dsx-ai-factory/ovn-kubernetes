@@ -130,6 +130,7 @@ func allocatePodAnnotation(
 	allocateToPodWithRollback := func(currentPod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
 		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+			ctx,
 			ipAllocator,
 			subnetName, owner,
 			idAllocator,
@@ -223,6 +224,7 @@ func allocatePodAnnotationWithTunnelID(
 	allocateToPodWithRollback := func(currentPod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
 		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+			ctx,
 			ipAllocator,
 			subnetName, owner,
 			idAllocator,
@@ -341,6 +343,7 @@ func validateIPFamilyMatchesNetwork(netInfo util.NetInfo, ipRequests []string) e
 // implementations. Use an inlined implementation if you want to extract
 // information from it as a side-effect.
 func allocatePodAnnotationWithRollback(
+	ctx context.Context,
 	ipAllocator subnet.IPAllocator,
 	subnetName, owner string,
 	idAllocator id.NamedAllocator,
@@ -470,7 +473,7 @@ func allocatePodAnnotationWithRollback(
 			return
 		}
 		updatedClaim := claimsReconciler.UpdateIPAMClaimStatus(ipamClaim, podAnnotation, pod.Name, err)
-		if reconcileErr := claimsReconciler.Reconcile(ipamClaim, updatedClaim, ipAllocator); reconcileErr != nil {
+		if reconcileErr := claimsReconciler.Reconcile(ctx, ipamClaim, updatedClaim, ipAllocator); reconcileErr != nil {
 			err = errors.Join(err, fmt.Errorf("failed to reconcile IPAM claim %s/%s: %w", ipamClaim.Namespace, ipamClaim.Name, reconcileErr))
 		}
 	}()

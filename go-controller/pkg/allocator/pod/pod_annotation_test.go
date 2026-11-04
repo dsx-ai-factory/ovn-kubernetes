@@ -96,7 +96,7 @@ type persistentIPsStub struct {
 	datastore map[string]ipamclaimsapi.IPAMClaim
 }
 
-func (c *persistentIPsStub) Reconcile(_ *ipamclaimsapi.IPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim, _ persistentips.IPReleaser) error {
+func (c *persistentIPsStub) Reconcile(_ context.Context, _ *ipamclaimsapi.IPAMClaim, newIPAMClaim *ipamclaimsapi.IPAMClaim, _ persistentips.IPReleaser) error {
 	c.datastore[ipamClaimKey(newIPAMClaim.Namespace, newIPAMClaim.Name)] = *newIPAMClaim
 	return nil
 }
@@ -181,7 +181,7 @@ func TestAllocatePodAnnotationIPOwnership(t *testing.T) {
 					&util.PodAnnotation{IPs: ips, MAC: util.IPAddrToHWAddr(ips[0].IP)}, nadKey)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 			}
-			_, annotation, rollback, err := allocatePodAnnotationWithRollback(allocator, "network", "pod",
+			_, annotation, rollback, err := allocatePodAnnotationWithRollback(context.Background(), allocator, "network", "pod",
 				&idAllocatorStub{nextID: 100}, netInfo, p, nadKey,
 				&nadapi.NetworkSelectionElement{IPRequest: util.StringSlice(ips)}, nil, nil, false, types.NetworkRolePrimary)
 			if tc.owner == "pod" {
@@ -358,9 +358,6 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 		network     *nadapi.NetworkSelectionElement
 		ipamClaim   *ipamclaimsapi.IPAMClaim
 		reallocate  bool
-		// ipamClaimNamespace overrides the namespace the IPAMClaim is stored
-		// under, which otherwise defaults to the pod's namespace
-		ipamClaimNamespace string
 	}
 	tests := []struct {
 		name                            string
@@ -1137,13 +1134,13 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				},
 				ipamClaim: &ipamclaimsapi.IPAMClaim{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "victim-ipam-claim",
+						Name:      "victim-ipam-claim",
+						Namespace: "victim-namespace",
 					},
 					Status: ipamclaimsapi.IPAMClaimStatus{
 						IPs: []string{"192.168.0.200/24"},
 					},
 				},
-				ipamClaimNamespace: "victim-namespace",
 				ipAllocator: &ipAllocatorStub{
 					nextIPs: ovntest.MustParseIPNets("192.168.0.3/24"),
 				},
@@ -1417,10 +1414,8 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			dummyDatastore := map[string]ipamclaimsapi.IPAMClaim{}
 			if tt.args.ipamClaim != nil {
 				tt.args.ipamClaim.UID = "claim-uid"
-				// IPAMClaims live in the namespace of the pod referencing them
-				tt.args.ipamClaim.Namespace = pod.Namespace
-				if tt.args.ipamClaimNamespace != "" {
-					tt.args.ipamClaim.Namespace = tt.args.ipamClaimNamespace
+				if tt.args.ipamClaim.Namespace == "" {
+					tt.args.ipamClaim.Namespace = pod.Namespace
 				}
 				dummyDatastore[ipamClaimKey(tt.args.ipamClaim.Namespace, tt.args.ipamClaim.Name)] = *tt.args.ipamClaim
 			}
@@ -1430,6 +1425,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			}
 
 			pod, podAnnotation, rollback, err := allocatePodAnnotationWithRollback(
+				context.Background(),
 				tt.args.ipAllocator,
 				"test-subnet", "test-owner",
 				tt.args.idAllocator,

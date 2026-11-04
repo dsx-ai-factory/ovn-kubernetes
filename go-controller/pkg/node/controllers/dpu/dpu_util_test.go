@@ -374,7 +374,7 @@ var _ = Describe("Node DPU tests", func() {
 
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(nil)
+				kubeMock.On("PatchPodStatusAnnotations", mock.Anything, &pod, cpod).Return(nil)
 
 				err = ctrl.addRepPort(context.Background(), &pod, state, ifInfo, clientset, false)
 				Expect(err).ToNot(HaveOccurred())
@@ -394,7 +394,7 @@ var _ = Describe("Node DPU tests", func() {
 
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(fmt.Errorf("failed to set pod annotations"))
+				kubeMock.On("PatchPodStatusAnnotations", mock.Anything, &pod, cpod).Return(fmt.Errorf("failed to set pod annotations"))
 
 				err = ctrl.addRepPort(context.Background(), &pod, state, ifInfo, clientset, false)
 				Expect(err).To(HaveOccurred())
@@ -826,13 +826,13 @@ var _ = Describe("Node DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", staleRep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
 			_, ok := ctrl.podStates.Load("foo-ns/a-pod")
 			Expect(ok).To(BeFalse())
 			expectOVSPortAndInterfaceAbsent(ctrl.ovsClient, staleRep)
 			// The status belongs to the pod that is gone, not to the new one.
-			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
@@ -874,19 +874,19 @@ var _ = Describe("Node DPU tests", func() {
 			// an assertion rather than on an unexpected mock call.
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(rep, nil)
 			podNamespaceLister.On("Get", "a-pod").Return(otherPod, nil)
-			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, mock.Anything).Return(nil)
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 			checkOVSPortPodInfo(execMock, rep, true, "15", "sb1", types.DefaultNetworkName)
 			vfLink := &linkMock.Link{}
 			netlinkOpsMock.On("LinkByName", rep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
 			_, ok := ctrl.podStates.Load("foo-ns/a-pod")
 			Expect(ok).To(BeFalse())
 			expectOVSPortAndInterfaceAbsent(ctrl.ovsClient, rep)
-			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
@@ -933,7 +933,7 @@ var _ = Describe("Node DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", rep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
 			_, ok := ctrl.podStates.Load("foo-ns/a-pod")
 			Expect(ok).To(BeFalse())
@@ -962,11 +962,11 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
-			kubeMock.On("PatchPodStatusAnnotations", livePod, clearedPod).Return(nil)
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, livePod, clearedPod).Return(nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
-			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, clearedPod)
+			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, livePod, clearedPod)
 		})
 
 		It("Re-adds the connection status of an already configured NAD", func() {
@@ -1006,11 +1006,11 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
-			kubeMock.On("PatchPodStatusAnnotations", livePod, readyPod).Return(nil)
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, livePod, readyPod).Return(nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
-			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, readyPod)
+			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, livePod, readyPod)
 			ps, ok := ctrl.podStates.Load("foo-ns/a-pod")
 			Expect(ok).To(BeTrue())
 			Expect(ps.nadStates).To(HaveKey(types.DefaultNetworkName))
@@ -1055,11 +1055,11 @@ var _ = Describe("Node DPU tests", func() {
 
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(MatchError(
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(MatchError(
 				ContainSubstring("failed to get pod interface information")))
 
 			// The status the pod carries is left alone, and so is the port.
-			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything)
 			expectOVSPortAndInterfacePresent(ctrl.ovsClient, rep)
 
 			// The port is still there, so it stays tracked for the retry.
@@ -1101,10 +1101,10 @@ var _ = Describe("Node DPU tests", func() {
 			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return(rep, nil)
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(MatchError(
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(MatchError(
 				ContainSubstring("failed to get pod interface information")))
 
-			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything)
 			expectOVSPortAndInterfacePresent(ctrl.ovsClient, rep)
 		})
 
@@ -1144,7 +1144,7 @@ var _ = Describe("Node DPU tests", func() {
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil).Once()
 
 			// The revalidation fails, leaving the port in place.
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(MatchError(
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(MatchError(
 				ContainSubstring("failed to get pod interface information")))
 			expectOVSPortAndInterfacePresent(ctrl.ovsClient, rep)
 
@@ -1159,13 +1159,13 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			podNamespaceLister.On("Get", "a-pod").Return(detailsGonePod, nil)
-			kubeMock.On("PatchPodStatusAnnotations", detailsGonePod, clearedPod).Return(nil)
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, detailsGonePod, clearedPod).Return(nil)
 			checkOVSPortPodInfo(execMock, rep, true, "15", "sb1", types.DefaultNetworkName)
 			vfLink := &linkMock.Link{}
 			netlinkOpsMock.On("LinkByName", rep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
 			expectOVSPortAndInterfaceAbsent(ctrl.ovsClient, rep)
 			_, ok := ctrl.podStates.Load("foo-ns/a-pod")
@@ -1191,14 +1191,14 @@ var _ = Describe("Node DPU tests", func() {
 			livePod.Annotations = annot
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(
 				MatchError(ContainSubstring("malformed index for NAD key")))
 
 			// The representor already configured for this pod is left alone.
 			ps, ok := ctrl.podStates.Load("foo-ns/a-pod")
 			Expect(ok).To(BeTrue())
 			Expect(ps.nadStates).To(HaveKey(types.DefaultNetworkName))
-			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything)
 		})
 
 		It("Untracks and re-adds a NAD whose representor is gone from OVS", func() {
@@ -1228,7 +1228,7 @@ var _ = Describe("Node DPU tests", func() {
 
 			// The NAD is untracked so that it is added again, and the add is
 			// what fails here: the pod has no OVN annotation to configure from.
-			err = ctrl.reconcileDPUPod("foo-ns/a-pod")
+			err = ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")
 			Expect(err).To(MatchError(ContainSubstring("failed to get pod interface information")))
 
 			ps, ok := ctrl.podStates.Load("foo-ns/a-pod")
@@ -1275,7 +1275,7 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
-			kubeMock.On("PatchPodStatusAnnotations", livePod, clearedPod).Return(fmt.Errorf("API is down"))
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, livePod, clearedPod).Return(fmt.Errorf("API is down"))
 
 			checkOVSPortPodInfo(execMock, rep, true, "15", "sb1", types.DefaultNetworkName)
 			vfLink := &linkMock.Link{}
@@ -1284,7 +1284,7 @@ var _ = Describe("Node DPU tests", func() {
 
 			// The host side waits on this status to plumb the new sandbox, so
 			// the old representor cannot be deleted while it still reads ready.
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).ToNot(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).ToNot(Succeed())
 
 			expectOVSPortAndInterfacePresent(ctrl.ovsClient, rep)
 			ps, ok := ctrl.podStates.Load("foo-ns/a-pod")
@@ -1324,7 +1324,7 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
-			kubeMock.On("PatchPodStatusAnnotations", livePod, clearedPod).Return(nil)
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, livePod, clearedPod).Return(nil)
 
 			ctrl.podStates.Store("foo-ns/a-pod", &podDPUState{
 				uid: k8stypes.UID("uid-1"),
@@ -1338,12 +1338,12 @@ var _ = Describe("Node DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", rep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
 			_, ok := ctrl.podStates.Load("foo-ns/a-pod")
 			Expect(ok).To(BeFalse())
 			expectOVSPortAndInterfaceAbsent(ctrl.ovsClient, rep)
-			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, clearedPod)
+			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, livePod, clearedPod)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
@@ -1384,7 +1384,7 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
-			kubeMock.On("PatchPodStatusAnnotations", livePod, clearedPod).Return(nil)
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, livePod, clearedPod).Return(nil)
 
 			ctrl.podStates.Store("foo-ns/a-pod", &podDPUState{
 				uid: k8stypes.UID("uid-1"),
@@ -1398,12 +1398,12 @@ var _ = Describe("Node DPU tests", func() {
 			netlinkOpsMock.On("LinkByName", rep).Return(vfLink, nil)
 			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
 			_, ok := ctrl.podStates.Load("foo-ns/a-pod")
 			Expect(ok).To(BeFalse())
 			expectOVSPortAndInterfaceAbsent(ctrl.ovsClient, rep)
-			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, clearedPod)
+			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, livePod, clearedPod)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
 
@@ -1440,7 +1440,7 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			podNamespaceLister.On("Get", "a-pod").Return(livePod, nil)
-			kubeMock.On("PatchPodStatusAnnotations", livePod, clearedPod).Return(fmt.Errorf("API is down"))
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, livePod, clearedPod).Return(fmt.Errorf("API is down"))
 
 			ctrl.podStates.Store("foo-ns/a-pod", &podDPUState{
 				uid: k8stypes.UID("uid-1"),
@@ -1457,7 +1457,7 @@ var _ = Describe("Node DPU tests", func() {
 			// Deleting the port while the pod still advertises it as ready would
 			// let the host side plumb a sandbox onto a representor that is gone,
 			// so the teardown waits for the next retry instead.
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).ToNot(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).ToNot(Succeed())
 
 			expectOVSPortAndInterfacePresent(ctrl.ovsClient, rep)
 			ps, ok := ctrl.podStates.Load("foo-ns/a-pod")
@@ -1480,7 +1480,7 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			podNamespaceLister.On("Get", from.Name).Return(from, nil)
-			kubeMock.On("PatchPodStatusAnnotations", from, patched).Return(nil)
+			kubeMock.On("PatchPodStatusAnnotations", mock.Anything, from, patched).Return(nil)
 			return patched
 		}
 
@@ -1503,7 +1503,7 @@ var _ = Describe("Node DPU tests", func() {
 
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1"}}
 			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
-			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
+			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, livePod, patched)
 		})
 
 		It("Does not set the status of a NAD awaiting revalidation", func() {
@@ -1513,7 +1513,7 @@ var _ = Describe("Node DPU tests", func() {
 				"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1", revalidate: true},
 			}
 			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
-			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything)
 		})
 
 		It("Preserves the status of an already-clamped NAD", func() {
@@ -1524,7 +1524,7 @@ var _ = Describe("Node DPU tests", func() {
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {connClampedDown: true}}
 
 			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
-			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything)
 		})
 
 		It("Repairs Ready status when the representor is clamped", func() {
@@ -1535,7 +1535,7 @@ var _ = Describe("Node DPU tests", func() {
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {connClampedDown: true}}
 
 			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
-			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
+			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, livePod, patched)
 		})
 
 		It("Clears the status of a NAD that is no longer tracked", func() {
@@ -1543,7 +1543,7 @@ var _ = Describe("Node DPU tests", func() {
 			patched := expectStatusPatch(livePod, map[string]*util.DPUConnectionStatus{"ns1/nad1": nil})
 
 			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", nil, nil)).To(Succeed())
-			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", livePod, patched)
+			kubeMock.AssertCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, livePod, patched)
 		})
 
 		It("Does not update the pod when the status already matches", func() {
@@ -1551,7 +1551,7 @@ var _ = Describe("Node DPU tests", func() {
 
 			tracked := map[string]*dpuConnectionState{"ns1/nad1": {vfRepName: "pf0vf9", sandboxId: "sb1"}}
 			Expect(ctrl.reconcileDPUConnStatus(context.Background(), livePod, "foo-ns/a-pod", tracked, nil)).To(Succeed())
-			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "PatchPodStatusAnnotations", mock.Anything, mock.Anything, mock.Anything)
 		})
 	})
 
@@ -1607,7 +1607,7 @@ var _ = Describe("Node DPU tests", func() {
 			p.Spec.NodeName = "other-host"
 			podNamespaceLister.On("Get", "elsewhere").Return(p, nil)
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/elsewhere")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/elsewhere")).To(Succeed())
 
 			Expect(ctrl.nadPods.pods("ns1/nad1")).To(BeEmpty())
 		})
@@ -1616,7 +1616,7 @@ var _ = Describe("Node DPU tests", func() {
 			Expect(ctrl.handleAddOrUpdateDPUPod(context.Background(), "foo-ns/a-pod", podWithNADs("a-pod", "ns1/nad1"), nil)).To(Succeed())
 			podNamespaceLister.On("Get", "a-pod").Return(nil, apierrors.NewNotFound(corev1.Resource("pods"), "a-pod"))
 
-			Expect(ctrl.reconcileDPUPod("foo-ns/a-pod")).To(Succeed())
+			Expect(ctrl.reconcileDPUPod(context.Background(), "foo-ns/a-pod")).To(Succeed())
 
 			Expect(ctrl.nadPods.pods("ns1/nad1")).To(BeEmpty())
 		})

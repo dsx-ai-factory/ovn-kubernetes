@@ -111,7 +111,7 @@ var _ = Describe("Kube", func() {
 			newPod := pod.DeepCopy()
 			newPod.Annotations["added"] = "new-value"
 
-			err = kube.PatchPodStatusAnnotations(oldPod, newPod)
+			err = kube.PatchPodStatusAnnotations(context.Background(), oldPod, newPod)
 			Expect(err).ToNot(HaveOccurred())
 
 			pod, err = kube.KClient.CoreV1().Pods("default").Get(context.TODO(), "my-pod", metav1.GetOptions{})
@@ -135,7 +135,7 @@ var _ = Describe("Kube", func() {
 			newPod := pod.DeepCopy()
 			newPod.Annotations = map[string]string{"ovn": "value"}
 
-			err = kube.PatchPodStatusAnnotations(oldPod, newPod)
+			err = kube.PatchPodStatusAnnotations(context.Background(), oldPod, newPod)
 			Expect(err).ToNot(HaveOccurred())
 
 			pod, err = kube.KClient.CoreV1().Pods("default").Get(context.TODO(), "my-pod", metav1.GetOptions{})
@@ -146,7 +146,7 @@ var _ = Describe("Kube", func() {
 			newPod = pod.DeepCopy()
 			delete(newPod.Annotations, "ovn")
 
-			err = kube.PatchPodStatusAnnotations(oldPod, newPod)
+			err = kube.PatchPodStatusAnnotations(context.Background(), oldPod, newPod)
 			Expect(err).ToNot(HaveOccurred())
 
 			pod, err = kube.KClient.CoreV1().Pods("default").Get(context.TODO(), "my-pod", metav1.GetOptions{})
@@ -173,7 +173,7 @@ var _ = Describe("Kube", func() {
 			newPod := oldPod.DeepCopy()
 			newPod.Annotations = map[string]string{"ovn": "value"}
 
-			err := kube.PatchPodStatusAnnotations(oldPod, newPod)
+			err := kube.PatchPodStatusAnnotations(context.Background(), oldPod, newPod)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(patchOps).To(HaveLen(3))
@@ -206,7 +206,7 @@ var _ = Describe("Kube", func() {
 			newPod := oldPod.DeepCopy()
 			newPod.Annotations["ovn"] = "new-value"
 
-			err := kube.PatchPodStatusAnnotations(oldPod, newPod)
+			err := kube.PatchPodStatusAnnotations(context.TODO(), oldPod, newPod)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(patchOps).To(HaveLen(2))
@@ -239,7 +239,7 @@ var _ = Describe("Kube", func() {
 			newPod := oldPod.DeepCopy()
 			newPod.Annotations["ovn"] = "new"
 
-			err := kube.PatchPodStatusAnnotations(oldPod, newPod)
+			err := kube.PatchPodStatusAnnotations(context.Background(), oldPod, newPod)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(patchOps).To(HaveLen(2))
@@ -270,7 +270,7 @@ var _ = Describe("Kube", func() {
 
 			newPod := oldPod.DeepCopy()
 			newPod.Annotations[annotationKey] = "new"
-			err = kube.PatchPodStatusAnnotations(oldPod, newPod)
+			err = kube.PatchPodStatusAnnotations(context.TODO(), oldPod, newPod)
 			Expect(err).To(HaveOccurred(), "the UID guard must reject the old pod's annotation patch")
 
 			pod, err := kube.KClient.CoreV1().Pods("default").Get(
@@ -307,7 +307,7 @@ var _ = Describe("Kube", func() {
 			newNode := node.DeepCopy()
 			newNode.Annotations["added"] = "new-value"
 
-			err = kube.PatchNodeStatusAnnotations(oldNode, newNode)
+			err = kube.PatchNodeStatusAnnotations(context.TODO(), oldNode, newNode)
 			Expect(err).ToNot(HaveOccurred())
 
 			node, err = kube.KClient.CoreV1().Nodes().Get(context.TODO(), "my-node", metav1.GetOptions{})
@@ -330,7 +330,7 @@ var _ = Describe("Kube", func() {
 			newNode := node.DeepCopy()
 			newNode.Annotations = map[string]string{"ovn": "value"}
 
-			err = kube.PatchNodeStatusAnnotations(oldNode, newNode)
+			err = kube.PatchNodeStatusAnnotations(context.TODO(), oldNode, newNode)
 			Expect(err).ToNot(HaveOccurred())
 
 			node, err = kube.KClient.CoreV1().Nodes().Get(context.TODO(), "my-node", metav1.GetOptions{})
@@ -341,7 +341,7 @@ var _ = Describe("Kube", func() {
 			newNode = node.DeepCopy()
 			delete(newNode.Annotations, "ovn")
 
-			err = kube.PatchNodeStatusAnnotations(oldNode, newNode)
+			err = kube.PatchNodeStatusAnnotations(context.TODO(), oldNode, newNode)
 			Expect(err).ToNot(HaveOccurred())
 
 			node, err = kube.KClient.CoreV1().Nodes().Get(context.TODO(), "my-node", metav1.GetOptions{})
@@ -367,7 +367,7 @@ var _ = Describe("Kube", func() {
 			newNode := oldNode.DeepCopy()
 			newNode.Annotations = map[string]string{"ovn": "value"}
 
-			err := kube.PatchNodeStatusAnnotations(oldNode, newNode)
+			err := kube.PatchNodeStatusAnnotations(context.TODO(), oldNode, newNode)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(patchOps).To(HaveLen(3))
@@ -399,7 +399,7 @@ var _ = Describe("Kube", func() {
 			newNode := oldNode.DeepCopy()
 			newNode.Annotations["ovn"] = "new"
 
-			err := kube.PatchNodeStatusAnnotations(oldNode, newNode)
+			err := kube.PatchNodeStatusAnnotations(context.TODO(), oldNode, newNode)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(patchOps).To(HaveLen(2))
@@ -429,7 +429,7 @@ var _ = Describe("Kube", func() {
 			newNode := oldNode.DeepCopy()
 			newNode.Annotations["k8s.ovn.org/node-subnets"] = `{"default":"10.128.0.0/23"}`
 
-			err = kube.PatchNodeStatusAnnotations(oldNode, newNode)
+			err = kube.PatchNodeStatusAnnotations(context.TODO(), oldNode, newNode)
 			Expect(err).ToNot(HaveOccurred())
 
 			node, err = kube.KClient.CoreV1().Nodes().Get(context.TODO(), "my-node", metav1.GetOptions{})
@@ -451,7 +451,7 @@ var _ = Describe("Kube", func() {
 				},
 			}
 
-			err := kube.PatchNodeStatusAnnotations(oldNode, newNode)
+			err := kube.PatchNodeStatusAnnotations(context.TODO(), oldNode, newNode)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("different nodes"))
 			Expect(err.Error()).To(ContainSubstring("node-a"))
@@ -487,7 +487,7 @@ var _ = Describe("Kube", func() {
 			newNode := oldNode.DeepCopy()
 			newNode.Annotations["ovn"] = "subnet-data"
 
-			err = kube.PatchNodeStatusAnnotations(oldNode, newNode)
+			err = kube.PatchNodeStatusAnnotations(context.TODO(), oldNode, newNode)
 			Expect(err).ToNot(HaveOccurred())
 
 			node, err := kube.KClient.CoreV1().Nodes().Get(context.TODO(), "my-node", metav1.GetOptions{})

@@ -47,7 +47,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
-type NetworkStatusReporter func(networkName string, fieldManager string, condition *metav1.Condition, events ...*util.EventDetails) error
+type NetworkStatusReporter func(ctx context.Context, networkName string, fieldManager string, condition *metav1.Condition, events ...*util.EventDetails) error
 
 // networkClusterController is the cluster controller for the networks. An
 // instance of this struct is expected to be created for each network. A network
@@ -110,12 +110,12 @@ type networkClusterController struct {
 }
 
 // HandleNetworkRefChange satisfies the NetworkController interface; it updates dynamic UDN metrics and status.
-func (ncc *networkClusterController) HandleNetworkRefChange(nodeName string, active bool) {
+func (ncc *networkClusterController) HandleNetworkRefChange(ctx context.Context, nodeName string, active bool) {
 	if !ncc.isDynamicUDNEnabled() {
 		return
 	}
 
-	ncc.updateDynamicUDNStatus(nodeName, active)
+	ncc.updateDynamicUDNStatus(ctx, nodeName, active)
 	if active {
 		ncc.clearScheduledNodeCleanup(nodeName)
 	}
@@ -148,7 +148,7 @@ func (ncc *networkClusterController) updateDynamicUDNNodeRefs(nodeName string, a
 	return ncc.dynamicUDNNodeCount, true
 }
 
-func (ncc *networkClusterController) updateDynamicUDNStatus(nodeName string, active bool) {
+func (ncc *networkClusterController) updateDynamicUDNStatus(ctx context.Context, nodeName string, active bool) {
 	nodeCount, changed := ncc.updateDynamicUDNNodeRefs(nodeName, active)
 	if !changed {
 		return
@@ -179,6 +179,7 @@ func (ncc *networkClusterController) updateDynamicUDNStatus(nodeName string, act
 	}
 	if ncc.statusReporter != nil {
 		if err := ncc.statusReporter(
+			ctx,
 			networkName,
 			"ClusterManager", // FieldManager - must be unique per subsystem
 			cond,
@@ -297,8 +298,8 @@ func (ncc *networkClusterController) scheduleNodeCleanup(node *corev1.Node) erro
 
 // cleanupNode executes cleanup and tracks retry state. When node is nil, cleanup
 // will still release allocator state using nodeName but will skip annotation updates.
-func (ncc *networkClusterController) cleanupNode(nodeName string, node *corev1.Node) error {
-	err := ncc.nodeAllocator.CleanupNode(nodeName, node)
+func (ncc *networkClusterController) cleanupNode(ctx context.Context, nodeName string, node *corev1.Node) error {
+	err := ncc.nodeAllocator.CleanupNode(ctx, nodeName, node)
 	if err == nil {
 		ncc.nodeSyncFailed.Delete(nodeName)
 	} else {
@@ -309,7 +310,7 @@ func (ncc *networkClusterController) cleanupNode(nodeName string, node *corev1.N
 
 // cleanupDynamicUDNNodeIfEligible performs cleanup when eligible and otherwise ensures
 // delayed cleanup has been scheduled.
-func (ncc *networkClusterController) cleanupDynamicUDNNodeIfEligible(node *corev1.Node) (err error) {
+func (ncc *networkClusterController) cleanupDynamicUDNNodeIfEligible(ctx context.Context, node *corev1.Node) (err error) {
 	if !ncc.isDynamicUDNEnabled() || ncc.nodeAllocator == nil {
 		return nil
 	}
@@ -340,7 +341,7 @@ func (ncc *networkClusterController) cleanupDynamicUDNNodeIfEligible(node *corev
 			return nil
 		}
 	}
-	err = ncc.cleanupNode(node.Name, node)
+	err = ncc.cleanupNode(ctx, node.Name, node)
 	if err != nil {
 		return err
 	}
@@ -403,9 +404,9 @@ func (ncc *networkClusterController) allowPersistentIPs() bool {
 		util.AllowsPersistentIPs(ncc.GetNetInfo())
 }
 
-func (ncc *networkClusterController) init() error {
+func (ncc *networkClusterController) init(ctx context.Context) error {
 	// report no errors on restart, then propagate any new errors by the started handlers
-	if err := ncc.resetStatus(); err != nil {
+	if err := ncc.resetStatus(ctx); err != nil {
 		return fmt.Errorf("failed to reset network status: %w", err)
 	}
 
@@ -447,7 +448,7 @@ func (ncc *networkClusterController) init() error {
 
 	if ncc.hasNodeAllocation() {
 		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.GetNetInfo(), ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.nodeClient, ncc.tunnelIDAllocator)
-		err := ncc.nodeAllocator.Init()
+		err := ncc.nodeAllocator.Init(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)
 		}
@@ -532,7 +533,7 @@ func (ncc *networkClusterController) init() error {
 // generated.
 // Call this function after every node event handling, set handlerErr to nil to report no error.
 // There are potential optimization to when an error should be reported, see https://github.com/ovn-kubernetes/ovn-kubernetes/pull/4647#discussion_r1763352619.
-func (ncc *networkClusterController) updateNetworkStatus(nodeName string, handlerErr error) error {
+func (ncc *networkClusterController) updateNetworkStatus(ctx context.Context, nodeName string, handlerErr error) error {
 	if ncc.statusReporter == nil {
 		return nil
 	}
@@ -586,7 +587,7 @@ func (ncc *networkClusterController) updateNetworkStatus(nodeName string, handle
 	}
 
 	netName := ncc.GetNetworkName()
-	if err := ncc.statusReporter(netName, "NetworkClusterController", condition, events...); err != nil {
+	if err := ncc.statusReporter(ctx, netName, "NetworkClusterController", condition, events...); err != nil {
 		return fmt.Errorf("failed to report network status: %w", err)
 	}
 
@@ -602,12 +603,12 @@ func (ncc *networkClusterController) updateNetworkStatus(nodeName string, handle
 }
 
 // resetStatus should be called on startup before any handler is started to avoid status race.
-func (ncc *networkClusterController) resetStatus() error {
+func (ncc *networkClusterController) resetStatus(ctx context.Context) error {
 	if ncc.statusReporter == nil {
 		return nil
 	}
 	netName := ncc.GetNetworkName()
-	return ncc.statusReporter(netName, "NetworkClusterController", getNetworkAllocationUDNCondition(""))
+	return ncc.statusReporter(ctx, netName, "NetworkClusterController", getNetworkAllocationUDNCondition(""))
 }
 
 // We only report one failed node in condition to avoid too long messages and too many condition updates.
@@ -637,7 +638,7 @@ func (ncc *networkClusterController) SyncNodes(nodes []*corev1.Node) error {
 	return ncc.nodeAllocator.Sync(objs)
 }
 
-func (ncc *networkClusterController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *sharednode.NodeAnnotationState) error {
+func (ncc *networkClusterController) ReconcileNode(ctx context.Context, oldNode, newNode *corev1.Node, oldState, newState *sharednode.NodeAnnotationState) error {
 	var (
 		nodeName string
 		err      error
@@ -651,7 +652,7 @@ func (ncc *networkClusterController) ReconcileNode(oldNode, newNode *corev1.Node
 			// check if went inactive, not a true node delete
 			currentNode, getErr := ncc.watchFactory.GetNode(nodeName)
 			if getErr == nil {
-				err = ncc.cleanupDynamicUDNNodeIfEligible(currentNode)
+				err = ncc.cleanupDynamicUDNNodeIfEligible(ctx, currentNode)
 				break
 			}
 			if !apierrors.IsNotFound(getErr) {
@@ -660,25 +661,25 @@ func (ncc *networkClusterController) ReconcileNode(oldNode, newNode *corev1.Node
 			}
 			ncc.clearScheduledNodeCleanup(nodeName)
 		}
-		err = ncc.cleanupNode(nodeName, nil)
+		err = ncc.cleanupNode(ctx, nodeName, nil)
 	case oldNode != nil && !util.NoHostSubnet(oldNode) && util.NoHostSubnet(newNode):
 		// managed -> NoHostSubnet transition: clean up immediately
 		nodeName = newNode.Name
 		if ncc.isDynamicUDNEnabled() {
 			ncc.clearScheduledNodeCleanup(nodeName)
 		}
-		err = ncc.cleanupNode(nodeName, newNode)
+		err = ncc.cleanupNode(ctx, nodeName, newNode)
 	case ncc.isDynamicUDNEnabled() && !ncc.nodeIsActive(newNode.Name):
 		// Dynamic UDN inactive add/update path: clean up now or after grace period
 		nodeName = newNode.Name
-		err = ncc.cleanupDynamicUDNNodeIfEligible(newNode)
+		err = ncc.cleanupDynamicUDNNodeIfEligible(ctx, newNode)
 	case oldNode == nil:
 		// add case
 		nodeName = newNode.Name
 		if ncc.isDynamicUDNEnabled() {
 			ncc.clearScheduledNodeCleanup(nodeName)
 		}
-		err = ncc.nodeAllocator.HandleAddUpdateNodeEvent(newNode)
+		err = ncc.nodeAllocator.HandleAddUpdateNodeEvent(ctx, newNode)
 		ncc.handleAddUpdateNodeResult(newNode, err)
 	default:
 		// update case
@@ -692,11 +693,11 @@ func (ncc *networkClusterController) ReconcileNode(oldNode, newNode *corev1.Node
 		if !ncc.shouldReconcileNode(oldNode, newNode, oldState, newState, nodeFailed, nodeNetworkUnavailable) {
 			return nil
 		}
-		err = ncc.nodeAllocator.HandleAddUpdateNodeEvent(newNode)
+		err = ncc.nodeAllocator.HandleAddUpdateNodeEvent(ctx, newNode)
 		ncc.handleAddUpdateNodeResult(newNode, err)
 	}
 
-	statusErr := ncc.updateNetworkStatus(nodeName, err)
+	statusErr := ncc.updateNetworkStatus(ctx, nodeName, err)
 	return errors.Join(err, statusErr)
 }
 
@@ -746,10 +747,10 @@ func (ncc *networkClusterController) relevantNodeAnnotationsChanged(
 //   - initializes the node allocator and starts listening to node events
 //   - initializes the persistent ip allocator and starts listening to IPAMClaim events
 //   - initializes the pod ip allocator and starts listening to pod events
-func (ncc *networkClusterController) Start(_ context.Context) error {
+func (ncc *networkClusterController) Start(ctx context.Context) error {
 	start := time.Now()
 	klog.Infof("Initializing cluster manager network controller %q ...", ncc.GetNetworkName())
-	err := ncc.init()
+	err := ncc.init(ctx)
 	if err != nil {
 		return err
 	}
@@ -840,13 +841,13 @@ func (ncc *networkClusterController) newRetryFramework(objectType reflect.Type, 
 }
 
 // Cleanup the subnet annotations from the node for the User Defined Networks
-func (ncc *networkClusterController) Cleanup() error {
+func (ncc *networkClusterController) Cleanup(ctx context.Context) error {
 	if !ncc.IsUserDefinedNetwork() {
 		return fmt.Errorf("default network cannot be cleaned up")
 	}
 
 	if ncc.hasNodeAllocation() {
-		err := ncc.nodeAllocator.Cleanup()
+		err := ncc.nodeAllocator.Cleanup(ctx)
 		if err != nil {
 			return err
 		}
@@ -876,7 +877,7 @@ func getNewSubnets(old, new []config.CIDRNetworkEntry) []config.CIDRNetworkEntry
 	return ret
 }
 
-func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
+func (ncc *networkClusterController) Reconcile(_ context.Context, netInfo util.NetInfo) error {
 	nadKeys := ncc.networkManager.GetNADKeysForNetwork(netInfo.GetNetworkName())
 	if ncc.nodeAllocator != nil {
 		oldSubnets := ncc.GetNetInfo().Subnets()
@@ -934,7 +935,7 @@ type networkClusterControllerEventHandler struct {
 
 	objType  reflect.Type
 	ncc      *networkClusterController
-	syncFunc func([]interface{}) error
+	syncFunc func(context.Context, []interface{}) error
 }
 
 func (h *networkClusterControllerEventHandler) FilterOutResource(_ interface{}) bool {
@@ -969,7 +970,7 @@ func (h *networkClusterControllerEventHandler) AddResource(ctx context.Context, 
 // UpdateResource updates the specified object in the cluster to its version in newObj according
 // to its type and returns the error, if any, yielded during the object update.
 // The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
+func (h *networkClusterControllerEventHandler) UpdateResource(ctx context.Context, oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.PodType:
 		old, ok := oldObj.(*corev1.Pod)
@@ -980,7 +981,6 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 		if !ok {
 			return fmt.Errorf("could not cast %T new object to *corev1.Pod", newObj)
 		}
-		ctx := context.Background()
 		ctx = tracing.ContextWithSpanNamePrefix(ctx, tracing.ClusterManagerNetworkControllerPodSpanPrefix)
 		ctx = tracing.ContextWithOperation(ctx, tracing.OperationUpdate)
 		err := h.ncc.podAllocator.Reconcile(ctx, old, new)
@@ -997,14 +997,13 @@ func (h *networkClusterControllerEventHandler) UpdateResource(oldObj, newObj int
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // cachedObj is the internal cache entry for this object, used for now for pods and network policies.
-func (h *networkClusterControllerEventHandler) DeleteResource(obj, _ interface{}) error {
+func (h *networkClusterControllerEventHandler) DeleteResource(ctx context.Context, obj, _ interface{}) error {
 	switch h.objType {
 	case factory.PodType:
 		pod, ok := obj.(*corev1.Pod)
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
 		}
-		ctx := context.Background()
 		ctx = tracing.ContextWithSpanNamePrefix(ctx, tracing.ClusterManagerNetworkControllerPodSpanPrefix)
 		ctx = tracing.ContextWithOperation(ctx, tracing.OperationDelete)
 		err := h.ncc.podAllocator.Reconcile(ctx, pod, nil)
@@ -1017,7 +1016,7 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, _ interface{}
 			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
 		}
 
-		err := h.ncc.ipamClaimReconciler.Reconcile(ipamClaim, nil, h.ncc.subnetAllocator)
+		err := h.ncc.ipamClaimReconciler.Reconcile(ctx, ipamClaim, nil, h.ncc.subnetAllocator)
 		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
 			return fmt.Errorf("error deleting IPAMClaim: %w", err)
 		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
@@ -1028,8 +1027,8 @@ func (h *networkClusterControllerEventHandler) DeleteResource(obj, _ interface{}
 	return nil
 }
 
-func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) error {
-	var syncFunc func([]interface{}) error
+func (h *networkClusterControllerEventHandler) SyncFunc(ctx context.Context, objs []interface{}) error {
+	var syncFunc func(context.Context, []interface{}) error
 
 	if h.syncFunc != nil {
 		// syncFunc was provided explicitly
@@ -1039,7 +1038,7 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 		case factory.PodType:
 			syncFunc = h.ncc.podAllocator.Sync
 		case factory.IPAMClaimsType:
-			syncFunc = func(claims []interface{}) error {
+			syncFunc = func(_ context.Context, claims []interface{}) error {
 				return h.ncc.ipamClaimReconciler.Sync(
 					claims,
 					h.ncc.subnetAllocator,
@@ -1053,7 +1052,7 @@ func (h *networkClusterControllerEventHandler) SyncFunc(objs []interface{}) erro
 	if syncFunc == nil {
 		return nil
 	}
-	return syncFunc(objs)
+	return syncFunc(ctx, objs)
 }
 
 func (h *networkClusterControllerEventHandler) AreResourcesEqual(_, _ interface{}) (bool, error) {

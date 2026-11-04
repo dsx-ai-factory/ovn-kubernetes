@@ -74,7 +74,7 @@ func (nc *UserDefinedLocalnetNodeNetworkController) Stop() {
 }
 
 // Cleanup cleans up node entities for the given secondary network
-func (nc *UserDefinedLocalnetNodeNetworkController) Cleanup() error {
+func (nc *UserDefinedLocalnetNodeNetworkController) Cleanup(_ context.Context) error {
 	return nil
 }
 

@@ -6,16 +6,17 @@
 package mocks
 
 import (
-	apicorev1 "k8s.io/api/core/v1"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	context "context"
 
-	adminpbrv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	egressfirewallv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	ipreservationv1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/ipreservation/v1beta1"
+	apicorev1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	v1alpha1 "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	v1 "github.com/openshift/api/cloudnetwork/v1"
+	v1beta1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpbr/v1beta1"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -24,9 +25,9 @@ type InterfaceOVN struct {
 	mock.Mock
 }
 
-// CreateCloudPrivateIPConfig provides a mock function with given fields: cloudPrivateIPConfig
-func (_m *InterfaceOVN) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *v1.CloudPrivateIPConfig) (*v1.CloudPrivateIPConfig, error) {
-	ret := _m.Called(cloudPrivateIPConfig)
+// CreateCloudPrivateIPConfig provides a mock function with given fields: ctx, cloudPrivateIPConfig
+func (_m *InterfaceOVN) CreateCloudPrivateIPConfig(ctx context.Context, cloudPrivateIPConfig *v1.CloudPrivateIPConfig) (*v1.CloudPrivateIPConfig, error) {
+	ret := _m.Called(ctx, cloudPrivateIPConfig)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateCloudPrivateIPConfig")
@@ -34,19 +35,19 @@ func (_m *InterfaceOVN) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *v1.Clou
 
 	var r0 *v1.CloudPrivateIPConfig
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*v1.CloudPrivateIPConfig) (*v1.CloudPrivateIPConfig, error)); ok {
-		return rf(cloudPrivateIPConfig)
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.CloudPrivateIPConfig) (*v1.CloudPrivateIPConfig, error)); ok {
+		return rf(ctx, cloudPrivateIPConfig)
 	}
-	if rf, ok := ret.Get(0).(func(*v1.CloudPrivateIPConfig) *v1.CloudPrivateIPConfig); ok {
-		r0 = rf(cloudPrivateIPConfig)
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.CloudPrivateIPConfig) *v1.CloudPrivateIPConfig); ok {
+		r0 = rf(ctx, cloudPrivateIPConfig)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*v1.CloudPrivateIPConfig)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*v1.CloudPrivateIPConfig) error); ok {
-		r1 = rf(cloudPrivateIPConfig)
+	if rf, ok := ret.Get(1).(func(context.Context, *v1.CloudPrivateIPConfig) error); ok {
+		r1 = rf(ctx, cloudPrivateIPConfig)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -54,17 +55,17 @@ func (_m *InterfaceOVN) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *v1.Clou
 	return r0, r1
 }
 
-// DeleteCloudPrivateIPConfig provides a mock function with given fields: name
-func (_m *InterfaceOVN) DeleteCloudPrivateIPConfig(name string) error {
-	ret := _m.Called(name)
+// DeleteCloudPrivateIPConfig provides a mock function with given fields: ctx, name
+func (_m *InterfaceOVN) DeleteCloudPrivateIPConfig(ctx context.Context, name string) error {
+	ret := _m.Called(ctx, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DeleteCloudPrivateIPConfig")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(name)
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, name)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -170,9 +171,9 @@ func (_m *InterfaceOVN) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
 	return r0, r1
 }
 
-// GetEgressIPs provides a mock function with no fields
-func (_m *InterfaceOVN) GetEgressIPs() ([]*egressipv1.EgressIP, error) {
-	ret := _m.Called()
+// GetEgressIPs provides a mock function with given fields: ctx
+func (_m *InterfaceOVN) GetEgressIPs(ctx context.Context) ([]*egressipv1.EgressIP, error) {
+	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetEgressIPs")
@@ -180,19 +181,19 @@ func (_m *InterfaceOVN) GetEgressIPs() ([]*egressipv1.EgressIP, error) {
 
 	var r0 []*egressipv1.EgressIP
 	var r1 error
-	if rf, ok := ret.Get(0).(func() ([]*egressipv1.EgressIP, error)); ok {
-		return rf()
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*egressipv1.EgressIP, error)); ok {
+		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func() []*egressipv1.EgressIP); ok {
-		r0 = rf()
+	if rf, ok := ret.Get(0).(func(context.Context) []*egressipv1.EgressIP); ok {
+		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*egressipv1.EgressIP)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func() error); ok {
-		r1 = rf()
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -260,17 +261,17 @@ func (_m *InterfaceOVN) GetNodesForWindows() ([]*apicorev1.Node, error) {
 	return r0, r1
 }
 
-// PatchEgressIP provides a mock function with given fields: name, patchData
-func (_m *InterfaceOVN) PatchEgressIP(name string, patchData []byte) error {
-	ret := _m.Called(name, patchData)
+// PatchEgressIP provides a mock function with given fields: ctx, name, patchData
+func (_m *InterfaceOVN) PatchEgressIP(ctx context.Context, name string, patchData []byte) error {
+	ret := _m.Called(ctx, name, patchData)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PatchEgressIP")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, []byte) error); ok {
-		r0 = rf(name, patchData)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []byte) error); ok {
+		r0 = rf(ctx, name, patchData)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -314,17 +315,17 @@ func (_m *InterfaceOVN) PatchNodeStatus(old *apicorev1.Node, new *apicorev1.Node
 	return r0
 }
 
-// PatchNodeStatusAnnotations provides a mock function with given fields: oldNode, newNode
-func (_m *InterfaceOVN) PatchNodeStatusAnnotations(oldNode *apicorev1.Node, newNode *apicorev1.Node) error {
-	ret := _m.Called(oldNode, newNode)
+// PatchNodeStatusAnnotations provides a mock function with given fields: ctx, oldNode, newNode
+func (_m *InterfaceOVN) PatchNodeStatusAnnotations(ctx context.Context, oldNode *apicorev1.Node, newNode *apicorev1.Node) error {
+	ret := _m.Called(ctx, oldNode, newNode)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PatchNodeStatusAnnotations")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*apicorev1.Node, *apicorev1.Node) error); ok {
-		r0 = rf(oldNode, newNode)
+	if rf, ok := ret.Get(0).(func(context.Context, *apicorev1.Node, *apicorev1.Node) error); ok {
+		r0 = rf(ctx, oldNode, newNode)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -332,17 +333,17 @@ func (_m *InterfaceOVN) PatchNodeStatusAnnotations(oldNode *apicorev1.Node, newN
 	return r0
 }
 
-// PatchPodStatusAnnotations provides a mock function with given fields: oldPod, newPod
-func (_m *InterfaceOVN) PatchPodStatusAnnotations(oldPod *apicorev1.Pod, newPod *apicorev1.Pod) error {
-	ret := _m.Called(oldPod, newPod)
+// PatchPodStatusAnnotations provides a mock function with given fields: ctx, oldPod, newPod
+func (_m *InterfaceOVN) PatchPodStatusAnnotations(ctx context.Context, oldPod *apicorev1.Pod, newPod *apicorev1.Pod) error {
+	ret := _m.Called(ctx, oldPod, newPod)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PatchPodStatusAnnotations")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*apicorev1.Pod, *apicorev1.Pod) error); ok {
-		r0 = rf(oldPod, newPod)
+	if rf, ok := ret.Get(0).(func(context.Context, *apicorev1.Pod, *apicorev1.Pod) error); ok {
+		r0 = rf(ctx, oldPod, newPod)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -368,17 +369,17 @@ func (_m *InterfaceOVN) SetAnnotationsOnNamespace(namespaceName string, annotati
 	return r0
 }
 
-// SetAnnotationsOnNode provides a mock function with given fields: nodeName, annotations
-func (_m *InterfaceOVN) SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error {
-	ret := _m.Called(nodeName, annotations)
+// SetAnnotationsOnNode provides a mock function with given fields: ctx, nodeName, annotations
+func (_m *InterfaceOVN) SetAnnotationsOnNode(ctx context.Context, nodeName string, annotations map[string]interface{}) error {
+	ret := _m.Called(ctx, nodeName, annotations)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SetAnnotationsOnNode")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) error); ok {
-		r0 = rf(nodeName, annotations)
+	if rf, ok := ret.Get(0).(func(context.Context, string, map[string]interface{}) error); ok {
+		r0 = rf(ctx, nodeName, annotations)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -477,27 +478,27 @@ func (_m *InterfaceOVN) SetLabelsOnPod(pod *apicorev1.Pod, labels map[string]str
 }
 
 // UpdateAdminPBRStatus provides a mock function with given fields: adminpbr
-func (_m *InterfaceOVN) UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error) {
+func (_m *InterfaceOVN) UpdateAdminPBRStatus(adminpbr *v1beta1.AdminPolicyBasedRoute) (*v1beta1.AdminPolicyBasedRoute, error) {
 	ret := _m.Called(adminpbr)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateAdminPBRStatus")
 	}
 
-	var r0 *adminpbrv1beta1.AdminPolicyBasedRoute
+	var r0 *v1beta1.AdminPolicyBasedRoute
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*adminpbrv1beta1.AdminPolicyBasedRoute) (*adminpbrv1beta1.AdminPolicyBasedRoute, error)); ok {
+	if rf, ok := ret.Get(0).(func(*v1beta1.AdminPolicyBasedRoute) (*v1beta1.AdminPolicyBasedRoute, error)); ok {
 		return rf(adminpbr)
 	}
-	if rf, ok := ret.Get(0).(func(*adminpbrv1beta1.AdminPolicyBasedRoute) *adminpbrv1beta1.AdminPolicyBasedRoute); ok {
+	if rf, ok := ret.Get(0).(func(*v1beta1.AdminPolicyBasedRoute) *v1beta1.AdminPolicyBasedRoute); ok {
 		r0 = rf(adminpbr)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*adminpbrv1beta1.AdminPolicyBasedRoute)
+			r0 = ret.Get(0).(*v1beta1.AdminPolicyBasedRoute)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*adminpbrv1beta1.AdminPolicyBasedRoute) error); ok {
+	if rf, ok := ret.Get(1).(func(*v1beta1.AdminPolicyBasedRoute) error); ok {
 		r1 = rf(adminpbr)
 	} else {
 		r1 = ret.Error(1)
@@ -506,9 +507,9 @@ func (_m *InterfaceOVN) UpdateAdminPBRStatus(adminpbr *adminpbrv1beta1.AdminPoli
 	return r0, r1
 }
 
-// UpdateCloudPrivateIPConfig provides a mock function with given fields: cloudPrivateIPConfig
-func (_m *InterfaceOVN) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *v1.CloudPrivateIPConfig) (*v1.CloudPrivateIPConfig, error) {
-	ret := _m.Called(cloudPrivateIPConfig)
+// UpdateCloudPrivateIPConfig provides a mock function with given fields: ctx, cloudPrivateIPConfig
+func (_m *InterfaceOVN) UpdateCloudPrivateIPConfig(ctx context.Context, cloudPrivateIPConfig *v1.CloudPrivateIPConfig) (*v1.CloudPrivateIPConfig, error) {
+	ret := _m.Called(ctx, cloudPrivateIPConfig)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateCloudPrivateIPConfig")
@@ -516,19 +517,19 @@ func (_m *InterfaceOVN) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *v1.Clou
 
 	var r0 *v1.CloudPrivateIPConfig
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*v1.CloudPrivateIPConfig) (*v1.CloudPrivateIPConfig, error)); ok {
-		return rf(cloudPrivateIPConfig)
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.CloudPrivateIPConfig) (*v1.CloudPrivateIPConfig, error)); ok {
+		return rf(ctx, cloudPrivateIPConfig)
 	}
-	if rf, ok := ret.Get(0).(func(*v1.CloudPrivateIPConfig) *v1.CloudPrivateIPConfig); ok {
-		r0 = rf(cloudPrivateIPConfig)
+	if rf, ok := ret.Get(0).(func(context.Context, *v1.CloudPrivateIPConfig) *v1.CloudPrivateIPConfig); ok {
+		r0 = rf(ctx, cloudPrivateIPConfig)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*v1.CloudPrivateIPConfig)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*v1.CloudPrivateIPConfig) error); ok {
-		r1 = rf(cloudPrivateIPConfig)
+	if rf, ok := ret.Get(1).(func(context.Context, *v1.CloudPrivateIPConfig) error); ok {
+		r1 = rf(ctx, cloudPrivateIPConfig)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -572,17 +573,17 @@ func (_m *InterfaceOVN) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 	return r0
 }
 
-// UpdateEgressServiceStatus provides a mock function with given fields: namespace, name, host
-func (_m *InterfaceOVN) UpdateEgressServiceStatus(namespace string, name string, host string) error {
-	ret := _m.Called(namespace, name, host)
+// UpdateEgressServiceStatus provides a mock function with given fields: ctx, namespace, name, host
+func (_m *InterfaceOVN) UpdateEgressServiceStatus(ctx context.Context, namespace string, name string, host string) error {
+	ret := _m.Called(ctx, namespace, name, host)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateEgressServiceStatus")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
-		r0 = rf(namespace, name, host)
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, string) error); ok {
+		r0 = rf(ctx, namespace, name, host)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -590,17 +591,17 @@ func (_m *InterfaceOVN) UpdateEgressServiceStatus(namespace string, name string,
 	return r0
 }
 
-// UpdateIPAMClaimIPs provides a mock function with given fields: updatedIPAMClaim
-func (_m *InterfaceOVN) UpdateIPAMClaimIPs(updatedIPAMClaim *v1alpha1.IPAMClaim) error {
-	ret := _m.Called(updatedIPAMClaim)
+// UpdateIPAMClaimIPs provides a mock function with given fields: ctx, updatedIPAMClaim
+func (_m *InterfaceOVN) UpdateIPAMClaimIPs(ctx context.Context, updatedIPAMClaim *v1alpha1.IPAMClaim) error {
+	ret := _m.Called(ctx, updatedIPAMClaim)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateIPAMClaimIPs")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*v1alpha1.IPAMClaim) error); ok {
-		r0 = rf(updatedIPAMClaim)
+	if rf, ok := ret.Get(0).(func(context.Context, *v1alpha1.IPAMClaim) error); ok {
+		r0 = rf(ctx, updatedIPAMClaim)
 	} else {
 		r0 = ret.Error(0)
 	}

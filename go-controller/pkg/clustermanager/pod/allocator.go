@@ -170,7 +170,7 @@ func (a *PodAllocator) Reconcile(ctx context.Context, old, new *corev1.Pod) erro
 }
 
 // Sync initializes the allocator with pods that already exist on the cluster
-func (a *PodAllocator) Sync(objs []interface{}) error {
+func (a *PodAllocator) Sync(ctx context.Context, objs []interface{}) error {
 	// on sync, we don't release IPs from the allocator, we are just trying to
 	// allocate annotated IPs; specifically we don't want to release IPs of
 	// completed pods that might be being used by other pods
@@ -182,7 +182,7 @@ func (a *PodAllocator) Sync(objs []interface{}) error {
 			klog.Errorf("Could not cast %T object to *corev1.Pod", obj)
 			continue
 		}
-		ctx := tracing.ContextWithSpansDisabled(context.Background())
+		ctx := tracing.ContextWithSpansDisabled(ctx)
 		err := a.reconcile(ctx, nil, pod, releaseFromAllocator)
 		if err != nil {
 			klog.Errorf("Failed to sync pod %s/%s: %v", pod.Namespace, pod.Name, err)

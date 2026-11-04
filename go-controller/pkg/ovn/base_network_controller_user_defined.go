@@ -86,7 +86,7 @@ func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommo
 			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
 		ctx = tracing.ContextWithOperation(ctx, tracing.OperationAdd)
-		return bsnc.ensurePodForUserDefinedNetwork(ctx, pod, true)
+		return bsnc.reconcilePodForUserDefinedNetwork(ctx, nil, pod, false)
 
 	case factory.NamespaceType:
 		ns, ok := obj.(*corev1.Namespace)
@@ -124,17 +124,17 @@ func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommo
 // UpdateUserDefinedNetworkResourceCommon updates the specified object in the cluster to its version in newObj
 // according to its type and returns the error, if any, yielded during the object update. This function is
 // called for User Defined Networks only.
-func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCommon(objType reflect.Type, oldObj, newObj interface{}, inRetryCache bool) error {
+// Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
+// is in the retryCache or not.
+func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCommon(ctx context.Context, objType reflect.Type, oldObj, newObj interface{}, inRetryCache bool) error {
 	switch objType {
 	case factory.PodType:
 		oldPod := oldObj.(*corev1.Pod)
 		newPod := newObj.(*corev1.Pod)
 
-		ctx := tracing.ContextWithRetryLoop(context.Background(), inRetryCache)
+		ctx = tracing.ContextWithRetryLoop(ctx, inRetryCache)
 		ctx = tracing.ContextWithOperation(ctx, tracing.OperationUpdate)
-		needsAdd := shouldAddPort(oldPod, newPod, inRetryCache) ||
-			bsnc.dhcpPodNetworkUpdated(oldPod, newPod)
-		return bsnc.ensurePodForUserDefinedNetwork(ctx, newPod, needsAdd)
+		return bsnc.reconcilePodForUserDefinedNetwork(ctx, oldPod, newPod, inRetryCache)
 
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*corev1.Namespace), newObj.(*corev1.Namespace)
@@ -197,7 +197,7 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 			portInfoMap = cachedObj.(map[string]*lpInfo)
 		}
 		ctx = tracing.ContextWithOperation(ctx, tracing.OperationDelete)
-		return bsnc.removePodForUserDefinedNetwork(ctx, pod, portInfoMap)
+		return bsnc.deletePodForUserDefinedNetwork(ctx, pod, portInfoMap)
 
 	case factory.NamespaceType:
 		ns := obj.(*corev1.Namespace)
@@ -223,6 +223,17 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 		return bsnc.DeleteResourceCommon(objType, obj)
 	}
 	return nil
+}
+
+// reconcilePodForUserDefinedNetwork coordinates logical port setup and policy
+// membership for the existing pod event/retry framework.
+func (bsnc *BaseUserDefinedNetworkController) reconcilePodForUserDefinedNetwork(ctx context.Context, oldPod, pod *corev1.Pod, inRetryCache bool) error {
+	addPort := oldPod == nil || inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(pod) ||
+		bsnc.dhcpPodNetworkUpdated(oldPod, pod)
+	if err := bsnc.ensurePodForUserDefinedNetwork(ctx, pod, addPort); err != nil {
+		return err
+	}
+	return bsnc.reconcileNetworkPolicyPortGroups(pod)
 }
 
 // ensurePodForUserDefinedNetwork tries to set up the User Defined Network for a pod. It returns nil on success and error
@@ -475,6 +486,12 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(ctx 
 	return nil
 }
 
+// deletePodForUserDefinedNetwork is the pod delete entry point for UDN
+// controllers. It currently delegates to the legacy remove path.
+func (bsnc *BaseUserDefinedNetworkController) deletePodForUserDefinedNetwork(ctx context.Context, pod *corev1.Pod, portInfoMap map[string]*lpInfo) error {
+	return bsnc.removePodForUserDefinedNetwork(ctx, pod, portInfoMap)
+}
+
 // removePodForUserDefinedNetwork tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(ctx context.Context, pod *corev1.Pod, portInfoMap map[string]*lpInfo) (err error) {
@@ -497,6 +514,13 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(ctx
 
 	if portInfoMap == nil {
 		portInfoMap = map[string]*lpInfo{}
+	}
+
+	cleanupNetworkPolicyMembership := func() error {
+		if err := bsnc.deletePodNetworkPolicyMembership(pod); err != nil {
+			return fmt.Errorf("failed to delete network policy membership for pod %s/%s network %s: %w", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+		}
+		return nil
 	}
 
 	// collect the NADs managed by this controller up front so that the trace is
@@ -525,7 +549,7 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(ctx
 		nadKeys = append(nadKeys, nadKey)
 	}
 	if len(nadKeys) == 0 {
-		return nil
+		return cleanupNetworkPolicyMembership()
 	}
 
 	ctx, rootSpan := bsnc.startTrace(ctx, pod)
@@ -560,7 +584,7 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(ctx
 			// became remote where we might still need to cleanup. On L3 networks
 			// the node switch is removed so there is no need to do this.
 			if bsnc.TopologyType() != types.LocalnetTopology {
-				return nil
+				return cleanupNetworkPolicyMembership()
 			}
 			alreadyProcessed = true
 		}
@@ -594,10 +618,10 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(ctx
 			return err
 		}
 	}
-	return nil
+	return cleanupNetworkPolicyMembership()
 }
 
-func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods []interface{}) error {
+func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(_ context.Context, pods []interface{}) error {
 	orderedPods, err := logicalswitchmanager.SortPodsForIPAM(pods)
 	if err != nil {
 		return err
@@ -790,8 +814,7 @@ func (bsnc *BaseUserDefinedNetworkController) WatchMultiNetworkPolicy() error {
 // the NB DB (by ExternalIDs and GWRouterPrefix) and cleans each one via a dummy GatewayManager.
 // Used when gateway managers are empty (e.g. dummy controller or stale cleanup) so cleanup works
 // even when nodes are gone.
-func cleanupGatewayRoutersForNetworkFromDB(
-	nbClient libovsdbclient.Client,
+func cleanupGatewayRoutersForNetworkFromDB(nbClient libovsdbclient.Client,
 	netInfo util.NetInfo,
 	clusterRouterName, joinSwitchName string,
 ) error {
@@ -819,8 +842,7 @@ func cleanupGatewayRoutersForNetworkFromDB(
 // cleanupLoadBalancerGroups removes load balancer groups for a user-defined network controller.
 // When LB group UUIDs are known (normal controller), they are deleted directly by UUID.
 // Otherwise (dummy/stale cleanup controller), the groups are looked up by network-scoped name.
-func cleanupLoadBalancerGroups(
-	nbClient libovsdbclient.Client,
+func cleanupLoadBalancerGroups(nbClient libovsdbclient.Client,
 	netInfo util.NetInfo,
 	switchLBGroupUUID, clusterLBGroupUUID, routerLBGroupUUID string,
 ) {
@@ -1148,10 +1170,6 @@ func (bsnc *BaseUserDefinedNetworkController) enableSourceLSPFailedLiveMigration
 // node where the pod was scheduled
 func (bsnc *BaseUserDefinedNetworkController) hasPodLogicalPort(pod *corev1.Pod) bool {
 	return pod != nil && (bsnc.isPodScheduledOnLocalNode(pod) || bsnc.isLayer2WithInterconnectTransport())
-}
-
-func shouldAddPort(oldPod, newPod *corev1.Pod, inRetryCache bool) bool {
-	return inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod)
 }
 
 // dhcpPodNetworkUpdated returns true when this network learns IPs from an

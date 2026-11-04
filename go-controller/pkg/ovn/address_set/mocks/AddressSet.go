@@ -235,7 +235,7 @@ func (_m *AddressSet) GetName() string {
 	return r0
 }
 
-// GetUuids provides a mock function with given fields:
+// GetUuids provides a mock function with no fields
 func (_m *AddressSet) GetUuids() (string, string) {
 	ret := _m.Called()
 
