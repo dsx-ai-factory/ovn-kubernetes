@@ -70,15 +70,15 @@ func TestGenerateDashboardTemplatePreservesObjectOrder(t *testing.T) {
 	}
 	for _, want := range []string{
 		"{{`",
-		"`}}{{ .Values.clusterLabel.label }}{{`",
-		helmRawSplice(`{{ printf "label_values(%s, %s)" .Values.clusterLabel.discoveryMetric .Values.clusterLabel.label | toJson }}`),
+		"`}}{{ .Values.global.clusterLabel }}{{`",
+		helmRawSplice(`{{ printf "label_values(%s, %s)" .Values.clusterDiscoveryMetric .Values.global.clusterLabel | toJson }}`),
 		`{{ if eq .Values.processMetrics.profile "otel_process_scraper" }}`,
 		`process_cpu_time_seconds_total`,
 		`namedprocess_namegroup_cpu_seconds_total`,
 		`{{host_name}}`,
 		`{{instance}}`,
 		`>100000`,
-		`label_values(kube_pod_info{` + helmRawSplice(`{{ .Values.clusterLabel.label }}`) + `=\"$cluster\", namespace=\"ovn-kubernetes\"},pod)`,
+		`label_values(kube_pod_info{` + helmRawSplice(`{{ .Values.global.clusterLabel }}`) + `=\"$cluster\", namespace=\"ovn-kubernetes\"},pod)`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("generated template does not contain %q:\n%s", want, got)

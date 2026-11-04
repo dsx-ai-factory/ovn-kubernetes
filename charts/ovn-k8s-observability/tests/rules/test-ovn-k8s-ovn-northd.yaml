@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  - name: OvnNorthdIsNotActive - does not pair pods from different clusters
+    interval: 1m
+    input_series:
+      - series: 'ovn_northd_status{cluster="cluster-a", pod="shared-control-plane"}'
+        values: '0+0x15'
+      - series: 'kube_pod_container_status_ready{namespace="ovn-kubernetes", container="ovn-northd", cluster="cluster-b", pod="shared-control-plane"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: OvnNorthdIsNotActive
+        exp_alerts: []

@@ -2,6 +2,7 @@
 SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 */ -}}
+{{- $clusterLabel := include "ovnK8sObservability.clusterLabel" . }}
 {{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
 {{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
 {{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
@@ -153,7 +154,7 @@ spec:
     {{- $threshold := $rule.threshold | default 300000 }}
     - alert: OvsVswitchdBridgeFlowsTooHighGPUNodes
       expr: |
-        max by(pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
+        max by({{ $clusterLabel }}, pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
       for: 15m
       labels:
         severity: major
@@ -172,7 +173,7 @@ spec:
     {{- $threshold := $rule.threshold | default 500000 }}
     - alert: OvsVswitchdBridgeFlowsTooHighCPUNodes
       expr: |
-        max by(pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
+        max by({{ $clusterLabel }}, pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
       for: 15m
       labels:
         severity: major
@@ -191,7 +192,7 @@ spec:
     {{- $threshold := $rule.threshold | default 200000 }}
     - alert: OvsVswitchdBridgeFlowsTotalTooHigh
       expr: |
-        max by(pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
+        max by({{ $clusterLabel }}, pod,instance,bridge) (ovs_vswitchd_bridge_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"{{ if $filter }}, {{ $filter }}{{ end }}}) > {{ $threshold }}
       for: 15m
       labels:
         severity: warning
@@ -206,7 +207,7 @@ spec:
 
     - alert: OvsVswitchdDPFlowsTotalTooHigh
       expr: |
-        max by (pod) (ovs_vswitchd_dp_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"}) > 10000
+        max by ({{ $clusterLabel }}, pod) (ovs_vswitchd_dp_flows_total{namespace="ovn-kubernetes",job="ovnkube-node"}) > 10000
       for: 15m
       labels:
         severity: warning
@@ -297,14 +298,14 @@ spec:
     - alert: OvsPollThreadFlowTableMissRatioHigh
       expr: |
         (
-          sum by (pod, instance) (
+          sum by ({{ $clusterLabel }}, pod, instance) (
             rate(ovs_vswitchd_poll_threads_missed_total{datapath="ovs-netdev",core!="main"}[10m])
             +
             rate(ovs_vswitchd_poll_threads_lost_total{datapath="ovs-netdev",core!="main"}[10m])
           )
           /
           clamp_min(
-            sum by (pod, instance) (
+            sum by ({{ $clusterLabel }}, pod, instance) (
               rate(ovs_vswitchd_poll_threads_hit_total{datapath="ovs-netdev",core!="main"}[10m])
               +
               rate(ovs_vswitchd_poll_threads_missed_total{datapath="ovs-netdev",core!="main"}[10m])
@@ -333,12 +334,12 @@ spec:
     - alert: OvsPollThreadPacketUpcallFailureRatioHigh
       expr: |
         (
-          sum by (pod, instance) (
+          sum by ({{ $clusterLabel }}, pod, instance) (
             rate(ovs_vswitchd_poll_threads_lost_total{datapath="ovs-netdev",core!="main"}[10m])
           )
           /
           clamp_min(
-            sum by (pod, instance) (
+            sum by ({{ $clusterLabel }}, pod, instance) (
               rate(ovs_vswitchd_poll_threads_hit_total{datapath="ovs-netdev",core!="main"}[10m])
               +
               rate(ovs_vswitchd_poll_threads_lost_total{datapath="ovs-netdev",core!="main"}[10m])

@@ -2,6 +2,7 @@
 SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 */ -}}
+{{- $clusterLabel := include "ovnK8sObservability.clusterLabel" . }}
 {{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
 {{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
 {{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
@@ -41,7 +42,7 @@ spec:
 
     - alert: OvnNorthdIsNotActive
       expr: |
-        ovn_northd_status == 0 and on(pod)
+        ovn_northd_status == 0 and on({{ $clusterLabel }}, pod)
         kube_pod_container_status_ready{namespace="ovn-kubernetes", container="ovn-northd"}  == 1
       for: 10m
       labels:

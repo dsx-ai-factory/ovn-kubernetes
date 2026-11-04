@@ -2,6 +2,7 @@
 SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 */ -}}
+{{- $clusterLabel := include "ovnK8sObservability.clusterLabel" . }}
 {{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
 {{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
 {{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
@@ -82,7 +83,11 @@ spec:
 
     - alert: OvnKubeClusterManagerNotRunning
       expr: |
-        absent(up{job="ovnkube-control-plane", namespace="ovn-kubernetes"} == 1) and sum(up{job=~"prometheus.*"}) > 0
+        count by ({{ $clusterLabel }}) (kube_node_info)
+        unless on ({{ $clusterLabel }})
+        count by ({{ $clusterLabel }}) (
+          up{job="ovnkube-control-plane", namespace="ovn-kubernetes"} == 1
+        )
       for: 5m
       labels:
         severity: warning
@@ -92,7 +97,7 @@ spec:
          {{`No ovnkube-cluster-manager running for longer than 5m`}}
 
     - alert: OvnKubeClusterManagerMultipleLeaders
-      expr: sum(ovnkube_clustermanager_leader{namespace="ovn-kubernetes"}) > 1
+      expr: sum by ({{ $clusterLabel }}) (ovnkube_clustermanager_leader{namespace="ovn-kubernetes"}) > 1
       for: 6m
       labels:
         severity: critical
@@ -101,7 +106,7 @@ spec:
        message: There are multiple ovnkube-cluster-manager leaders
 
     - alert: OvnKubeClusterManagerNoLeader
-      expr: max(ovnkube_clustermanager_leader{namespace="ovn-kubernetes"}) == 0
+      expr: max by ({{ $clusterLabel }}) (ovnkube_clustermanager_leader{namespace="ovn-kubernetes"}) == 0
       for: 6m
       labels:
         severity: critical

@@ -34,6 +34,28 @@ tests:
         alertname: K8sNodeWithoutOvnKubeRunning
         exp_alerts: []
 
+  - name: K8sNodeWithoutOvnKubeRunning - matches nodes and pods within each cluster
+    interval: 1m
+    input_series:
+      - series: 'kube_node_info{cluster="cluster-a", node="shared-node"}'
+        values: '1+0x15'
+      - series: 'kube_node_info{cluster="cluster-b", node="shared-node"}'
+        values: '1+0x15'
+      - series: 'kube_pod_info{namespace="ovn-kubernetes", cluster="cluster-a", pod="ovnkube-node-a", node="shared-node"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: K8sNodeWithoutOvnKubeRunning
+        exp_alerts:
+          - exp_labels:
+              severity: minor
+              cluster: cluster-b
+              node: shared-node
+            exp_annotations:
+              message: |
+                All K8s nodes should be running OVN K8s Controller pods,
+                but OVN K8s Controller pod is not running on shared-node node.
+
   - name: K8sNodeWithoutOvnKubeReady - should fire when pod not Ready on Ready schedulable node
     interval: 1m
     input_series:
@@ -123,11 +145,11 @@ tests:
     input_series:
       - series: 'kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod="ovnkube-node-abc"}'
         values: '0+0x25'
-      - series: 'kube_pod_info{namespace="ovn-kubernetes", pod="ovnkube-node-abc", node="node-cs-001"}'
+      - series: 'kube_pod_info{namespace="ovn-kubernetes", pod="ovnkube-node-abc", node="node-worker-001"}'
         values: '1+0x25'
-      - series: 'kube_node_status_condition{condition="Ready", status="true", node="node-cs-001"}'
+      - series: 'kube_node_status_condition{condition="Ready", status="true", node="node-worker-001"}'
         values: '1+0x25'
-      - series: 'kube_node_spec_unschedulable{node="node-cs-001"}'
+      - series: 'kube_node_spec_unschedulable{node="node-worker-001"}'
         values: '0+0x25'
       - series: 'kube_pod_container_status_ready{namespace="ovn-kubernetes", container="sb-ovsdb", pod="ovnkube-node-abc"}'
         values: '0+0x25'
@@ -140,11 +162,103 @@ tests:
               namespace: ovn-kubernetes
               condition: "true"
               pod: ovnkube-node-abc
-              node: node-cs-001
+              node: node-worker-001
             exp_annotations:
               message: |
-                OvnKube/Host K8s pod ovnkube-node-abc is in not Ready state on critical infrastructure node node-cs-001 for longer than 20min.
+                OvnKube/Host K8s pod ovnkube-node-abc is in not Ready state on critical infrastructure node node-worker-001 for longer than 20min.
                 Not ready containers: sb-ovsdb
+
+  - name: OvnKubeCNIRequestSuccessRateLow - should fire when success rate is 85%
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '85+85x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '15+15x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: node-worker-01
+              pod: ovnkube-node-abc
+              command: ADD
+            exp_annotations:
+              message: |
+                CNI request success rate is 85% for command ADD on pod ovnkube-node-abc
+                running on node node-worker-01 over the last 20 minutes. Requires at least 10 CNI requests in that window;
+                a low success rate with fewer than 10 requests does not alert, to avoid false positives from small samples.
+
+  - name: OvnKubeCNIRequestSuccessRateCriticalLow - should fire when success rate is 45%
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '45+45x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '55+55x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateCriticalLow
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-01
+              pod: ovnkube-node-abc
+              command: ADD
+            exp_annotations:
+              message: |
+                CNI request success rate is 45% for command ADD on pod ovnkube-node-abc
+                running on node node-worker-01 over the last 20 minutes. Requires at least 10 CNI requests in that window;
+                a low success rate with fewer than 10 requests does not alert, to avoid false positives from small samples.
+
+  - name: OvnKubeCNIRequestSuccessRateLow - should not fire when success rate is 95%
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '95+95x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '5+5x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateLow
+        exp_alerts: []
+
+  - name: OvnKubeCNIRequestSuccessRateLow - should not fire at exactly 90% boundary
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '90+90x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '10+10x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateLow
+        exp_alerts: []
+
+  - name: OvnKubeCNIRequestSuccessRateCriticalLow - should not fire at exactly 50% boundary
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '50+50x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '50+50x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateCriticalLow
+        exp_alerts: []
+
+  - name: OvnKubeCNIRequestSuccessRateLow - should not fire when success rate is 45% (critical band)
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="false",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '45+45x40'
+      - series: 'ovnkube_node_cni_request_duration_seconds_count{err="true",instance="node-worker-01",pod="ovnkube-node-abc",command="ADD"}'
+        values: '55+55x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: OvnKubeCNIRequestSuccessRateLow
+        exp_alerts: []
 
   - name: OvnKubeIncreaseInPodCreationLatencyP100 - should fire when P100 rises
     interval: 1m
@@ -183,3 +297,22 @@ tests:
       - expr: ALERTS{alertname="OvnKubeIncreaseInPodCreationLatencyP100"}
         eval_time: 40m
         exp_samples: []
+
+  - name: OvnKubeControllerStale - detects only the stale cluster
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_controller_nb_e2e_timestamp{cluster="cluster-a"}'
+        values: '0+0x12'
+      - series: 'ovnkube_controller_nb_e2e_timestamp{cluster="cluster-b"}'
+        values: '0+60x12'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: OvnKubeControllerStale
+        exp_alerts:
+          - exp_labels:
+              severity: major
+              cluster: cluster-a
+            exp_annotations:
+              message: |
+                Pod ovn-kubernetes/  ovnkube-controller container has not
+                updating the OVN northbound database for too long

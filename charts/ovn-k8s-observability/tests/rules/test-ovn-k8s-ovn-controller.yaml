@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  - name: OvnControllerGeneveTunnelCountIsLow - counts nodes within each cluster
+    interval: 1m
+    input_series:
+      - series: 'kube_node_info{cluster="cluster-a", node="node-a-1"}'
+        values: '1+0x15'
+      - series: 'kube_node_info{cluster="cluster-a", node="node-a-2"}'
+        values: '1+0x15'
+      - series: 'kube_node_info{cluster="cluster-b", node="node-b-1"}'
+        values: '1+0x15'
+      - series: 'kube_node_info{cluster="cluster-b", node="node-b-2"}'
+        values: '1+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-a", instance="node-a-1"}'
+        values: '1+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-a", instance="node-a-2"}'
+        values: '1+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-b", instance="node-b-1"}'
+        values: '1+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-b", instance="node-b-2"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: OvnControllerGeneveTunnelCountIsLow
+        exp_alerts: []
+
+  - name: OvnControllerGeneveTunnelCountIsLow - flags only the node below its own cluster's expectation
+    interval: 1m
+    input_series:
+      - series: 'kube_node_info{cluster="cluster-a", node="node-a-1"}'
+        values: '1+0x15'
+      - series: 'kube_node_info{cluster="cluster-a", node="node-a-2"}'
+        values: '1+0x15'
+      - series: 'kube_node_info{cluster="cluster-a", node="node-a-3"}'
+        values: '1+0x15'
+      - series: 'kube_node_info{cluster="cluster-b", node="node-b-1"}'
+        values: '1+0x15'
+      - series: 'kube_node_info{cluster="cluster-b", node="node-b-2"}'
+        values: '1+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-a", instance="node-a-1"}'
+        values: '2+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-a", instance="node-a-2"}'
+        values: '2+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-a", instance="node-a-3"}'
+        values: '1+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-b", instance="node-b-1"}'
+        values: '1+0x15'
+      - series: 'ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes", cluster="cluster-b", instance="node-b-2"}'
+        values: '1+0x15'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: OvnControllerGeneveTunnelCountIsLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              cluster: cluster-a
+              node: node-a-3
+              instance: node-a-3
+              job: ovnkube-node
+              namespace: ovn-kubernetes
+            exp_annotations:
+              message: |
+                Node node-a-3 in cluster cluster-a has 1 Geneve ports, fewer than expected for its cluster.

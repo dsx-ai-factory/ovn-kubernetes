@@ -41,7 +41,7 @@
       "type": "table",
       "targets": [
         {
-          "expr": "ovnkube_clustermanager_build_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"}",
+          "expr": "ovnkube_clustermanager_build_info{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"}",
           "instant": true,
           "range": false,
           "format": "table",
@@ -142,7 +142,7 @@
       "type": "state-timeline",
       "targets": [
         {
-          "expr": "ovnkube_clustermanager_leader{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"}",
+          "expr": "ovnkube_clustermanager_leader{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"}",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -208,7 +208,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-cluster-manager\"}[5m]))",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-cluster-manager\"}[5m]))",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -262,7 +262,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (container_memory_working_set_bytes{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-cluster-manager\"}) / 1024^3",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"$pod\",container=\"ovnkube-cluster-manager\"}) / 1024^3",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -316,28 +316,28 @@
       "type": "table",
       "targets": [
         {
-          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v4_host_subnets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
+          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v4_host_subnets{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "instant": true,
           "range": false,
           "format": "table",
           "refId": "A"
         },
         {
-          "expr": "max by (network_name) (ovnkube_clustermanager_num_v4_host_subnets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
+          "expr": "max by (network_name) (ovnkube_clustermanager_num_v4_host_subnets{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "instant": true,
           "range": false,
           "format": "table",
           "refId": "B"
         },
         {
-          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v6_host_subnets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
+          "expr": "max by (network_name) (ovnkube_clustermanager_allocated_v6_host_subnets{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "instant": true,
           "range": false,
           "format": "table",
           "refId": "C"
         },
         {
-          "expr": "max by (network_name) (ovnkube_clustermanager_num_v6_host_subnets{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
+          "expr": "max by (network_name) (ovnkube_clustermanager_num_v6_host_subnets{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "instant": true,
           "range": false,
           "format": "table",
@@ -414,7 +414,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (pod) (rate(ovnkube_resource_retry_failures_total{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"ovnkube-control-plane-.*\"}[5m]))",
+          "expr": "sum by (pod) (rate(ovnkube_resource_retry_failures_total{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", pod=~\"ovnkube-control-plane-.*\"}[5m]))",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -468,7 +468,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "max(ovnkube_clustermanager_num_egress_ips{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
+          "expr": "max(ovnkube_clustermanager_num_egress_ips{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\"})",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -497,7 +497,7 @@
         "skipUrlSync": false,
         "query": {
           "qryType": 1,
-          "query": `}}{{ printf "label_values(%s, %s)" .Values.clusterLabel.discoveryMetric .Values.clusterLabel.label | toJson }}{{`,
+          "query": `}}{{ printf "label_values(%s, %s)" .Values.clusterDiscoveryMetric .Values.global.clusterLabel | toJson }}{{`,
           "refId": "prometheus-cluster-Variable-Query"
         },
         "datasource": {
@@ -521,7 +521,7 @@
         "label": "Pod",
         "skipUrlSync": false,
         "description": "A list of ovnkube-control-plane Pods.",
-        "query": "label_values(kube_pod_info{`}}{{ .Values.clusterLabel.label }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", created_by_name=~\"ovnkube-control-plane-.*\"},pod)",
+        "query": "label_values(kube_pod_info{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", namespace=\"ovn-kubernetes\", created_by_name=~\"ovnkube-control-plane-.*\"},pod)",
         "datasource": {
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"

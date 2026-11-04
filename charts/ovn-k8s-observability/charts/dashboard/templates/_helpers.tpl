@@ -8,10 +8,8 @@ SPDX-License-Identifier: Apache-2.0
 {{- if not (has .Values.processMetrics.profile $profiles) -}}
 {{- fail (printf "dashboard.processMetrics.profile must be one of %s" (join ", " $profiles)) -}}
 {{- end -}}
-{{- if not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" .Values.clusterLabel.label) -}}
-{{- fail "dashboard.clusterLabel.label must be a valid Prometheus label name" -}}
-{{- end -}}
-{{- if or (empty .Values.clusterLabel.discoveryMetric) (contains "`" .Values.clusterLabel.discoveryMetric) -}}
-{{- fail "dashboard.clusterLabel.discoveryMetric must be a non-empty PromQL series selector without backticks" -}}
+{{- $_ := include "ovnK8sObservability.clusterLabel" . -}}
+{{- if or (empty .Values.clusterDiscoveryMetric) (contains "`" .Values.clusterDiscoveryMetric) -}}
+{{- fail "dashboard.clusterDiscoveryMetric must be a non-empty PromQL series selector without backticks" -}}
 {{- end -}}
 {{- end -}}

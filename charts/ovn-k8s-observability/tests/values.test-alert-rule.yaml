@@ -20,16 +20,16 @@ alert-rule:
   rules:
     ovnKubePodHealthRequiredNodes:
       enable: true
-      filter: 'node=~".*k8s-supervisor-.*|.*nid-core-.*|.*-cs-.*|.*-ss-.*"'
+      filter: 'node=~".*worker.*"'
     ovnKubePodHealthFilteredNodes:
       enable: true
-      filter: 'node!~".*liqo-.*|.*-k8s-ovn-.*"'
+      filter: 'node!~".*unmanaged.*"'
     ovsNoOffloadBytes:
       enable: true
-      filter: 'interface=~"^enp.*_[0-9]+$", port!~"^intra-node$"'
+      filter: 'interface=~"^enp.*_[0-9]+$"'
     ovsNoOffloadIntraNodeBytes:
       enable: true
-      filter: 'interface=~"^enp.*_[0-9]+$", port=~"^intra-node$"'
+      filter: 'interface=~"^enp.*_[0-9]+$"'
     ovsBridgeFlowsTooHighGPUNodes:
       enable: true
       filter: 'bridge=~".*-br[1-9]-.*"'
@@ -47,5 +47,5 @@ alert-rule:
       podInterfaceFilter: 'interface=~"^enp.*_[0-9]+$|^pf[01]vf[0-9]+$"'
     ovsMegaFlows:
       enable: true
-      filter: 'instance=~".*-cs-.*"'
+      filter: 'instance=~".*-worker-.*"'
       threshold: 40000

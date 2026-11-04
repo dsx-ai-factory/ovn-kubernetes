@@ -2,6 +2,7 @@
 SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 */ -}}
+{{- $clusterLabel := include "ovnK8sObservability.clusterLabel" . }}
 {{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
 {{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
 {{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
@@ -94,18 +95,17 @@ spec:
 
     - alert: OvnControllerGeneveTunnelCountIsLow
       expr: |
-        kube_node_info and on (node) (
+        (
           label_replace(ovn_controller_integration_bridge_geneve_ports{job="ovnkube-node", namespace="ovn-kubernetes"},
-            "node", "$1", "instance", "(.*)") < scalar(count(kube_node_info)) - 1
+            "node", "$1", "instance", "(.*)")
+          < on ({{ $clusterLabel }}) group_left()
+          (count by ({{ $clusterLabel }}) (kube_node_info) - 1)
         )
+        and on ({{ $clusterLabel }}, node) kube_node_info
       for: 10m
       labels:
         severity: warning
         {{- include "alertRuleLabels" (merge (dict "labels" $ruleLabels "indent" 8) .) }}
       annotations:
         message: |
-          {{`The list of nodes that have a lower number of Geneve Ports
-          and counts they have
-          {{ range query "ovn_controller_integration_bridge_geneve_ports{job='ovnkube-node', namespace='ovn-kubernetes'} < scalar(count(kube_node_info)) - 1" }}
-          {{ .Labels.instance }}: {{ .Value }}
-          {{ end }}.`}}
+          {{`Node {{ $labels.node }} in cluster {{ index $labels "`}}{{ $clusterLabel }}{{`" }} has {{ $value }} Geneve ports, fewer than expected for its cluster.`}}

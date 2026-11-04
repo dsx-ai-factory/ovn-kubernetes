@@ -49,24 +49,30 @@ helm template ovn-k8s-observability charts/ovn-k8s-observability \
   --namespace ovn-kubernetes
 ```
 
-## Dashboard customization
+## Cluster label
 
-Dashboard PromQL is rendered from Helm-templated JSON. The default settings
-match the existing DSX deployment:
+`global.clusterLabel` (default `cluster`) names the Prometheus label that
+identifies a cluster. The alert rules keep it in aggregations and vector
+matches, so series from different clusters are not mixed when several clusters
+share one Prometheus, and the resulting alerts carry it. The dashboards use the
+same label for the `$cluster` variable and the panel selectors. Set it to the
+label your metrics carry (for example `k8s_cluster_name`):
 
 ```yaml
-dashboard:
-  clusterLabel:
-    label: cluster
-    discoveryMetric: up{job="ovnkube-node"}
-  processMetrics:
-    profile: otel_process_scraper
+global:
+  clusterLabel: k8s_cluster_name
 ```
 
-Every dashboard includes a `$cluster` variable. Set `dashboard.clusterLabel.label`
-and `dashboard.clusterLabel.discoveryMetric` to match the Prometheus series used
-to identify clusters. The label is validated as a Prometheus label name; the
-discovery value may be a metric name or a PromQL series selector.
+The label must be present on the series the alerts and dashboards use,
+including `kube_node_info` and the `ovnkube-*` and OVS series. It must not be
+empty and must be a valid Prometheus label name; the render fails otherwise.
+
+## Dashboard customization
+
+Dashboard PromQL is rendered from Helm-templated JSON. Every dashboard includes
+a `$cluster` variable whose label is `global.clusterLabel`. Set
+`dashboard.clusterDiscoveryMetric` to the series used to discover its
+values; it may be a metric name or a PromQL series selector.
 
 The `dashboard.processMetrics.profile` value controls only the host OVS process
 CPU and memory panels:
@@ -118,13 +124,14 @@ of the package.
 | alert-rule.rules.ovsNoOffloadBytes.enable | bool | `false` | Alert on non-offloaded traffic |
 | alert-rule.rules.ovsNoOffloadBytes.filter | string | `"interface=~\"^pf[0|1]vf[0-9]+$\""` | PromQL matcher for non-offloaded traffic alerts |
 | alert-rule.rules.ovsNoOffloadIntraNodeBytes.enable | bool | `false` | Alert on non-offloaded traffic through intra-node ports |
-| dashboard.clusterLabel.discoveryMetric | string | `"up{job=\"ovnkube-node\"}"` | PromQL series selector used to discover cluster-label values |
-| dashboard.clusterLabel.label | string | `"cluster"` | Prometheus label used by the cluster variable and panel selectors |
+| alert-rule.rules.ovsNoOffloadIntraNodeBytes.filter | string | `""` | Required when `enable` is true; rendering fails while it is empty. PromQL matcher selecting the intra-node ports, for example `interface=~"^enp.*_[0-9]+$", port=~".*_app.*"`. The right pattern depends on the deployment, so there is no default. |
+| dashboard.clusterDiscoveryMetric | string | `"up{job=\"ovnkube-node\"}"` | PromQL series selector used to discover the values of the cluster variable (the label is `global.clusterLabel`) |
 | dashboard.grafana.allowCrossNamespaceImport | bool | `true` | Allow importing dashboards from other namespaces |
 | dashboard.grafana.datasourceName | string | `"prom-victoriametrics"` | Grafana datasource mapped to `DS_PROMETHEUS` |
 | dashboard.grafana.instanceSelector.matchLabels."grafana.com/selector" | string | `"grafana"` | Grafana instance selector for dashboard provisioning |
 | dashboard.namespace | string | `"ovn-kubernetes"` | Namespace for GrafanaDashboard resources |
 | dashboard.processMetrics.profile | string | `"otel_process_scraper"` | Host OVS process metric source: process_exporter or otel_process_scraper |
+| global.clusterLabel | string | `"cluster"` | Prometheus label identifying a cluster. Preserved by the alert rule aggregations and vector matches, and used by the Grafana cluster variable and panel selectors. Must be non-empty and a valid Prometheus label name. |
 | global.ovnkubeNamespace | string | `"ovn-kubernetes"` | Namespace where the OVN Kubernetes workloads run |
 | monitoring.metricsPortName | string | `"ovnkube-node-metrics"` | Service port name scraped for ovnkube-node metrics |
 | monitoring.namespace | string | `"ovn-kubernetes"` | Namespace for ServiceMonitor resources |

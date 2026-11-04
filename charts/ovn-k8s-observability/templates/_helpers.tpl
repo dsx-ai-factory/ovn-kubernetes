@@ -33,3 +33,20 @@ Usage:
 {{- toYaml . | nindent $indent }}
 {{- end }}
 {{- end -}}
+
+{{/*
+Prometheus label identifying a cluster, from global.clusterLabel. It is used by the
+alert rules (kept in aggregations and vector matches) and by the dashboards (cluster
+variable and panel selectors). Fails the render if it is empty or not a valid
+Prometheus label name.
+
+Usage:
+  {{- $clusterLabel := include "ovnK8sObservability.clusterLabel" . }}
+*/}}
+{{- define "ovnK8sObservability.clusterLabel" -}}
+{{- $label := required "global.clusterLabel must not be empty" .Values.global.clusterLabel -}}
+{{- if not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" $label) -}}
+{{- fail (printf "global.clusterLabel %q is not a valid Prometheus label name" $label) -}}
+{{- end -}}
+{{- $label -}}
+{{- end -}}

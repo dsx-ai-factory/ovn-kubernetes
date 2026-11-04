@@ -143,10 +143,10 @@ The patch stage performs targeted, in-place text edits so existing JSON key
 order and unrelated content remain unchanged. It:
 
 1. Replaces the literal `cluster=` matcher label with
-   `dashboard.clusterLabel.label`.
+   `global.clusterLabel`.
 2. Replaces the built-in cluster query with a query constructed from
-   `dashboard.clusterLabel.discoveryMetric` and
-   `dashboard.clusterLabel.label`.
+   `dashboard.clusterDiscoveryMetric` and
+   `global.clusterLabel`.
 3. Adds Helm conditionals for the supported host OVS process-metric profiles.
 4. Wraps the JSON in a Helm raw string.
 
@@ -171,13 +171,14 @@ Each dashboard subchart template loads its corresponding patched file with:
 {{- tpl (.Files.Get "json/<dashboard>.json") . | nindent 4 }}
 ```
 
-The parent chart exposes the relevant settings under `dashboard`:
+The parent chart exposes the cluster label as `global.clusterLabel`, shared with
+the alert rules, and the other settings under `dashboard`:
 
 ```yaml
+global:
+  clusterLabel: cluster
 dashboard:
-  clusterLabel:
-    label: cluster
-    discoveryMetric: up{job="ovnkube-node"}
+  clusterDiscoveryMetric: up{job="ovnkube-node"}
   processMetrics:
     profile: otel_process_scraper
 ```
@@ -185,7 +186,7 @@ dashboard:
 The dashboard subchart validates:
 
 - The process profile is `process_exporter` or `otel_process_scraper`.
-- The cluster label is a valid Prometheus label name.
+- `global.clusterLabel` is a non-empty, valid Prometheus label name.
 - The discovery metric is non-empty and contains no backticks.
 
 Render the chart locally with:

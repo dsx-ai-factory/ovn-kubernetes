@@ -41,24 +41,30 @@ helm template ovn-k8s-observability charts/ovn-k8s-observability \
   --namespace ovn-kubernetes
 ```
 
-## Dashboard customization
+## Cluster label
 
-Dashboard PromQL is rendered from Helm-templated JSON. The default settings
-match the existing DSX deployment:
+`global.clusterLabel` (default `cluster`) names the Prometheus label that
+identifies a cluster. The alert rules keep it in aggregations and vector
+matches, so series from different clusters are not mixed when several clusters
+share one Prometheus, and the resulting alerts carry it. The dashboards use the
+same label for the `$cluster` variable and the panel selectors. Set it to the
+label your metrics carry (for example `k8s_cluster_name`):
 
 ```yaml
-dashboard:
-  clusterLabel:
-    label: cluster
-    discoveryMetric: up{job="ovnkube-node"}
-  processMetrics:
-    profile: otel_process_scraper
+global:
+  clusterLabel: k8s_cluster_name
 ```
 
-Every dashboard includes a `$cluster` variable. Set `dashboard.clusterLabel.label`
-and `dashboard.clusterLabel.discoveryMetric` to match the Prometheus series used
-to identify clusters. The label is validated as a Prometheus label name; the
-discovery value may be a metric name or a PromQL series selector.
+The label must be present on the series the alerts and dashboards use,
+including `kube_node_info` and the `ovnkube-*` and OVS series. It must not be
+empty and must be a valid Prometheus label name; the render fails otherwise.
+
+## Dashboard customization
+
+Dashboard PromQL is rendered from Helm-templated JSON. Every dashboard includes
+a `$cluster` variable whose label is `global.clusterLabel`. Set
+`dashboard.clusterDiscoveryMetric` to the series used to discover its
+values; it may be a metric name or a PromQL series selector.
 
 The `dashboard.processMetrics.profile` value controls only the host OVS process
 CPU and memory panels:

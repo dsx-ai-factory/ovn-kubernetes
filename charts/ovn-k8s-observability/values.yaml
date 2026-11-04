@@ -12,15 +12,15 @@ tags:
 global:
   # -- Namespace where the OVN Kubernetes workloads run
   ovnkubeNamespace: ovn-kubernetes
+  # -- Prometheus label identifying a cluster. Preserved by the alert rule aggregations and vector matches, and used by
+  # the Grafana cluster variable and panel selectors. Must be non-empty and a valid Prometheus label name.
+  clusterLabel: cluster
 
 dashboard:
   # -- Namespace for GrafanaDashboard resources
   namespace: ovn-kubernetes
-  clusterLabel:
-    # -- Prometheus label used by the cluster variable and panel selectors
-    label: cluster
-    # -- PromQL series selector used to discover cluster-label values
-    discoveryMetric: up{job="ovnkube-node"}
+  # -- PromQL series selector used to discover the values of the cluster variable (the label is `global.clusterLabel`)
+  clusterDiscoveryMetric: up{job="ovnkube-node"}
   processMetrics:
     # -- Host OVS process metric source: process_exporter or otel_process_scraper
     profile: otel_process_scraper
@@ -71,10 +71,10 @@ alert-rule:
       # -- Flow-count threshold for `ovsBridgeFlowsTotalTooHigh`
       threshold: 200000
     ovsNoIngressFilter:
-      # CSC and DH clusters run in PV mode; their uplinks (for example, ens1np0) and
+      # In PV mode, uplinks (for example, ens1np0) and
       # pod veth interfaces do not use hardware offload, so these alerts are not applicable
       # to these clusters.
-      # For the DPF cluster, interface name is used to filter the interfaces that support
+      # Otherwise, interface name is used to filter the interfaces that support
       # hardware offloading.
       # -- Alert when ingress policing is missing on offload-capable interfaces
       enable: false

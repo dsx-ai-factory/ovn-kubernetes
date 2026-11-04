@@ -2,6 +2,7 @@
 SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 */ -}}
+{{- $clusterLabel := include "ovnK8sObservability.clusterLabel" . }}
 {{- $ruleLabels := deepCopy (default (dict) .Values.labels) }}
 {{- $dashboardBaseURL := trimSuffix "/" (default "" .Values.dashboardBaseURL) }}
 {{- $dashboardPaths := include "getSdnDashboardPaths" . | fromYaml }}
@@ -32,7 +33,7 @@ spec:
     {{- $filter := $rule.filter | default "" }}
     - alert: K8sNodeWithoutOvnKubeRunning
       expr: |
-        kube_node_info{{ printf "{%s}" $filter }} unless on(node)
+        kube_node_info{{ printf "{%s}" $filter }} unless on({{ $clusterLabel }}, node)
         (kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node.*"}) > 0
       for: 10m
       labels:
@@ -45,10 +46,10 @@ spec:
 
     - alert: K8sNodeWithoutOvnKubeReady
       expr: |
-        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*"} * on(pod) group_left(node)
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*"} * on({{ $clusterLabel }}, pod) group_left(node)
          kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*"}) == 0
-         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
-         and on (node) kube_node_spec_unschedulable == 0
+         and on ({{ $clusterLabel }}, node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on ({{ $clusterLabel }}, node) kube_node_spec_unschedulable == 0
       for: 20m
       labels:
         severity: minor
@@ -67,10 +68,10 @@ spec:
     {{- $filter := $rule.filter | default "" }}
     - alert: K8sCriticalNodeWithoutOvnKubeRunning
       expr: |
-        (kube_pod_status_phase{namespace="ovn-kubernetes", phase="Running", pod=~"ovnkube-node-.*"} * on(pod) group_left(node)
+        (kube_pod_status_phase{namespace="ovn-kubernetes", phase="Running", pod=~"ovnkube-node-.*"} * on({{ $clusterLabel }}, pod) group_left(node)
          kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*"{{ if $filter }}, {{ $filter }}{{ end }}}) == 0
-         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
-         and on (node) kube_node_spec_unschedulable == 0
+         and on ({{ $clusterLabel }}, node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on ({{ $clusterLabel }}, node) kube_node_spec_unschedulable == 0
       for: 20m
       labels:
         severity: major
@@ -81,10 +82,10 @@ spec:
 
     - alert: K8sCriticalNodeWithoutOvnKubeReady
       expr: |
-        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*"} * on(pod) group_left(node)
+        (kube_pod_status_ready{namespace="ovn-kubernetes", condition="true", pod=~"ovnkube-node-.*"} * on({{ $clusterLabel }}, pod) group_left(node)
          kube_pod_info{namespace="ovn-kubernetes", pod=~"ovnkube-node-.*"{{ if $filter }}, {{ $filter }}{{ end }}}) == 0
-         and on (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
-         and on (node) kube_node_spec_unschedulable == 0
+         and on ({{ $clusterLabel }}, node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+         and on ({{ $clusterLabel }}, node) kube_node_spec_unschedulable == 0
       for: 20m
       labels:
         severity: major
@@ -115,7 +116,7 @@ spec:
     - alert: OvnKubeHighPodCreationLatencyP99
       expr: |
         histogram_quantile(0.99,
-         sum by (instance, le) (
+         sum by ({{ $clusterLabel }}, instance, le) (
            rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m])
          )
         ) > 20
@@ -143,12 +144,12 @@ spec:
     - alert: OvnKubeCNIRequestSuccessRateLow
       expr: |
         50 <= 100 * (
-          sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count{err="false"}[20m]))
+          sum by ({{ $clusterLabel }}, instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count{err="false"}[20m]))
           /
-          sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m]))
+          sum by ({{ $clusterLabel }}, instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m]))
         ) < 90
         and
-        sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m])) >= 10
+        sum by ({{ $clusterLabel }}, instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m])) >= 10
       for: 10m
       labels:
         severity: warning
@@ -164,12 +165,12 @@ spec:
     - alert: OvnKubeCNIRequestSuccessRateCriticalLow
       expr: |
         100 * (
-          sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count{err="false"}[20m]))
+          sum by ({{ $clusterLabel }}, instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count{err="false"}[20m]))
           /
-          sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m]))
+          sum by ({{ $clusterLabel }}, instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m]))
         ) < 50
         and
-        sum by (instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m])) >= 10
+        sum by ({{ $clusterLabel }}, instance, pod, command) (increase(ovnkube_node_cni_request_duration_seconds_count[20m])) >= 10
       for: 10m
       labels:
         severity: critical
@@ -203,13 +204,13 @@ spec:
     - alert: OvnKubeIncreaseInPodCreationLatencyP100
       expr: |
         histogram_quantile(1.0,
-         sum by (le) (
+         sum by ({{ $clusterLabel }}, le) (
           rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m])
          )
         )
         -
         histogram_quantile(1.0,
-         sum by (le) (
+         sum by ({{ $clusterLabel }}, le) (
           rate(ovnkube_controller_pod_creation_latency_seconds_bucket[2m]
           offset 15m)
          )
@@ -224,7 +225,7 @@ spec:
          10 minutes has increased 10 seconds as compared to 15 minutes before.
 
     - alert: OvnKubeControllerStale
-      expr: time() - max(ovnkube_controller_nb_e2e_timestamp) > 120
+      expr: time() - max by ({{ $clusterLabel }}) (ovnkube_controller_nb_e2e_timestamp) > 120
       for: 6m
       labels:
         severity: major

@@ -1,0 +1,568 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  - name: Native OVS metrics should be summed
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_datapath_n_flows{datapath="system@ovs-system",instance="node-worker-native",pod="ovnkube-node-native",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '25000+0x10'
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="node-worker-native",pod="ovnkube-node-native",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-native
+              pod: ovnkube-node-native
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45000 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-native instance node-worker-native for longer than 5m
+
+  - name: Legacy OVS metrics with hardware offload should be summed
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-worker-legacy",pod="ovnkube-node-legacy",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '25000+0x10'
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="node-worker-legacy",pod="ovnkube-node-legacy",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-legacy
+              pod: ovnkube-node-legacy
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45000 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-legacy instance node-worker-legacy for longer than 5m
+
+  - name: Legacy OVS metrics in PV mode should fire without offload metric
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-worker-pv",pod="ovnkube-node-pv",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-pv
+              pod: ovnkube-node-pv
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-pv instance node-worker-pv for longer than 5m
+
+  - name: Native datapath flow metric should fire by itself
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_datapath_n_flows{datapath="system@ovs-system",instance="node-worker-native-only",pod="ovnkube-node-native-only",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-native-only
+              pod: ovnkube-node-native-only
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-native-only instance node-worker-native-only for longer than 5m
+
+  - name: Offloaded flow metric should fire by itself
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="node-worker-offload-only",pod="ovnkube-node-offload-only",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-offload-only
+              pod: ovnkube-node-offload-only
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-offload-only instance node-worker-offload-only for longer than 5m
+
+  - name: Combined flow count below threshold should not fire
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-worker-below",pod="ovnkube-node-below",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="node-worker-below",pod="ovnkube-node-below",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '19999+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts: []
+
+  - name: Combined flow count exactly at threshold should not fire
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-worker-boundary",pod="ovnkube-node-boundary",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+      - series: 'ovs_vswitchd_dp_offloaded_flows_total{datapath="ovs-system",instance="node-worker-boundary",pod="ovnkube-node-boundary",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '20000+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts: []
+
+  - name: Matching instance filter should allow alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-worker-filtered",pod="ovnkube-node-filtered",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-filtered
+              pod: ovnkube-node-filtered
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-filtered instance node-worker-filtered for longer than 5m
+
+  - name: Nonmatching instance filter should suppress alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-br2-b",pod="ovnkube-node-excluded",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts: []
+
+  - name: Alert should respect five minute pending period
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-worker-pending",pod="ovnkube-node-pending",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45001+0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-pending
+              pod: ovnkube-node-pending
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45001 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-pending instance node-worker-pending for longer than 5m
+
+  - name: Flow counts should remain isolated per node
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-worker-a",pod="ovnkube-node-a",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '25000+0x10'
+      - series: 'ovs_vswitchd_dp_flows_total{datapath="ovs-system",instance="node-worker-b",pod="ovnkube-node-b",namespace="ovn-kubernetes",job="ovnkube-node"}'
+        values: '45000+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvsMegaFlowsTotalUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: node-worker-b
+              pod: ovnkube-node-b
+              namespace: ovn-kubernetes
+              job: ovnkube-node
+            exp_annotations:
+              message: |
+                Noticed unusually high number 45000 of fast-path flows on the host with
+                pod ovn-kubernetes/ ovnkube-node-b instance node-worker-b for longer than 5m
+
+  - name: No-offload byte alerts should use the interface label
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_tx_sw_bytes{interface="enp1s0f0_14",instance="node-worker-01",pod="ovnkube-node-test",port="test-port"}'
+        values: '0+4404019200x90'
+      - series: 'ovs_vswitchd_interface_rx_sw_bytes{interface="enp1s0f0_14",instance="node-worker-01",pod="ovnkube-node-test",port="test-port"}'
+        values: '0+4404019200x90'
+      - series: 'ovs_vswitchd_interface_tx_sw_bytes{interface="enp1s0f0_15",instance="node-worker-01",pod="ovnkube-node-test",port="intra-node"}'
+        values: '0+4404019200x90'
+      - series: 'ovs_vswitchd_interface_rx_sw_bytes{interface="enp1s0f0_15",instance="node-worker-01",pod="ovnkube-node-test",port="intra-node"}'
+        values: '0+4404019200x90'
+    alert_rule_test:
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadBytesTooHigh
+        exp_alerts:
+          - exp_labels:
+              severity: minor
+              interface: enp1s0f0_14
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port test-port interface enp1s0f0_14 for longer than 5m
+          - exp_labels:
+              severity: minor
+              interface: enp1s0f0_15
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port intra-node interface enp1s0f0_15 for longer than 5m
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadBytesUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_14
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 20MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port test-port interface enp1s0f0_14 for longer than 5m
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_15
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 20MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port intra-node interface enp1s0f0_15 for longer than 5m
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadBytesCriticallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              interface: enp1s0f0_14
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port test-port interface enp1s0f0_14 for longer than 10m
+          - exp_labels:
+              severity: critical
+              interface: enp1s0f0_15
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port intra-node interface enp1s0f0_15 for longer than 10m
+      - eval_time: 76m
+        alertname: OvsRxNoOffloadBytesCriticallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              interface: enp1s0f0_14
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port test-port interface enp1s0f0_14 for longer than 10m
+          - exp_labels:
+              severity: critical
+              interface: enp1s0f0_15
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port intra-node interface enp1s0f0_15 for longer than 10m
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadIntraNodeBytesHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_15
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port intra-node interface enp1s0f0_15 for longer than 10m
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_14
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 60MiB/s TX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port test-port interface enp1s0f0_14 for longer than 10m
+      - eval_time: 76m
+        alertname: OvsRxNoOffloadIntraNodeBytesHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_15
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port intra-node interface enp1s0f0_15 for longer than 5m
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_14
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port test-port interface enp1s0f0_14 for longer than 5m
+      - eval_time: 76m
+        alertname: OvsRxNoOffloadBytesTooHigh
+        exp_alerts:
+          - exp_labels:
+              severity: minor
+              interface: enp1s0f0_14
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port test-port interface enp1s0f0_14 for longer than 5m
+          - exp_labels:
+              severity: minor
+              interface: enp1s0f0_15
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 40MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port intra-node interface enp1s0f0_15 for longer than 5m
+      - eval_time: 76m
+        alertname: OvsRxNoOffloadBytesUnusuallyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_14
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: test-port
+            exp_annotations:
+              message: |
+                Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port test-port interface enp1s0f0_14 for longer than 5m
+          - exp_labels:
+              severity: warning
+              interface: enp1s0f0_15
+              instance: node-worker-01
+              pod: ovnkube-node-test
+              port: intra-node
+            exp_annotations:
+              message: |
+                Noticed higher than 20MiB/s RX rates without offload on the host with pod ovn-kubernetes/ ovnkube-node-test
+                instance node-worker-01 port intra-node interface enp1s0f0_15 for longer than 5m
+
+  - name: Interfaces excluded by profile filters should not alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_tx_sw_bytes{interface="ens1f0np0",instance="node-worker-01",pod="ovnkube-node-test",port="ens1f0np0"}'
+        values: '0+4404019200x90'
+      - series: 'ovs_vswitchd_interface_rx_sw_bytes{interface="ens1f0np0",instance="node-worker-01",pod="ovnkube-node-test",port="ens1f0np0"}'
+        values: '0+4404019200x90'
+    alert_rule_test:
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadBytesTooHigh
+        exp_alerts: []
+      - eval_time: 76m
+        alertname: OvsTxNoOffloadIntraNodeBytesHigh
+        exp_alerts: []
+
+  # ovs_vswitchd_interface_of_port carries a type label that
+  # ovs_vswitchd_interface_ingress_qdisc_total does not, so the alert expressions
+  # must join with ignoring(type).
+
+  - name: Uplink interface naming variants should alert after six minutes
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="enp197s0f0",instance="pci-node",pod="ovnkube-node-pci"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="enp197s0f0",instance="pci-node",pod="ovnkube-node-pci",type="system"}'
+        values: '5+0x10'
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="ens1np0",instance="slot-node",pod="ovnkube-node-slot"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="ens1np0",instance="slot-node",pod="ovnkube-node-slot",type="system"}'
+        values: '5+0x10'
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="bond0",instance="bond-node",pod="ovnkube-node-bond"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="bond0",instance="bond-node",pod="ovnkube-node-bond"}'
+        values: '5+0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: OvsVswitchdNoIngressFilterOnUplinkInterface
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnUplinkInterface
+        exp_alerts:
+          - exp_labels:
+              severity: major
+              interface: enp197s0f0
+              instance: pci-node
+              pod: ovnkube-node-pci
+            exp_annotations:
+              message: |
+                The uplink interface enp197s0f0 in instance pci-node reports
+                the ingress filters count as 0
+          - exp_labels:
+              severity: major
+              interface: ens1np0
+              instance: slot-node
+              pod: ovnkube-node-slot
+            exp_annotations:
+              message: |
+                The uplink interface ens1np0 in instance slot-node reports
+                the ingress filters count as 0
+          - exp_labels:
+              severity: major
+              interface: bond0
+              instance: bond-node
+              pod: ovnkube-node-bond
+            exp_annotations:
+              message: |
+                The uplink interface bond0 in instance bond-node reports
+                the ingress filters count as 0
+
+  - name: Pod interface naming variants should alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="enp197s0f0_7",instance="pci-node",pod="ovnkube-node-pci"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="enp197s0f0_7",instance="pci-node",pod="ovnkube-node-pci",type="system"}'
+        values: '7+0x10'
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="pf0vf7",instance="pf-node",pod="ovnkube-node-pf"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="pf0vf7",instance="pf-node",pod="ovnkube-node-pf"}'
+        values: '7+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnPodInterface
+        exp_alerts:
+          - exp_labels:
+              severity: major
+              interface: enp197s0f0_7
+              instance: pci-node
+              pod: ovnkube-node-pci
+            exp_annotations:
+              message: |
+                The interface enp197s0f0_7 in instance pci-node reports
+                the ingress filters count as 0
+          - exp_labels:
+              severity: major
+              interface: pf0vf7
+              instance: pf-node
+              pod: ovnkube-node-pf
+            exp_annotations:
+              message: |
+                The interface pf0vf7 in instance pf-node reports
+                the ingress filters count as 0
+
+  - name: Configured qdisc or invalid OVS port should not alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="enp197s0f0",instance="configured-node",pod="ovnkube-node-configured"}'
+        values: '1+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="enp197s0f0",instance="configured-node",pod="ovnkube-node-configured",type="system"}'
+        values: '5+0x10'
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="enp197s0f1",instance="invalid-port-node",pod="ovnkube-node-invalid"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="enp197s0f1",instance="invalid-port-node",pod="ovnkube-node-invalid",type="system"}'
+        values: '-1+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnUplinkInterface
+        exp_alerts: []
+
+  - name: Interfaces excluded by configured filters should not alert
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_interface_ingress_qdisc_total{interface="eth0",instance="excluded-node",pod="ovnkube-node-excluded"}'
+        values: '0+0x10'
+      - series: 'ovs_vswitchd_interface_of_port{interface="eth0",instance="excluded-node",pod="ovnkube-node-excluded"}'
+        values: '5+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnUplinkInterface
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: OvsVswitchdNoIngressFilterOnPodInterface
+        exp_alerts: []
+
+  - name: OvsVswitchdDPFlowsTotalTooHigh - retains one alert per cluster
+    interval: 1m
+    input_series:
+      - series: 'ovs_vswitchd_dp_flows_total{namespace="ovn-kubernetes", job="ovnkube-node", cluster="cluster-a", pod="ovnkube-node-shared"}'
+        values: '10001+0x20'
+      - series: 'ovs_vswitchd_dp_flows_total{namespace="ovn-kubernetes", job="ovnkube-node", cluster="cluster-b", pod="ovnkube-node-shared"}'
+        values: '10002+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: OvsVswitchdDPFlowsTotalTooHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              cluster: cluster-a
+              pod: ovnkube-node-shared
+            exp_annotations:
+              message: |
+                Pod ovn-kubernetes/ ovnkube-node-shared ovs-vswitchd process reports that
+                number of DP flows is 10001.00.
+          - exp_labels:
+              severity: warning
+              cluster: cluster-b
+              pod: ovnkube-node-shared
+            exp_annotations:
+              message: |
+                Pod ovn-kubernetes/ ovnkube-node-shared ovs-vswitchd process reports that
+                number of DP flows is 10002.00.

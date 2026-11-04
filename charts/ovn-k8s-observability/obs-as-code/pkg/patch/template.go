@@ -261,12 +261,12 @@ func replaceTemplateSentinels(out []byte) ([]byte, error) {
 		return nil, fmt.Errorf("dashboard is missing cluster variable query %s", clusterVariableQuery)
 	}
 	queryTemplate := helmRawSplice(
-		`{{ printf "label_values(%s, %s)" .Values.clusterLabel.discoveryMetric .Values.clusterLabel.label | toJson }}`,
+		`{{ printf "label_values(%s, %s)" .Values.clusterDiscoveryMetric .Values.global.clusterLabel | toJson }}`,
 	)
 	out = bytes.ReplaceAll(out, queryLiteral, []byte(queryTemplate))
 	// Expressions already contain cluster="$cluster". Replace only the label
 	// name so "$cluster" and the rest of the expression stay in place.
-	out = bytes.ReplaceAll(out, []byte("cluster="), []byte(helmRawSplice(`{{ .Values.clusterLabel.label }}`)+"="))
+	out = bytes.ReplaceAll(out, []byte("cluster="), []byte(helmRawSplice(`{{ .Values.global.clusterLabel }}`)+"="))
 	replacements := []struct {
 		sentinel    string
 		replacement string

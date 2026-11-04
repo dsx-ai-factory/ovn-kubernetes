@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+rule_files:
+  - rules-ic.yaml
+evaluation_interval: 1m
+tests:
+  - name: OvnKubeClusterManagerNotRunning - detects only the cluster with no healthy manager
+    interval: 1m
+    input_series:
+      - series: 'kube_node_info{cluster="cluster-a", node="node-a"}'
+        values: '1+0x10'
+      - series: 'kube_node_info{cluster="cluster-b", node="node-b"}'
+        values: '1+0x10'
+      - series: 'up{job="ovnkube-control-plane", namespace="ovn-kubernetes", cluster="cluster-a", instance="manager-a"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: OvnKubeClusterManagerNotRunning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              cluster: cluster-b
+            exp_annotations:
+              message: |
+                No ovnkube-cluster-manager running for longer than 5m
+
+  - name: OvnKubeClusterManagerMultipleLeaders - isolates leaders by cluster
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_clustermanager_leader{namespace="ovn-kubernetes", cluster="cluster-a", pod="manager-a"}'
+        values: '1+0x10'
+      - series: 'ovnkube_clustermanager_leader{namespace="ovn-kubernetes", cluster="cluster-b", pod="manager-b"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvnKubeClusterManagerMultipleLeaders
+        exp_alerts: []
+
+  - name: OvnKubeClusterManagerMultipleLeaders - detects multiple leaders within one cluster
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_clustermanager_leader{namespace="ovn-kubernetes", cluster="cluster-a", pod="manager-a-1"}'
+        values: '1+0x10'
+      - series: 'ovnkube_clustermanager_leader{namespace="ovn-kubernetes", cluster="cluster-a", pod="manager-a-2"}'
+        values: '1+0x10'
+      - series: 'ovnkube_clustermanager_leader{namespace="ovn-kubernetes", cluster="cluster-b", pod="manager-b"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvnKubeClusterManagerMultipleLeaders
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              cluster: cluster-a
+            exp_annotations:
+              message: There are multiple ovnkube-cluster-manager leaders
+
+  - name: OvnKubeClusterManagerNoLeader - detects the cluster without a leader
+    interval: 1m
+    input_series:
+      - series: 'ovnkube_clustermanager_leader{namespace="ovn-kubernetes", cluster="cluster-a", pod="manager-a"}'
+        values: '0+0x10'
+      - series: 'ovnkube_clustermanager_leader{namespace="ovn-kubernetes", cluster="cluster-b", pod="manager-b"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: OvnKubeClusterManagerNoLeader
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              cluster: cluster-a
+            exp_annotations:
+              message: There is no running ovnkube-cluster-manager leader
