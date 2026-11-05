@@ -24,7 +24,9 @@ plus ServiceMonitors for `ovnkube-node` and `ovnkube-control-plane`. Optional
 OVS offload and ingress-filter alerts are disabled (`ovsNoOffloadBytes`,
 `ovsNoOffloadIntraNodeBytes`, `ovsNoIngressFilter`, and the per-node
 `ovsBridgeFlowsTooHigh*` rules); enable them under `alert-rule.rules` when
-they apply to the cluster.
+they apply to the cluster. `ovsNoOffloadIntraNodeBytes` has no default
+`filter`: set `alert-rule.rules.ovsNoOffloadIntraNodeBytes.filter` to a PromQL
+matcher for the intra-node ports, or the render fails.
 
 Override a setting at install time, for example:
 

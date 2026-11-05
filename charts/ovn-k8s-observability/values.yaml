@@ -55,10 +55,14 @@ alert-rule:
       # -- Alert on non-offloaded traffic
       enable: false
       # -- PromQL matcher for non-offloaded traffic alerts
-      filter: 'interface=~"^pf[0|1]vf[0-9]+$"'
+      filter: 'interface=~"^pf[01]vf[0-9]+$"'
     ovsNoOffloadIntraNodeBytes:
       # -- Alert on non-offloaded traffic through intra-node ports
       enable: false
+      # -- Required when `enable` is true; rendering fails while it is empty. PromQL matcher selecting the
+      # intra-node ports, for example `interface=~"^enp.*_[0-9]+$", port=~".*_app.*"`. The right
+      # pattern depends on the deployment, so there is no default.
+      filter: ""
     ovsBridgeFlowsTooHighGPUNodes:
       # -- Alert on high OVS bridge flow counts on GPU nodes
       enable: false
@@ -79,6 +83,7 @@ alert-rule:
       # -- Alert when ingress policing is missing on offload-capable interfaces
       enable: false
       # -- PromQL matcher for uplink interfaces
+      # @default -- `interface=~"^p[01]$\|^pf[01]hpf$"`
       uplinkFilter: 'interface=~"^p[01]$|^pf[01]hpf$"'
       # -- PromQL matcher for pod interfaces
       podInterfaceFilter: 'interface=~"^pf[01]vf[0-9]+$"'

@@ -32,7 +32,9 @@ plus ServiceMonitors for `ovnkube-node` and `ovnkube-control-plane`. Optional
 OVS offload and ingress-filter alerts are disabled (`ovsNoOffloadBytes`,
 `ovsNoOffloadIntraNodeBytes`, `ovsNoIngressFilter`, and the per-node
 `ovsBridgeFlowsTooHigh*` rules); enable them under `alert-rule.rules` when
-they apply to the cluster.
+they apply to the cluster. `ovsNoOffloadIntraNodeBytes` has no default
+`filter`: set `alert-rule.rules.ovsNoOffloadIntraNodeBytes.filter` to a PromQL
+matcher for the intra-node ports, or the render fails.
 
 Override a setting at install time, for example:
 
@@ -120,9 +122,9 @@ of the package.
 | alert-rule.rules.ovsMegaFlows.threshold | int | `100000` | Megaflow-count threshold |
 | alert-rule.rules.ovsNoIngressFilter.enable | bool | `false` | Alert when ingress policing is missing on offload-capable interfaces |
 | alert-rule.rules.ovsNoIngressFilter.podInterfaceFilter | string | `"interface=~\"^pf[01]vf[0-9]+$\""` | PromQL matcher for pod interfaces |
-| alert-rule.rules.ovsNoIngressFilter.uplinkFilter | string | `"interface=~\"^p[01]$|^pf[01]hpf$\""` | PromQL matcher for uplink interfaces |
+| alert-rule.rules.ovsNoIngressFilter.uplinkFilter | string | `interface=~"^p[01]$\|^pf[01]hpf$"` | PromQL matcher for uplink interfaces |
 | alert-rule.rules.ovsNoOffloadBytes.enable | bool | `false` | Alert on non-offloaded traffic |
-| alert-rule.rules.ovsNoOffloadBytes.filter | string | `"interface=~\"^pf[0|1]vf[0-9]+$\""` | PromQL matcher for non-offloaded traffic alerts |
+| alert-rule.rules.ovsNoOffloadBytes.filter | string | `"interface=~\"^pf[01]vf[0-9]+$\""` | PromQL matcher for non-offloaded traffic alerts |
 | alert-rule.rules.ovsNoOffloadIntraNodeBytes.enable | bool | `false` | Alert on non-offloaded traffic through intra-node ports |
 | alert-rule.rules.ovsNoOffloadIntraNodeBytes.filter | string | `""` | Required when `enable` is true; rendering fails while it is empty. PromQL matcher selecting the intra-node ports, for example `interface=~"^enp.*_[0-9]+$", port=~".*_app.*"`. The right pattern depends on the deployment, so there is no default. |
 | dashboard.clusterDiscoveryMetric | string | `"up{job=\"ovnkube-node\"}"` | PromQL series selector used to discover the values of the cluster variable (the label is `global.clusterLabel`) |
