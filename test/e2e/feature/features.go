@@ -46,6 +46,8 @@ var (
 	Unidle                        = New("Unidle")
 	NetworkQos                    = New("NetworkQos")
 	NetworkConnect                = New("NetworkConnect")
+	// DCWideOverlaySNATExemptions identifies cases documented in docs/features/bgp-integration/no-overlay.md.
+	DCWideOverlaySNATExemptions = New("DCWideOverlaySNATExemptions")
 )
 
 func New(name string) ginkgo.Labels {

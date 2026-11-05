@@ -4,11 +4,13 @@
 package factory
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimsapifake "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
@@ -2367,3 +2369,43 @@ var _ = Describe("informerObjectTrim", func() {
 		Expect(n.Spec.PodCIDR).To(Equal("10.128.0.0/23"))
 	})
 })
+
+// TestConfigMapInformerScope checks that either registration order preserves namespace isolation.
+func TestConfigMapInformerScope(t *testing.T) {
+	for _, clusterFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("cluster-first=%t", clusterFirst), func(t *testing.T) {
+			namespace := config.Kubernetes.OVNConfigNamespace
+			client := fake.NewSimpleClientset(
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: namespace}},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: namespace + "-other"}},
+			)
+			wf, err := NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, "test-node")
+			if err != nil {
+				t.Fatalf("creating watch factory: %v", err)
+			}
+			defer wf.Shutdown()
+			var cluster cache.SharedIndexInformer
+			if clusterFirst {
+				cluster = wf.iFactory.Core().V1().ConfigMaps().Informer()
+			}
+			scoped := wf.ConfigMapCoreInformer().Informer()
+			if !clusterFirst {
+				cluster = wf.iFactory.Core().V1().ConfigMaps().Informer()
+			}
+			wf.iFactory.Start(wf.stopChan)
+			wf.configMapFactory.Start(wf.stopChan)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if !cache.WaitForCacheSync(ctx.Done(), cluster.HasSynced, scoped.HasSynced) {
+				t.Fatal("ConfigMap informer caches did not synchronize")
+			}
+			if got := len(cluster.GetStore().List()); got != 2 {
+				t.Fatalf("cluster-wide informer contains %d ConfigMaps, expected 2", got)
+			}
+			objects := scoped.GetStore().List()
+			if len(objects) != 1 || objects[0].(*corev1.ConfigMap).Namespace != namespace {
+				t.Fatalf("namespace-scoped informer contains unexpected ConfigMaps: %v", objects)
+			}
+		})
+	}
+}

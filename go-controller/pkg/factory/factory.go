@@ -133,6 +133,7 @@ type WatchFactory struct {
 	handlerCounter *handlerCounter
 
 	iFactory             informerfactory.SharedInformerFactory
+	configMapFactory     informerfactory.SharedInformerFactory
 	anpFactory           anpinformerfactory.SharedInformerFactory
 	eipFactory           egressipinformerfactory.SharedInformerFactory
 	efFactory            egressfirewallinformerfactory.SharedInformerFactory
@@ -167,6 +168,7 @@ func (wf *WatchFactory) ShallowClone() *WatchFactory {
 	return &WatchFactory{
 		handlerCounter:       wf.handlerCounter,
 		iFactory:             wf.iFactory,
+		configMapFactory:     wf.configMapFactory,
 		anpFactory:           wf.anpFactory,
 		eipFactory:           wf.eipFactory,
 		efFactory:            wf.efFactory,
@@ -381,6 +383,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	wf := &WatchFactory{
 		handlerCounter:       &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
+		configMapFactory:     informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace), informerfactory.WithTransform(informerObjectTrim)),
 		anpFactory:           anpinformerfactory.NewSharedInformerFactory(ovnClientset.ANPClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
@@ -680,6 +683,12 @@ func (wf *WatchFactory) Start() error {
 	if err := waitForCacheSyncWithTimeout(wf.iFactory, wf.stopChan); err != nil {
 		return err
 	}
+	if wf.configMapFactory != nil {
+		wf.configMapFactory.Start(wf.stopChan)
+		if err := waitForCacheSyncWithTimeout(wf.configMapFactory, wf.stopChan); err != nil {
+			return err
+		}
+	}
 	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy && wf.anpFactory != nil {
 		wf.anpFactory.Start(wf.stopChan)
 		if err := waitForCacheSyncWithTimeout(wf.anpFactory, wf.stopChan); err != nil {
@@ -831,6 +840,9 @@ func (wf *WatchFactory) Start() error {
 func (wf *WatchFactory) Stop() {
 	klog.Info("Stopping watch factory")
 	wf.iFactory.Shutdown()
+	if wf.configMapFactory != nil {
+		wf.configMapFactory.Shutdown()
+	}
 	if wf.anpFactory != nil {
 		wf.anpFactory.Shutdown()
 	}
@@ -912,6 +924,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	wf := &WatchFactory{
 		handlerCounter:       &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
+		configMapFactory:     informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace), informerfactory.WithTransform(informerObjectTrim)),
 		egressServiceFactory: egressserviceinformerfactory.NewSharedInformerFactory(ovnClientset.EgressServiceClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		apbRouteFactory:      adminbasedpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.AdminPolicyRouteClient, resyncInterval),
@@ -1110,6 +1123,7 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 	wf := &WatchFactory{
 		handlerCounter:       &handlerCounter{},
 		iFactory:             informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithTransform(informerObjectTrim)),
+		configMapFactory:     informerfactory.NewSharedInformerFactoryWithOptions(ovnClientset.KubeClient, resyncInterval, informerfactory.WithNamespace(config.Kubernetes.OVNConfigNamespace), informerfactory.WithTransform(informerObjectTrim)),
 		efFactory:            egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		eipFactory:           egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		cpipcFactory:         ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
@@ -2154,8 +2168,11 @@ func (wf *WatchFactory) EndpointSliceCoreInformer() discoveryinformers.EndpointS
 	return wf.iFactory.Discovery().V1().EndpointSlices()
 }
 
+// ConfigMapCoreInformer shares ConfigMaps in the configured OVN namespace.
+// A separate factory keeps this scope independent of cluster-wide informer registration order.
+// Revisit this scope if another consumer needs ConfigMaps outside the OVN namespace.
 func (wf *WatchFactory) ConfigMapCoreInformer() v1coreinformers.ConfigMapInformer {
-	return wf.iFactory.Core().V1().ConfigMaps()
+	return wf.configMapFactory.Core().V1().ConfigMaps()
 }
 
 func (wf *WatchFactory) SecretCoreInformer() v1coreinformers.SecretInformer {

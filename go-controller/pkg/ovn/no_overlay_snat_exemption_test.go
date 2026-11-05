@@ -4,16 +4,51 @@
 package ovn
 
 import (
+	"context"
 	"net"
+	"sync"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilnet "k8s.io/utils/net"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
+
+type snatGuardTestNetInfo struct{ util.ReconcilableNetInfo }
+
+func (*snatGuardTestNetInfo) TopologyType() string       { return types.Layer2Topology }
+func (*snatGuardTestNetInfo) Transport() string          { return types.NetworkTransportNoOverlay }
+func (*snatGuardTestNetInfo) OutboundSNAT() string       { return types.NoOverlaySNATEnabled }
+func (*snatGuardTestNetInfo) IsUserDefinedNetwork() bool { return true }
+
+type dcWideBaseNodeHandler struct {
+	*BaseNetworkController
+	onSync func()
+}
+
+func (h *dcWideBaseNodeHandler) SyncNodes(_ []*corev1.Node) error {
+	if h.onSync != nil {
+		h.onSync()
+	}
+	return nil
+}
+
+func (h *dcWideBaseNodeHandler) ReconcileNode(_, node *corev1.Node, _, _ *nodecontroller.NodeAnnotationState) error {
+	if node == nil {
+		return nil
+	}
+	return h.ReconcileSNATExemptions()
+}
 
 var _ = ginkgo.Describe("No-Overlay SNAT Exemption Address Set", func() {
 	var (
@@ -25,6 +60,7 @@ var _ = ginkgo.Describe("No-Overlay SNAT Exemption Address Set", func() {
 
 	ginkgo.BeforeEach(func() {
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		setDCWideOverlaySubnets(nil)
 		fakeOvn = NewFakeOVN(false, "node1")
 		fakeOvn.start()
 		addressSetFactory = fakeOvn.controller.addressSetFactory
@@ -35,7 +71,187 @@ var _ = ginkgo.Describe("No-Overlay SNAT Exemption Address Set", func() {
 
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
+		setDCWideOverlaySubnets(nil)
 	})
+
+	ginkgo.It("updates existing exemptions through registered node handlers without changing NAT matches", func() {
+		config.NoOverlay.EnableDCWideOverlaySNATExemptions = true
+		config.Gateway.Mode = config.GatewayModeShared
+		config.Default.Transport = types.NetworkTransportNoOverlay
+		config.NoOverlay.OutboundSNAT = types.NoOverlaySNATEnabled
+		config.IPv6Mode = true
+		netInfo.transport = types.NetworkTransportNoOverlay
+		netInfo.outboundSNAT = types.NoOverlaySNATEnabled
+		netInfo.topology = types.Layer3Topology
+		netInfo.ipMode = &[2]bool{true, true}
+		_, subnet, err := net.ParseCIDR("10.128.0.0/14")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		netInfo.subnets = []config.CIDRNetworkEntry{{CIDR: subnet, HostSubnetLength: 24}}
+		config.Default.ClusterSubnets = netInfo.subnets
+		addressSetFactory = addressset.NewOvnAddressSetFactory(fakeOvn.nbClient, true, true)
+		gomega.Expect(syncNoOverlaySNATExemptionAddressSet(addressSetFactory, netInfo, controllerName, []string{"192.0.2.10"})).To(gomega.Succeed())
+		as, err := getNoOverlaySNATExemptionAddressSet(addressSetFactory, netInfo, controllerName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		v4UUID, _ := as.GetASUUID()
+		router := &nbdb.LogicalRouter{Name: "GR_dc-wide-test"}
+		gomega.Expect(libovsdbops.CreateOrUpdateLogicalRouter(fakeOvn.nbClient, router)).To(gomega.Succeed())
+		match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, "node1", true, utilnet.IPv4, nil)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(match).To(gomega.BeEmpty())
+		nat := &nbdb.NAT{Type: nbdb.NATTypeSNAT, LogicalIP: "10.128.0.0/14", ExternalIP: "192.0.2.10", Match: match, ExemptedExtIPs: &v4UUID}
+		gomega.Expect(libovsdbops.CreateOrUpdateNATs(fakeOvn.nbClient, router, nat)).To(gomega.Succeed())
+		nats := func() []*nbdb.NAT {
+			result, err := libovsdbops.FindNATsWithPredicate(fakeOvn.nbClient, func(nat *nbdb.NAT) bool { return nat.ExternalIP == "192.0.2.10" })
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			return result
+		}
+		originalNATs := nats()
+		gomega.Expect(originalNATs).To(gomega.HaveLen(1))
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1", Annotations: map[string]string{"k8s.ovn.org/host-cidrs": `["192.0.2.10/24"]`}}}
+		_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(func() error { _, err := fakeOvn.watcher.GetNode("node1"); return err }).Should(gomega.Succeed())
+		base := &fakeOvn.controller.BaseNetworkController
+		base.addressSetFactory = addressSetFactory
+		gomega.Expect(base.nodeReconciler.RegisterNetworkController(&dcWideBaseNodeHandler{BaseNetworkController: base})).To(gomega.Succeed())
+		defer base.nodeReconciler.DeregisterNetworkController(base.GetNetworkName())
+		c := NewDCWideOverlaySubnetsController(fakeOvn.watcher.ConfigMapCoreInformer(), base.nodeReconciler)
+		// The fake OVN factory is already running; start the newly requested ConfigMap informer.
+		gomega.Expect(fakeOvn.watcher.Start()).To(gomega.Succeed())
+		gomega.Expect(c.Start()).To(gomega.Succeed())
+		defer c.Stop()
+		addresses := func() []string { v4, v6 := as.GetAddresses(); return append(v4, v6...) }
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: dcWideOverlaySubnetsConfigMapName, Namespace: config.Kubernetes.OVNConfigNamespace},
+			Data: map[string]string{dcWideOverlaySubnetsKey: "10.20.0.0/16,fd00:20::/48,10.128.0.0/14"}}
+		_, err = fakeOvn.fakeClient.KubeClient.CoreV1().ConfigMaps(cm.Namespace).Create(context.Background(), cm, metav1.CreateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(addresses).Should(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10", "10.20.0.0/16", "fd00:20::/48"))
+		// An unrelated node sync must preserve the configured prefixes.
+		gomega.Expect(syncNoOverlaySNATExemptionAddressSet(addressSetFactory, netInfo, controllerName, []string{"192.0.2.10"})).To(gomega.Succeed())
+		gomega.Expect(addresses()).To(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10", "10.20.0.0/16", "fd00:20::/48"))
+		cm.Data[dcWideOverlaySubnetsKey] = "10.30.0.0/16"
+		_, err = fakeOvn.fakeClient.KubeClient.CoreV1().ConfigMaps(cm.Namespace).Update(context.Background(), cm, metav1.UpdateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(addresses).Should(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10", "10.30.0.0/16"))
+		cm.Data[dcWideOverlaySubnetsKey] = "invalid"
+		_, err = fakeOvn.fakeClient.KubeClient.CoreV1().ConfigMaps(cm.Namespace).Update(context.Background(), cm, metav1.UpdateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(func() string {
+			obj, exists, _ := c.informer.GetStore().GetByKey(cm.Namespace + "/" + cm.Name)
+			if !exists {
+				return ""
+			}
+			return obj.(*corev1.ConfigMap).Data[dcWideOverlaySubnetsKey]
+		}).Should(gomega.Equal("invalid"))
+		gomega.Expect(c.sync(cm.Namespace + "/" + cm.Name)).To(gomega.Succeed())
+		gomega.Expect(addresses()).To(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10", "10.30.0.0/16"))
+		cm.Data[dcWideOverlaySubnetsKey] = "10.40.0.0/16"
+		_, err = fakeOvn.fakeClient.KubeClient.CoreV1().ConfigMaps(cm.Namespace).Update(context.Background(), cm, metav1.UpdateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(addresses).Should(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10", "10.40.0.0/16"))
+
+		gomega.Expect(fakeOvn.fakeClient.KubeClient.CoreV1().ConfigMaps(cm.Namespace).Delete(context.Background(), cm.Name, metav1.DeleteOptions{})).To(gomega.Succeed())
+		gomega.Eventually(addresses).Should(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10"))
+		gomega.Expect(nats()).To(gomega.ConsistOf(originalNATs))
+	})
+
+	ginkgo.It("skips Layer 2 no-overlay networks without creating an exemption set", func() {
+		info := &snatGuardTestNetInfo{ReconcilableNetInfo: fakeOvn.controller.ReconcilableNetInfo}
+		base := &BaseNetworkController{ReconcilableNetInfo: info}
+		gomega.Expect(base.ReconcileSNATExemptions()).To(gomega.Succeed())
+	})
+
+	ginkgo.DescribeTable("converges when network lifecycle overlaps CIDR publication", func(duringBootstrap bool) {
+		config.NoOverlay.EnableDCWideOverlaySNATExemptions = true
+		config.Gateway.Mode = config.GatewayModeShared
+		config.Default.Transport = types.NetworkTransportNoOverlay
+		config.NoOverlay.OutboundSNAT = types.NoOverlaySNATEnabled
+		config.IPv6Mode = true
+		_, subnet, err := net.ParseCIDR("10.128.0.0/14")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: subnet, HostSubnetLength: 24}}
+		base := &fakeOvn.controller.BaseNetworkController
+		base.addressSetFactory = addressset.NewOvnAddressSetFactory(fakeOvn.nbClient, true, true)
+		ctx := context.Background()
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1", Annotations: map[string]string{"k8s.ovn.org/host-cidrs": `["192.0.2.10/24"]`}}}
+		_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(func() error { _, err := fakeOvn.watcher.GetNode("node1"); return err }).Should(gomega.Succeed())
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: dcWideOverlaySubnetsConfigMapName, Namespace: config.Kubernetes.OVNConfigNamespace},
+			Data: map[string]string{dcWideOverlaySubnetsKey: "10.20.0.0/16,fd00:20::/48"}}
+		publish := func() {
+			_, err := fakeOvn.fakeClient.KubeClient.CoreV1().ConfigMaps(cm.Namespace).Create(ctx, cm, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+		if !duringBootstrap {
+			publish()
+		}
+		c := NewDCWideOverlaySubnetsController(fakeOvn.watcher.ConfigMapCoreInformer(), base.nodeReconciler)
+		gomega.Expect(fakeOvn.watcher.Start()).To(gomega.Succeed())
+		gomega.Expect(c.Start()).To(gomega.Succeed())
+		defer c.Stop()
+		gomega.Expect(base.nodeReconciler.Start()).To(gomega.Succeed())
+		defer base.nodeReconciler.DeregisterNetworkController(base.GetNetworkName())
+		handler := &dcWideBaseNodeHandler{BaseNetworkController: base}
+		if duringBootstrap {
+			started, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			handler.onSync = func() { close(started); <-release }
+			registered := make(chan error, 1)
+			go func() { registered <- base.nodeReconciler.RegisterNetworkController(handler) }()
+			gomega.Eventually(started).Should(gomega.BeClosed())
+			publish()
+			gomega.Eventually(getDCWideOverlaySubnets).Should(gomega.ConsistOf("10.20.0.0/16", "fd00:20::/48"))
+			unblock()
+			gomega.Eventually(registered).Should(gomega.Receive(gomega.BeNil()))
+		} else {
+			gomega.Expect(base.nodeReconciler.RegisterNetworkController(handler)).To(gomega.Succeed())
+		}
+		addresses := func() []string {
+			as, err := getNoOverlaySNATExemptionAddressSet(base.addressSetFactory, base.GetNetInfo(), base.controllerName)
+			if err != nil || as == nil {
+				return nil
+			}
+			v4, v6 := as.GetAddresses()
+			return append(v4, v6...)
+		}
+		gomega.Eventually(addresses).Should(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10", "10.20.0.0/16", "fd00:20::/48"))
+
+		// Hold an in-flight node reconciliation while the CIDRs change and deletion starts.
+		locked, release := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		unblock := func() { once.Do(func() { close(release) }) }
+		defer unblock()
+		inFlight := make(chan error, 1)
+		go func() {
+			inFlight <- base.nodeReconciler.WithNetworkHandler(base.GetNetworkName(), func(nodecontroller.NodeHandler) error {
+				close(locked)
+				<-release
+				return nil
+			})
+		}()
+		gomega.Eventually(locked).Should(gomega.BeClosed())
+		cm.Data[dcWideOverlaySubnetsKey] = "10.30.0.0/16"
+		_, err = fakeOvn.fakeClient.KubeClient.CoreV1().ConfigMaps(cm.Namespace).Update(ctx, cm, metav1.UpdateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(getDCWideOverlaySubnets).Should(gomega.ConsistOf("10.30.0.0/16"))
+		removed := make(chan struct{})
+		go func() { base.nodeReconciler.DeregisterNetworkController(base.GetNetworkName()); close(removed) }()
+		unblock()
+		gomega.Eventually(inFlight).Should(gomega.Receive(gomega.BeNil()))
+		gomega.Eventually(removed).Should(gomega.BeClosed())
+		gomega.Expect(cleanupNoOverlaySNATExemptionAddressSet(base.addressSetFactory, base.GetNetInfo(), base.controllerName)).To(gomega.Succeed())
+		// Pending work for the removed network must not recreate its deleted address set.
+		gomega.Expect(c.reconcile(dcWideOverlayNetworkKeyPrefix + base.GetNetworkName())).To(gomega.Succeed())
+		gomega.Expect(addresses()).To(gomega.BeEmpty())
+
+		// Reusing the name must target the new handler and bootstrap from the current list.
+		gomega.Expect(base.nodeReconciler.RegisterNetworkController(&dcWideBaseNodeHandler{BaseNetworkController: base})).To(gomega.Succeed())
+		gomega.Expect(c.reconcile(dcWideOverlayNetworkKeyPrefix + base.GetNetworkName())).To(gomega.Succeed())
+		gomega.Eventually(addresses).Should(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10", "10.30.0.0/16"))
+	}, ginkgo.Entry("CIDRs published before registration", false), ginkgo.Entry("CIDRs published during bootstrap", true))
 
 	ginkgo.Context("syncNoOverlaySNATExemptionAddressSet", func() {
 		ginkgo.BeforeEach(func() {
@@ -78,6 +294,23 @@ var _ = ginkgo.Describe("No-Overlay SNAT Exemption Address Set", func() {
 			allAddrs = append(allAddrs, ipv4Addrs...)
 			allAddrs = append(allAddrs, ipv6Addrs...)
 			gomega.Expect(allAddrs).To(gomega.ConsistOf(expectedAddrs))
+		})
+
+		ginkgo.It("filters DC-wide prefixes by family and ignores them when disabled", func() {
+			setDCWideOverlaySubnets([]string{"10.20.0.0/16", "fd00:20::/48"})
+			config.NoOverlay.EnableDCWideOverlaySNATExemptions = true
+			netInfo.ipMode = &[2]bool{true, false}
+			gomega.Expect(syncNoOverlaySNATExemptionAddressSet(addressSetFactory, netInfo, controllerName, []string{"192.0.2.10"})).To(gomega.Succeed())
+			as, err := getNoOverlaySNATExemptionAddressSet(addressSetFactory, netInfo, controllerName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v4, v6 := as.GetAddresses()
+			gomega.Expect(v4).To(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10", "10.20.0.0/16"))
+			gomega.Expect(v6).To(gomega.BeEmpty())
+			config.NoOverlay.EnableDCWideOverlaySNATExemptions = false
+			gomega.Expect(syncNoOverlaySNATExemptionAddressSet(addressSetFactory, netInfo, controllerName, []string{"192.0.2.10"})).To(gomega.Succeed())
+			v4, v6 = as.GetAddresses()
+			gomega.Expect(v4).To(gomega.ConsistOf("10.128.0.0/14", "192.0.2.10"))
+			gomega.Expect(v6).To(gomega.BeEmpty())
 		})
 
 		ginkgo.It("handles idempotent syncs correctly", func() {

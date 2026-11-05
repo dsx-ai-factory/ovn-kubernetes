@@ -141,6 +141,13 @@ global:
   enableNoOverlaySnat: false
   # -- Configure to enable managed routing mode for no-overlay
   enableNoOverlayManagedRouting: false
+  # -- Enable DC-wide overlay subnet SNAT exemptions for no-overlay networks, independently of the default network transport.
+  # Watches externally managed dc-wide-overlay-subnets-config in global.namespace using the controller's Kubernetes API (the host-cluster API in DPU deployments).
+  enableDCWideOverlaySNATExemptions: false
+  # -- Kubernetes usernames allowed to create, update or delete the DC-wide exemptions ConfigMap; service accounts use system:serviceaccount:NAMESPACE:NAME.
+  dcWideOverlaySubnetWriters: []
+  # -- Kubernetes groups allowed to manage the DC-wide exemptions ConfigMap; configure explicitly for each deployment.
+  dcWideOverlaySubnetWriterGroups: []
   # -- Configure to allow ICMP and ICMPv6 traffic to bypass NetworkPolicy deny rules
   allowICMPNetworkPolicy: false
   # -- Configure to use route advertisements feature with ovn-kubernetes

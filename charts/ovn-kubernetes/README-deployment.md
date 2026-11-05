@@ -74,6 +74,24 @@ false
 			<td>fallback coredns cluster IP, required when the coredns service can't be looked up (e.g. lookup is disabled in argocd)</td>
 		</tr>
 		<tr>
+			<td>global.dcWideOverlaySubnetWriterGroups</td>
+			<td>list</td>
+			<td><pre lang="json">
+[]
+</pre>
+</td>
+			<td>Kubernetes groups allowed to manage the DC-wide exemptions ConfigMap; configure explicitly for each deployment.</td>
+		</tr>
+		<tr>
+			<td>global.dcWideOverlaySubnetWriters</td>
+			<td>list</td>
+			<td><pre lang="json">
+[]
+</pre>
+</td>
+			<td>Kubernetes usernames allowed to create, update or delete the DC-wide exemptions ConfigMap; service accounts use system:serviceaccount:NAMESPACE:NAME.</td>
+		</tr>
+		<tr>
 			<td>global.dockerConfigSecret.auth</td>
 			<td>string</td>
 			<td><pre lang="json">
@@ -144,6 +162,15 @@ true
 </pre>
 </td>
 			<td>Configure to use AdminPolicyBasedRoute CRD feature with ovn-kubernetes</td>
+		</tr>
+		<tr>
+			<td>global.enableDCWideOverlaySNATExemptions</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>Enable DC-wide overlay subnet SNAT exemptions for no-overlay networks, independently of the default network transport. Watches externally managed dc-wide-overlay-subnets-config in global.namespace using the controller's Kubernetes API (the host-cluster API in DPU deployments).</td>
 		</tr>
 		<tr>
 			<td>global.enableDNSNameResolver</td>

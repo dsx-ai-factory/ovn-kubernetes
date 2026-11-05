@@ -39,6 +39,8 @@ KEY_RE = re.compile(r"^(?P<indent>\s*)(?P<key>[^\s:#][^:]*):")
 # behind.
 ARRAY_ITEM_TYPES = {
     "global.hybridOverlaySubnetWriters": "string",
+    "global.dcWideOverlaySubnetWriters": "string",
+    "global.dcWideOverlaySubnetWriterGroups": "string",
 }
 APPLIED_ARRAY_ITEM_TYPES = set()
 

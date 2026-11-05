@@ -36,11 +36,19 @@ metadata:
   namespace: {{ .Values.global.namespace }}
 data:
   ovnkube.conf: |
+{{- $watchDCWideOverlaySubnets := and .Values.global.enableDCWideOverlaySNATExemptions (not (index .Values.tags "ovnkube-node-dpu-host")) }}
 {{- if .Values.global.enableNoOverlay }}
     [default]
     transport = no-overlay
+{{- end }}
+{{- /* UDNs may need exemptions while the default network still uses overlay. */}}
+{{- if or .Values.global.enableNoOverlay $watchDCWideOverlaySubnets }}
 
     [no-overlay]
+{{- if $watchDCWideOverlaySubnets }}
+    enable-dc-wide-overlay-snat-exemptions = true
+{{- end }}
+{{- if .Values.global.enableNoOverlay }}
 {{- if .Values.global.enableNoOverlaySnat }}
     outbound-snat = enabled
 {{- else }}
@@ -53,6 +61,7 @@ data:
     as-number = {{ .Values.global.managedBGPASNumber | default 64512 }}
     topology = {{ .Values.global.managedBGPTopology | default "full-mesh" }}
     frr-namespace = {{ .Values.global.managedBGPFRRNamespace | default "frr-k8s-system" }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- /* Gate on a non-empty value rather than key presence, so both settings can

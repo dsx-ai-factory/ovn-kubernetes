@@ -163,13 +163,26 @@ func (c *NodeController) ReconcileNetworkWithPreflight(
 	netName string,
 	preflight func(NodeHandler),
 ) {
-	_ = c.handlers.DoWithLock(netName, func(handlerKey string) error {
-		if handler, ok := c.handlers.Load(handlerKey); ok {
-			preflight(handler)
-		}
+	_ = c.WithNetworkHandler(netName, func(handler NodeHandler) error {
+		preflight(handler)
 		return nil
 	})
 	c.ReconcileNetwork(nodeName, netName)
+}
+
+// GetNetworkNames returns a snapshot of registered network names.
+func (c *NodeController) GetNetworkNames() []string {
+	return c.handlers.GetKeys()
+}
+
+// WithNetworkHandler runs fn under the network's lifecycle lock if it is registered.
+func (c *NodeController) WithNetworkHandler(netName string, fn func(NodeHandler) error) error {
+	return c.handlers.DoWithLock(netName, func(key string) error {
+		if handler, ok := c.handlers.Load(key); ok {
+			return fn(handler)
+		}
+		return nil
+	})
 }
 
 // AnnotationCache returns the cache used for parsed node annotations.

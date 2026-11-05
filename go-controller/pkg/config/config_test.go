@@ -2782,3 +2782,28 @@ var _ = Describe("kubelet cgroup path config", func() {
 		gomega.Expect(app.Run([]string{app.Name, "-kubelet-cgroup-path=/"})).To(gomega.Succeed())
 	})
 })
+
+func TestBuildDCWideOverlaySubnetsConfig(t *testing.T) {
+	if err := PrepareTestConfig(); err != nil {
+		t.Fatalf("resetting configuration before DC-wide overlay config parsing: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := PrepareTestConfig(); err != nil {
+			t.Errorf("resetting configuration after DC-wide overlay config parsing: %v", err)
+		}
+	})
+	configFile := filepath.Join(t.TempDir(), "ovn.conf")
+	if err := os.WriteFile(configFile, []byte("[no-overlay]\nenable-dc-wide-overlay-snat-exemptions = true\n"), 0600); err != nil {
+		t.Fatalf("writing DC-wide overlay configuration file: %v", err)
+	}
+	app := cli.NewApp()
+	app.Flags = Flags
+	// InitConfig also validates that this flag is allowed with overlay default transport.
+	app.Action = func(ctx *cli.Context) error { _, err := InitConfig(ctx, kexec.New(), nil); return err }
+	if err := app.Run([]string{app.Name, "--config-file=" + configFile}); err != nil {
+		t.Fatalf("initializing DC-wide overlay configuration from file: %v", err)
+	}
+	if !NoOverlay.EnableDCWideOverlaySNATExemptions {
+		t.Fatal("DC-wide overlay SNAT exemptions were not parsed from the config file")
+	}
+}

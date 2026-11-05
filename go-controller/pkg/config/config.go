@@ -867,6 +867,10 @@ type ClusterManagerConfig struct {
 
 // NoOverlayConfig holds configuration for no-overlay mode
 type NoOverlayConfig struct {
+	// EnableDCWideOverlaySNATExemptions watches the ConfigMap in
+	// OVNConfigNamespace for no-overlay networks, independently of the default transport.
+	EnableDCWideOverlaySNATExemptions bool `gcfg:"enable-dc-wide-overlay-snat-exemptions"`
+
 	// OutboundSNAT configures SNAT behavior for outbound traffic from pods on the default network.
 	// Supported values: "enabled" or "disabled".
 	// Required when transport=no-overlay.
@@ -2922,7 +2926,7 @@ func validateNoOverlayConfig() error {
 			}
 		}
 	} else {
-		// Warn if no-overlay or BGP config is specified but transport is not no-overlay
+		// OutboundSNAT and Routing configure the default network; exemptions may serve no-overlay UDNs.
 		if NoOverlay.OutboundSNAT != "" || NoOverlay.Routing != "" {
 			klog.Warningf("[no-overlay] configuration specified but transport is %q; configuration will be ignored", Default.Transport)
 		}

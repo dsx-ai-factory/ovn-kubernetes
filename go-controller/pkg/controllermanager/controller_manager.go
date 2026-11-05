@@ -74,7 +74,8 @@ type ControllerManager struct {
 	// eIPController programs OVN to support EgressIP
 	eIPController *ovn.EgressIPController
 
-	addressSetManager *addresssetmanager.AddressSetManager
+	addressSetManager              *addresssetmanager.AddressSetManager
+	dcWideOverlaySubnetsController *ovn.DCWideOverlaySubnetsController
 }
 
 func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
@@ -388,13 +389,24 @@ func (cm *ControllerManager) initDefaultNetworkController(observManager *observa
 }
 
 // Start the ovnkube controller
-func (cm *ControllerManager) Start(ctx context.Context) error {
+func (cm *ControllerManager) Start(ctx context.Context) (err error) {
 	klog.Info("Starting the ovnkube controller")
 
 	// Configure metrics early so workqueue provider is set before any workqueues are created
 	cm.configureMetrics(cm.stopChan)
 
-	err := cm.watchFactory.Start()
+	if config.NoOverlay.EnableDCWideOverlaySNATExemptions {
+		// Register the shared informer before the watch factory starts and synchronizes caches.
+		cm.dcWideOverlaySubnetsController = ovn.NewDCWideOverlaySubnetsController(cm.watchFactory.ConfigMapCoreInformer(), cm.nodeController)
+		// The caller only stops the manager after successful startup.
+		defer func() {
+			if err != nil {
+				cm.dcWideOverlaySubnetsController.Stop()
+			}
+		}()
+	}
+
+	err = cm.watchFactory.Start()
 	if err != nil {
 		return err
 	}
@@ -460,6 +472,12 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}()
 	}
 
+	if config.NoOverlay.EnableDCWideOverlaySNATExemptions {
+		if err := cm.dcWideOverlaySubnetsController.Start(); err != nil {
+			return fmt.Errorf("failed to start DC-wide overlay subnets controller: %w", err)
+		}
+	}
+
 	err = cm.initDefaultNetworkController(observabilityManager)
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)
@@ -501,6 +519,9 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 func (cm *ControllerManager) Stop() {
 	// stop metric recorders
 	close(cm.stopChan)
+	if cm.dcWideOverlaySubnetsController != nil {
+		cm.dcWideOverlaySubnetsController.Stop()
+	}
 
 	// stop the default network controller
 	if cm.defaultNetworkController != nil {

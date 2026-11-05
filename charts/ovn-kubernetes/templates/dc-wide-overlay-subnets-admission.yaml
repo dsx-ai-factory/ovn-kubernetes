@@ -1,0 +1,54 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+{{- /* Standard and DPU-host releases own admission on the API watched by the controller. */}}
+{{- $hasWriters := or .Values.global.dcWideOverlaySubnetWriters .Values.global.dcWideOverlaySubnetWriterGroups }}
+{{- if and .Values.global.enableDCWideOverlaySNATExemptions $hasWriters (not (index .Values.tags "ovnkube-single-node-zone-dpu")) }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: dc-wide-overlay-subnets-writers
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    # Bound fail-closed evaluation to the OVN namespace before running CEL.
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Values.global.namespace | quote }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["configmaps"]
+  matchConditions:
+    # DELETE uses oldObject, including collection deletes whose request.name is empty.
+    - name: exemptions-configmap
+      expression: >-
+        (request.operation == "DELETE" ? oldObject.metadata.name : object.metadata.name) == "dc-wide-overlay-subnets-config"
+  validations:
+    # With --use-service-account-credentials, cleanup controllers use the two kube-system service accounts below.
+    # system:kube-controller-manager covers deployments using the standard shared controller-manager credentials.
+    # Namespace cleanup must delete this ConfigMap, or its namespace remains Terminating.
+    # Garbage collection must delete this ConfigMap when its referenced owner disappears.
+    # These exceptions allow DELETE only; creating or updating subnet values still requires an approved writer.
+    - expression: >-
+        (request.operation == "DELETE" && (
+          (request.userInfo.username in ["system:serviceaccount:kube-system:namespace-controller", "system:kube-controller-manager"] &&
+            namespaceObject != null && has(namespaceObject.metadata.deletionTimestamp)) ||
+          (request.userInfo.username in ["system:serviceaccount:kube-system:generic-garbage-collector", "system:kube-controller-manager"] &&
+            has(oldObject.metadata.ownerReferences) && oldObject.metadata.ownerReferences.size() > 0)
+        )) ||
+        request.userInfo.username in {{ .Values.global.dcWideOverlaySubnetWriters | default (list) | toJson }} ||
+        request.userInfo.groups.exists(group, group in {{ .Values.global.dcWideOverlaySubnetWriterGroups | default (list) | toJson }})
+      message: "not allowed to modify the DC-wide overlay subnets ConfigMap"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: dc-wide-overlay-subnets-writers
+spec:
+  policyName: dc-wide-overlay-subnets-writers
+  validationActions: [Deny]
+{{- end }}

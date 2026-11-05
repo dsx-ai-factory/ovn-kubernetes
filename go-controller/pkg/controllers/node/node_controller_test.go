@@ -6,6 +6,7 @@ package node
 import (
 	"errors"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -482,5 +483,55 @@ func TestReconcileNodeDeleteCacheMissStillClearsState(t *testing.T) {
 	}
 	if c.nodeNeedsDeleteReconciliation(handler.netName, "node-a") {
 		t.Fatal("expected delete reconciliation marker to be cleared")
+	}
+}
+
+func TestWithNetworkHandlerLifecycle(t *testing.T) {
+	handler := &fakeNodeHandler{netName: "net-a"}
+	c := &NodeController{handlers: syncmap.NewSyncMap[NodeHandler]()}
+	c.handlers.Store(handler.netName, handler)
+	if names := c.GetNetworkNames(); len(names) != 1 || names[0] != handler.netName {
+		t.Fatalf("unexpected registered networks: %v", names)
+	}
+	expected := errors.New("reconcile failed")
+	if err := c.WithNetworkHandler(handler.netName, func(NodeHandler) error { return expected }); !errors.Is(err, expected) {
+		t.Fatalf("reconcile error was not returned: %v", err)
+	}
+	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		finished <- c.WithNetworkHandler(handler.netName, func(NodeHandler) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+	removed := make(chan struct{})
+	go func() {
+		c.DeregisterNetworkController(handler.netName)
+		close(removed)
+	}()
+	select {
+	case <-removed:
+		t.Error("network deregistered while its reconciliation was running")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if err := <-finished; err != nil {
+		t.Fatalf("waiting for WithNetworkHandler completion: %v", err)
+	}
+	select {
+	case <-removed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("network deregistration did not finish")
+	}
+	if err := c.WithNetworkHandler(handler.netName, func(NodeHandler) error {
+		t.Error("removed handler was reconciled")
+		return nil
+	}); err != nil {
+		t.Fatalf("rechecking handler after network deregistration: %v", err)
+	}
+	if names := c.GetNetworkNames(); len(names) != 0 {
+		t.Fatalf("removed network is still registered: %v", names)
 	}
 }

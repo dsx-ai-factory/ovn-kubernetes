@@ -173,6 +173,8 @@ elif [[ "${WHAT}" = "${DPU_TESTS}" ]]; then
   shift # don't "focus" on DPU since we filter by label
 elif [[ "${WHAT}" = "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
   require_label "Feature:NetworkSegmentation"
+  # DC-wide exemptions are covered by the control-plane run.
+  skip_label "Feature:DCWideOverlaySNATExemptions"
   shift # don't "focus" on Network Segmentation since we filter by label
 elif [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
   if [ "$ENABLE_NETWORK_SEGMENTATION" == true ] && [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then

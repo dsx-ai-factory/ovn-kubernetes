@@ -263,6 +263,33 @@ var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.Ro
 			}
 		})
 
+		// These cases share cluster state and run in the sequential no-overlay lane.
+		// Mark them Serial if the lane enables parallel execution.
+		ginkgo.It("applies DC-wide SNAT exemptions as the ConfigMap changes", feature.DCWideOverlaySNATExemptions, feature.NoOverlay, func() {
+			testDCWideOverlaySNATExemptions(f, clientPod, serverContainerIPs, "updates")
+		})
+
+		// Lifecycle checks restart the node-local controller and inspect its colocated NBDB.
+		ginkgo.Describe("Kind-only DC-wide SNAT exemption lifecycle", func() {
+			ginkgo.BeforeEach(func() {
+				if infraprovider.Get().Name() != "kind" {
+					ginkgo.Skip("DC-wide SNAT exemption lifecycle coverage requires the Kind provider")
+				}
+			})
+
+			ginkgo.DescribeTable("initializes DC-wide SNAT exemptions when the controller starts", feature.DCWideOverlaySNATExemptions, feature.NoOverlay,
+				func(scenario string) {
+					testDCWideOverlaySNATExemptions(f, clientPod, serverContainerIPs, scenario)
+				},
+				ginkgo.Entry("with a malformed ConfigMap", "startup-invalid"),
+				ginkgo.Entry("without a ConfigMap", "startup-absent"),
+			)
+
+			ginkgo.It("maintains DC-wide SNAT exemptions as primary Layer 3 CUDNs are created, deleted and recreated", feature.DCWideOverlaySNATExemptions, feature.NoOverlay, feature.NetworkSegmentation, func() {
+				testDCWideOverlaySNATExemptions(f, clientPod, serverContainerIPs, "networks")
+			})
+		})
+
 		ginkgo.It("can connect to an external server and another cluster node after toggling default network advertisement off and back on", ginkgo.Serial, func() {
 			ginkgo.By("routes from external bgp server are imported by nodes in the cluster")
 			bgpNetwork, err := infraprovider.Get().GetNetwork(bgpExternalNetworkName)

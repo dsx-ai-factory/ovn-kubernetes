@@ -8,10 +8,15 @@ import (
 	"reflect"
 	"sort"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -99,7 +104,7 @@ func cleanupNoOverlaySNATExemptionAddressSet(
 }
 
 // syncNoOverlaySNATExemptionAddressSet recalculates all IPs that should be in the no-overlay
-// SNAT exemption address set (cluster CIDRs + local zone node IPs) and updates the address
+// SNAT exemption address set (cluster CIDRs + local node IPs + DC-wide CIDRs) and updates the address
 // set if changed. This address set is used to exempt pod-to-pod and pod-to-node traffic from SNAT.
 // This should be called when the local zone node is added or updated.
 // Note: No-overlay mode only supports one node per IC zone.
@@ -141,6 +146,17 @@ func syncNoOverlaySNATExemptionAddressSet(
 
 	// Add all local node IPs
 	desiredAddrs = append(desiredAddrs, allLocalNodeIPs...)
+
+	// Merge configured DC-wide prefixes only for the network's enabled families.
+	if config.NoOverlay.EnableDCWideOverlaySNATExemptions {
+		ipv4Mode, ipv6Mode := netInfo.IPMode()
+		for _, cidr := range getDCWideOverlaySubnets() {
+			if (utilnet.IsIPv6CIDRString(cidr) && ipv6Mode) || (!utilnet.IsIPv6CIDRString(cidr) && ipv4Mode) {
+				desiredAddrs = append(desiredAddrs, cidr)
+			}
+		}
+	}
+	desiredAddrs = sets.List(sets.New(desiredAddrs...))
 
 	// Get current addresses from the address set
 	currentIPv4Addrs, currentIPv6Addrs := as.GetAddresses()
@@ -190,4 +206,35 @@ func getNoOverlaySNATExemptionAsUUID(
 		return "", "", fmt.Errorf("no-overlay SNAT exemption address set for network %s has no IPv6 UUID", netInfo.GetNetworkName())
 	}
 	return v4UUID, v6UUID, nil
+}
+
+// needsSNATExemptions reports whether this network uses no-overlay exemption sets.
+func (oc *BaseNetworkController) needsSNATExemptions() bool {
+	if oc.TopologyType() != types.Layer3Topology {
+		return false
+	}
+	if oc.IsUserDefinedNetwork() {
+		return oc.Transport() == types.NetworkTransportNoOverlay && oc.OutboundSNAT() == types.NoOverlaySNATEnabled
+	}
+	return util.IsNoOverlaySNATExemptionNeeded(oc)
+}
+
+// ReconcileSNATExemptions updates exemptions; callers must hold the node-handler lock.
+func (oc *BaseNetworkController) ReconcileSNATExemptions() error {
+	if !oc.needsSNATExemptions() {
+		return nil
+	}
+
+	node, err := oc.watchFactory.GetNode(oc.nodeName)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get node %q for network %q SNAT exemptions: %w", oc.nodeName, oc.GetNetworkName(), err)
+	}
+	hostAddrs, err := util.GetNodeHostAddrs(node)
+	if err != nil {
+		return fmt.Errorf("failed to get host addresses for node %q SNAT exemptions: %w", oc.nodeName, err)
+	}
+	return syncNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName, hostAddrs)
 }

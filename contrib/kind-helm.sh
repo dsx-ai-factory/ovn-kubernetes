@@ -476,6 +476,7 @@ print_params() {
      echo "ADVERTISED_UDN_ISOLATION_MODE = $ADVERTISED_UDN_ISOLATION_MODE"
      echo "OVN_NETWORK_QOS_ENABLE = $OVN_NETWORK_QOS_ENABLE"
      echo "ENABLE_NO_OVERLAY = $ENABLE_NO_OVERLAY"
+     echo "ENABLE_DC_WIDE_OVERLAY_SNAT_EXEMPTIONS = $ENABLE_DC_WIDE_OVERLAY_SNAT_EXEMPTIONS"
      echo "ENABLE_NO_OVERLAY_OUTBOUND_SNAT = $ENABLE_NO_OVERLAY_OUTBOUND_SNAT"
      echo "ENABLE_NO_OVERLAY_MANAGED_ROUTING = $ENABLE_NO_OVERLAY_MANAGED_ROUTING"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
@@ -570,6 +571,10 @@ helm_prereqs() {
 helm_extra_values_args() {
     local args=""
     local values_file
+    # Kind's e2e administrator needs admission access; explicit deployment values take precedence.
+    if [ "${ENABLE_DC_WIDE_OVERLAY_SNAT_EXEMPTIONS:-false}" == true ]; then
+        args+=" -f $(printf '%q' "${DIR}/kind-dc-wide-overlay-snat-values.yaml")"
+    fi
     for values_file in "${OVN_HELM_EXTRA_VALUES[@]}"; do
         args+=" -f $(printf '%q' "${values_file}")"
     done
@@ -689,6 +694,7 @@ helm upgrade --install ovn-kubernetes . -f "${value_file}" ${extra_values_args} 
           --set global.enableDNSNameResolver=$(if [ "${OVN_ENABLE_DNSNAMERESOLVER}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNetworkQos=$(if [ "${OVN_NETWORK_QOS_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNoOverlay=$(if [ "${ENABLE_NO_OVERLAY}" == "true" ]; then echo "true"; else echo "false"; fi) \
+          --set global.enableDCWideOverlaySNATExemptions=$(if [ "${ENABLE_DC_WIDE_OVERLAY_SNAT_EXEMPTIONS}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNoOverlaySnat=$(if [ "${ENABLE_NO_OVERLAY_OUTBOUND_SNAT}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableNoOverlayManagedRouting=$(if [ "${ENABLE_NO_OVERLAY_MANAGED_ROUTING}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enablePersistentIPs=true \

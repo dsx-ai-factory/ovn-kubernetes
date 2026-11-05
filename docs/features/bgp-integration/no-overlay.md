@@ -101,6 +101,201 @@ No-overlay mode separates pod-to-pod routing from pod egress behavior.
 Pod-to-remote-pod traffic on a no-overlay network is not SNATed.
 Traffic to remote nodes, to the Kubernetes API server, and to DNS is always SNATed.
 
+### DC-wide SNAT exemptions
+
+No-overlay deployments can use additional destination subnets that must
+preserve source pod or VM addresses. LaunchLayer supplies these subnets in VMaaS
+deployments. These exemptions apply to the default network and primary Layer 3
+CUDNs with no-overlay transport and outbound SNAT enabled. Routing and isolation remain fabric responsibilities.
+
+An external service or administrator creates and updates the following ConfigMap
+in the controller's Kubernetes cluster, in the configured OVN namespace
+(`ovn-kubernetes` by default, controlled by `ovn-config-namespace`). For DPU
+deployments, LaunchLayer creates it in the **DPU-host Kubernetes cluster**:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dc-wide-overlay-subnets-config
+  namespace: ovn-kubernetes
+data:
+  dc-wide-overlay-subnets: "10.10.0.0/16,20.20.0.0/16,fd00:10::/48"
+```
+
+The chart disables this integration by default. Enable it using the flag below.
+This flag is independent of `global.enableNoOverlay`, which controls only the
+default network transport. Leave `global.enableNoOverlay=false` when the default
+network uses overlay and only UDNs need no-overlay exemptions. Configure each
+UDN's transport and outbound SNAT on its UDN or CUDN resource.
+
+For VMaaS DPU deployments, enable the feature in both releases: the DPU release
+enables the watch, and the host release installs the admission policy:
+
+```yaml
+global:
+  enableDCWideOverlaySNATExemptions: true
+  dcWideOverlaySubnetWriters:
+    - system:serviceaccount:<launchlayer-namespace>:<launchlayer-service-account>
+```
+
+The chart does not create the ConfigMap. Changes to this ConfigMap are applied
+automatically. Existing OVN node RBAC already grants ConfigMap read/watch
+access; this feature adds no read Role or binding.
+The namespace `global.namespace` must match the controller's `ovn-config-namespace`.
+
+A ValidatingAdmissionPolicy and binding protect creation, updates (including
+patches), and deletion (including collection deletion) of this ConfigMap. They
+are rendered when this feature is enabled in the standard or DPU-host release
+and at least one writer allowlist is nonempty, regardless of the default network
+transport. A namespace selector bounds policy evaluation to the OVN namespace,
+and an object-name condition selects only this ConfigMap. Reads and other
+ConfigMaps are unaffected. The policy and binding use the fixed name
+`dc-wide-overlay-subnets-writers`, following existing chart conventions.
+Add LaunchLayer's authenticated Kubernetes username to
+`global.dcWideOverlaySubnetWriters`. The list defaults to empty; the chart does
+not create LaunchLayer's service account or grant it write permissions.
+Allowed writers still need ordinary RBAC permissions.
+
+Both writer allowlists default to empty. Leave both empty to omit the admission
+policy and binding in a trusted cluster; ordinary Kubernetes RBAC still controls
+ConfigMap access. To enable admission protection, configure LaunchLayer's username
+or approved administrator usernames or groups in deployment-specific Helm values.
+When the policy is installed, ClusterRole membership alone does not bypass it.
+
+Deletion-only exceptions allow the namespace controller to clean a terminating
+namespace and the garbage collector to remove an owner-referenced ConfigMap.
+They apply to the standard `kube-system` controller service accounts and the
+shared `system:kube-controller-manager` identity. These exceptions grant no
+permission to create or update subnet values.
+
+Admission protection uses the v1 ValidatingAdmissionPolicy API, following the
+chart's existing admission-policy templates.
+
+For example, save the configuration above in `dc-wide-overlay-values.yaml`,
+replace the service-account placeholders, and apply it after the deployment's
+existing profile:
+
+```sh
+helm upgrade --install ovn-kubernetes ./charts/ovn-kubernetes \
+  --namespace ovn-kubernetes \
+  -f deployment-values.yaml -f dc-wide-overlay-values.yaml
+```
+
+Helm merges these files with the chart defaults; later files override earlier
+values, and lists are replaced. For DPU deployments, apply the writer allowlists
+to the DPU-host release, which owns the admission policy.
+
+For deployments outside Helm, grant equivalent permissions and configure:
+
+```ini
+[no-overlay]
+enable-dc-wide-overlay-snat-exemptions = true
+```
+
+The watcher can start before any eligible no-overlay networks exist. Overlay
+networks ignore the published CIDRs; newly created no-overlay networks use the
+current list during initialization. The flag is therefore valid even when the
+default network transport is unset.
+
+Set the Helm flag to `false` to disable the watch. DPU-host node processes do not
+run the watcher; the DPU controller watches their API server.
+
+One controller per ovnkube-controller process maintains a shared Go CIDR list.
+Initial data is loaded before network controllers start. Each network merges
+those CIDRs with its own subnets and local node IPs in its existing
+`exempted_ext_ips` address set.
+The SNAT rule's `match` and priority remain unchanged.
+
+ConfigMap changes queue registered network names without waiting for their
+handler locks. A bounded worker pool processes independent network keys
+concurrently. Each queued update looks up the current handler under its lifecycle lock, checks
+eligibility, and calls its base-controller reconcile method to update only its
+exemption address set.
+Failed OVN writes retry independently through the shared work queue.
+CIDRs are normalized and deduplicated, and each network uses only its enabled
+address families. Newly created networks read the current list during their
+initial reconciliation.
+
+An absent ConfigMap or key means an empty extra CIDR list, allowing startup
+before LaunchLayer creates it. Deletion, removal of the key, or an empty value
+removes only the DC-wide exemptions. Recreating the ConfigMap restores them.
+Malformed values are logged as errors without retrying unchanged invalid input.
+At startup, no extra exemptions are used until a valid value is available. Malformed runtime updates retain the last valid
+list and leave exemption sets unchanged; a later valid value is applied
+automatically. API/watch failures retain current state while client-go reconnects
+and relists. Changes do not wait for kubelet volume projection or a polling
+interval; API delivery and OVN reconciliation still take time.
+
+### Kind e2e coverage
+
+The Kind helper defaults the feature flag to `ENABLE_NO_OVERLAY`. Set
+`ENABLE_DC_WIDE_OVERLAY_SNAT_EXEMPTIONS=true` explicitly when the default network
+uses overlay and no-overlay UDNs need exemptions. Whenever the feature is
+enabled, the helper loads `contrib/kind-dc-wide-overlay-snat-values.yaml` to allow
+its e2e administrator groups (`system:masters` and `kubeadm:cluster-admins`).
+Extra values files passed to the helper override those Kind-specific defaults.
+Set `ENABLE_DC_WIDE_OVERLAY_SNAT_EXEMPTIONS=false` to disable the feature
+explicitly; the Helm chart default remains `false`, with both writer allowlists
+empty.
+
+The normal sequential no-overlay control-plane run includes the four cases
+labelled `Feature:DCWideOverlaySNATExemptions` when the feature is enabled.
+The netseg invocation excludes the feature label to avoid duplicating network
+lifecycle coverage.
+The startup and CUDN lifecycle cases are explicitly Kind-only: they restart the
+node-local controller and inspect its colocated NBDB. Other providers skip
+these cases; the traffic and admission case has no Kind-only provider guard.
+
+For local iteration, select these cases by their shared description text. Run
+from the repository root with the no-overlay cluster and external BGP fixture
+already configured:
+
+```bash
+cd test
+ENABLE_NO_OVERLAY=true ENABLE_ROUTE_ADVERTISEMENTS=true \
+ENABLE_NETWORK_SEGMENTATION=true ADVERTISE_DEFAULT_NETWORK=true PARALLEL=false \
+E2E_CP_DOWNSTREAM_HOOK=./scripts/e2e-cp-nvidia-overrides.sh \
+  ./scripts/e2e-cp.sh "DC-wide SNAT exemptions"
+```
+
+These cases use the normal suite timeout and report, with no separate pass or
+guaranteed position in the run. They share a cluster-wide ConfigMap and restart
+controllers; cleanup removes the test exemptions and waits for normal SNAT
+before subsequent specs execute. The runner checks feature configuration and
+writer access even when invoked from a fresh shell after cluster creation.
+
+The `Feature:NoOverlay` e2e cases use an external echo server to check
+source addresses on the default network and primary Layer 3 CUDNs:
+
+- ConfigMap creation, valid and malformed updates, deletion, recreation and clearing.
+- Controller startup with malformed or absent ConfigMap data, followed by valid
+  updates.
+- CUDN creation before and after controller restart with an unchanged valid
+  ConfigMap.
+- Multi-network updates, deletion during an update, same-name recreation, and
+  absence of orphan exemption sets after later updates.
+
+Admission coverage impersonates a temporary namespace writer and verifies that
+create, update, patch, delete and collection-delete requests are rejected while
+reads and creation of unrelated ConfigMaps succeed. Rejected writes use dry-run
+to avoid changing dataplane state if admission protection regresses. A copy of
+the deployed policy in an isolated namespace also verifies actual garbage
+collection and namespace termination without deleting the OVN namespace.
+CUDN subnets come from the shared BGP test allocator.
+
+These cases require the no-overlay lane with shared gateway mode, outbound SNAT,
+default-network advertisement and the BGP external-server fixture. Startup and
+network lifecycle checks require the standard Kind deployment with a controller
+and NBDB on the workload node; unsupported layouts skip those lifecycle checks.
+The Kind helper and companion CI configuration default
+`ENABLE_DC_WIDE_OVERLAY_SNAT_EXEMPTIONS` to `ENABLE_NO_OVERLAY` and configure
+writer groups when the feature is enabled. An explicit `true` tells the tests to
+fail if feature configuration or writer authorization is missing. Set it to
+`false` to skip these cases. When the flag is unset, tests skip if configuration
+or writer access is unavailable, or an externally managed exemptions ConfigMap
+already exists.
+
 ## Enable no-overlay mode on the Default Network
 
 The default network is configured with the `transport` option in the `[default]`
