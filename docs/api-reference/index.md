@@ -36,6 +36,10 @@ Define cluster-wide external gateway routing policies.
 
 Create isolated or connected tenant networks with custom topologies.
 
+**[Uplink and UplinkState](uplink-api-spec.md)**
+
+Describe the node interfaces a network uses for external traffic.
+
 **[RouteAdvertisements](routeadvertisements-api-spec.md)**
 
 Advertise pod and service routes to external BGP peers.
@@ -47,3 +51,7 @@ Enable controlled connectivity between isolated User Defined Networks.
 **[VTEP](vtep-api-spec.md)**
 
 Configure Virtual Tunnel Endpoints for external network integration.
+
+**[NetworkSelectors](networkselectors-api-spec.md)**
+
+Select networks by type and label, shared by RouteAdvertisements and ClusterNetworkConnect.

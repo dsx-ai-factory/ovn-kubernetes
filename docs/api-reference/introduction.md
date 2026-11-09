@@ -42,3 +42,4 @@ designed and implemented by OVN-Kubernetes
 * [RouteAdvertisements](routeadvertisements-api-spec.md)
 * [VTEP](vtep-api-spec.md)
 * [ClusterNetworkConnect](clusternetworkconnect-api-spec.md)
+* [NetworkSelectors](networkselectors-api-spec.md) - shared by RouteAdvertisements and ClusterNetworkConnect
