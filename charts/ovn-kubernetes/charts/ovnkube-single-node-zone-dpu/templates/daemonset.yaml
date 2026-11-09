@@ -549,6 +549,8 @@ spec:
           value: "local"
         - name: OVN_NETWORK_SEGMENTATION_ENABLE
           value: "true"
+        - name: OVN_DISABLE_UDN_ARP_NDP_FLOOD
+          value: {{ .Values.global.disableUDNARPNDPFlood | quote }}
         - name: OVN_NETWORK_CONNECT_ENABLE
           value: {{ default "false" .Values.global.enableNetworkConnect | quote }}
         - name: OVN_ROUTE_ADVERTISEMENTS_ENABLE

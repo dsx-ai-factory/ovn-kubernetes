@@ -3,7 +3,7 @@
 
 package cudn
 
-import "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"
+import "github.com/ovn-kubernetes/ovn-kubernetes/test/crd-integration/testscenario"
 
 var LocalnetInvalidSubnets = []testscenario.ValidateCRScenario{
 	{
@@ -63,7 +63,7 @@ spec:
 	},
 	{
 		Description: "subnets is empty",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-empty-subnets-fail" is invalid: spec.network.localnet.subnets: Invalid value: 0: spec.network.localnet.subnets in body should have at least 1 items`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-empty-subnets-fail" is invalid: spec.network.localnet.subnets: Invalid value: 0: spec.network.localnet.subnets in body should have at least 1 items`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
@@ -208,7 +208,7 @@ spec:
 	},
 	{
 		Description: "invalid excludeSubnets - empty slice",
-		ExpectedErr: `The ClusterUserDefinedNetwork "localnet-excludesubnet-empty-slice-fail" is invalid: spec.network.localnet.excludeSubnets: Invalid value: 0: spec.network.localnet.excludeSubnets in body should have at least 1 items`,
+		ExpectedErr: `ClusterUserDefinedNetwork.k8s.ovn.org "localnet-excludesubnet-empty-slice-fail" is invalid: spec.network.localnet.excludeSubnets: Invalid value: 0: spec.network.localnet.excludeSubnets in body should have at least 1 items`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
