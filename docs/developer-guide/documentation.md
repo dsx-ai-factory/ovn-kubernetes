@@ -62,6 +62,18 @@ around this! Open a commit adding it to our `docs/blog/posts/` folder.
 Reference documentation changes to `docs/api-reference` folder. See [here](../api-reference/introduction.md)
 for more details.
 
+    The pages under `docs/api-reference` are generated from the Go types with
+    [crd-ref-docs](https://github.com/elastic/crd-ref-docs), so edit the type comments and
+    kubebuilder markers rather than the Markdown:
+
+    ```bash
+    make -C docs api-reference       # regenerate
+    make -C docs verify-api-reference  # what CI runs
+    ```
+
+    A new CRD also needs an entry in `hack/update-api-reference.sh`, `mkdocs.yml`,
+    `docs/api-reference/index.md` and `docs/api-reference/introduction.md`.
+
 ## Website Guide
 
 We are utilizing [GitHub Pages](https://docs.github.com/en/pages/quickstart) to host the ovn-kubernetes.io website. The website's

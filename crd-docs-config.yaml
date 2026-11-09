@@ -6,3 +6,10 @@ processor:
 
 render:
   kubernetesVersion: 1.28
+  # The shared selector types are rendered as their own page, since each API
+  # group is a separate crd-ref-docs run. Without this the groups that embed
+  # them link to a local anchor that does not exist on their page.
+  knownTypes:
+    - name: NetworkSelectors
+      package: github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types
+      link: ./networkselectors-api-spec.md#networkselectors

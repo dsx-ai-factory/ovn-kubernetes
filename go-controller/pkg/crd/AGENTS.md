@@ -87,9 +87,11 @@ guides. Project-specific additions:
   conflicts.
 - **Documentation** — CRD type changes must be accompanied by updating the
   API reference docs in `docs/api-reference/`. Each CRD has a
-  `<name>-api-spec.md` file documenting its spec/status fields. New CRDs
-  must also be added to `mkdocs.yml` under "API Reference Guide" and to
-  `docs/api-reference/introduction.md`.
+  `<name>-api-spec.md` file documenting its spec/status fields. These pages
+  are generated from the Go types — never hand-edit them; run
+  `make -C docs api-reference` and commit the result. New CRDs must also be
+  added to `hack/update-api-reference.sh`, to `mkdocs.yml` under
+  "API Reference Guide", and to `docs/api-reference/introduction.md`.
 - **Validation tests** — CRD schema changes must include validation tests
   that verify field constraints (CEL rules, enums, required fields, max items,
   etc.) are enforced by the API server. Prefer using
