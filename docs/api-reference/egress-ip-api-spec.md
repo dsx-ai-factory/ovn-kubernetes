@@ -8,8 +8,30 @@
 
 Package v1 contains API Schema definitions for the network v1 API group
 
+### Resource Types
+- [EgressIP](#egressip)
 
 
+
+#### EgressIP
+
+
+
+EgressIP is a CRD allowing the user to define a fixed
+source IP for all egress traffic originating from any pods which
+match the EgressIP resource according to its spec definition.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `k8s.ovn.org/v1` | | |
+| `kind` _string_ | `EgressIP` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[EgressIPSpec](#egressipspec)_ | Specification of the desired behavior of EgressIP. |  |  |
+| `status` _[EgressIPStatus](#egressipstatus)_ | Observed status of EgressIP. Read-only. |  | Optional: {} <br /> |
 
 
 #### EgressIPSpec

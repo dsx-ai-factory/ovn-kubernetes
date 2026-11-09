@@ -16,6 +16,7 @@ import (
 // +resource:path=egressip
 // +kubebuilder:resource:shortName=eip,scope=Cluster
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
 // +kubebuilder:printcolumn:name="EgressIPs",type=string,JSONPath=".spec.egressIPs[*]"
 // +kubebuilder:printcolumn:name="Assigned Node",type=string,JSONPath=".status.items[*].node"
 // +kubebuilder:printcolumn:name="Assigned EgressIPs",type=string,JSONPath=".status.items[*].egressIP"

@@ -19,6 +19,7 @@ const (
 // +genclient
 // +resource:path=egressfirewall
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
 // +kubebuilder:printcolumn:name="EgressFirewall Status",type=string,JSONPath=".status.status"
 // +kubebuilder:subresource:status
 // EgressFirewall describes the current egress firewall for a Namespace.

@@ -8,8 +8,32 @@
 
 Package v1 contains API Schema definitions for the network v1 API group
 
+### Resource Types
+- [EgressFirewall](#egressfirewall)
 
 
+
+#### EgressFirewall
+
+
+
+EgressFirewall describes the current egress firewall for a Namespace.
+Traffic from a pod to an IP address outside the cluster will be checked against
+each EgressFirewallRule in the pod's namespace's EgressFirewall, in
+order. If no rule matches (or no EgressFirewall is present) then the traffic
+will be allowed by default.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `k8s.ovn.org/v1` | | |
+| `kind` _string_ | `EgressFirewall` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[EgressFirewallSpec](#egressfirewallspec)_ | Specification of the desired behavior of EgressFirewall. |  |  |
+| `status` _[EgressFirewallStatus](#egressfirewallstatus)_ | Observed status of EgressFirewall |  | Optional: {} <br /> |
 
 
 #### EgressFirewallDestination
