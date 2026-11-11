@@ -118,6 +118,35 @@ func TestLocalnetCleanupBridgeMapping(t *testing.T) {
 	}
 }
 
+func TestLocalnetCleanupSoleBridgeMapping(t *testing.T) {
+	for _, mode := range []string{types.NodeModeFull, types.NodeModeDPU} {
+		t.Run(mode, func(t *testing.T) {
+			nc, fexec := setupLocalnetLifecycleTest(t, mode)
+			nc.bridgeName = "br-blue"
+			const (
+				readCmd   = "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-bridge-mappings"
+				removeCmd = "ovs-vsctl --timeout=15 remove Open_vSwitch . external_ids ovn-bridge-mappings"
+			)
+			// The localnet mapping is the only entry, so there is no map left to
+			// set and the key itself has to be removed.
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: readCmd, Output: "blue_br-localnet:br-blue"})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: removeCmd})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{Cmd: readCmd})
+
+			nc.Stop()
+			if err := nc.Cleanup(); err != nil {
+				t.Fatalf("cleanup sole localnet mapping: %v", err)
+			}
+			if err := nc.Cleanup(); err != nil {
+				t.Fatalf("repeated cleanup failed: %v", err)
+			}
+			if !fexec.CalledMatchesExpected() {
+				t.Fatalf("unexpected OVS commands during cleanup: %s", fexec.ErrorDesc())
+			}
+		})
+	}
+}
+
 func TestLocalnetCleanupSkipsUnmanagedBridgeMapping(t *testing.T) {
 	for _, mode := range []string{types.NodeModeFull, types.NodeModeDPU, types.NodeModeDPUHost} {
 		t.Run(mode, func(t *testing.T) {

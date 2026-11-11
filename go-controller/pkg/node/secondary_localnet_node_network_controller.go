@@ -208,6 +208,14 @@ func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMappi
 	}
 
 	if len(bridgeMap) == 0 {
+		// ovs-vsctl rejects an empty map value, so the key has to be removed
+		// rather than set. Returning here without touching OVS would leave the
+		// deleted network's mapping in place and keep ovn-controller's localnet
+		// patch port alive.
+		if _, stderr, err = util.RunOVSVsctl("remove", "Open_vSwitch", ".", "external_ids",
+			"ovn-bridge-mappings"); err != nil {
+			return fmt.Errorf("failed to remove ovn-bridge-mappings, stderr:%s (%v)", stderr, err)
+		}
 		return nil
 	}
 
