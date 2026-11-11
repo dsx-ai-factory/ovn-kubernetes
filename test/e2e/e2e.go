@@ -677,11 +677,19 @@ func findOvnKubeControlPlaneNode(namespace, controlPlanePodName, leaseName strin
 	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (%s)"+
 		"from %s %v", leaseName, namespace, err))
 
-	framework.Logf("leader instance of %s is running on node %s", controlPlanePodName, ovnkubeControlPlaneNode)
 	// Strip leading and trailing quotes if present
 	if ovnkubeControlPlaneNode[0] == '\'' || ovnkubeControlPlaneNode[0] == '"' {
 		ovnkubeControlPlaneNode = ovnkubeControlPlaneNode[1 : len(ovnkubeControlPlaneNode)-1]
 	}
+
+	// The holder identity is <node>_<per-process ID>. Node names cannot contain
+	// an underscore, so the last one separates the two. Older control planes
+	// hold the bare node name, which has no suffix to strip.
+	if i := strings.LastIndex(ovnkubeControlPlaneNode, "_"); i != -1 {
+		ovnkubeControlPlaneNode = ovnkubeControlPlaneNode[:i]
+	}
+
+	framework.Logf("leader instance of %s is running on node %s", controlPlanePodName, ovnkubeControlPlaneNode)
 
 	return ovnkubeControlPlaneNode, nil
 }
