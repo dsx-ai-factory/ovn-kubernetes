@@ -1581,6 +1581,15 @@ false
 			<td></td>
 		</tr>
 		<tr>
+			<td>ovnkube-single-node-zone-dpu.dpuHostClusterNamespace</td>
+			<td>string</td>
+			<td><pre lang="json">
+"ovn-kubernetes"
+</pre>
+</td>
+			<td></td>
+		</tr>
+		<tr>
 			<td>ovnkube-single-node-zone-dpu.execInVrf</td>
 			<td>string</td>
 			<td><pre lang="json">

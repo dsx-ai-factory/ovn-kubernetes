@@ -1208,6 +1208,9 @@
         "ovnGwVlanId": {
           "type": "string"
         },
+        "dpuHostClusterNamespace": {
+          "type": "string"
+        },
         "dpuHostClusterK8sSkipTLSVerify": {
           "type": "boolean"
         },

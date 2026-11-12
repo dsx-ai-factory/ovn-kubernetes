@@ -51,6 +51,12 @@ ovnVtepIface: ""
 ovnGwInterface: ""
 ovnGwVlanId: ""
 
+# Namespace ovn-kubernetes is deployed into in the DPU host cluster. ovnkube on the DPU
+# talks to the host cluster's API server, so objects it owns there, such as the DPU node
+# lease, land in this namespace. It has to match the host-side deployment, which derives
+# the same value from its own metadata.namespace. Empty keeps the ovn-kubernetes default.
+dpuHostClusterNamespace: "ovn-kubernetes"
+
 # Skip verification of the DPU host cluster's Kubernetes API server certificate, so that
 # k8s_cacert_data is not needed and the DPU authenticates with k8s_token (for example a
 # SPIFFE/SPIRE issued token) alone. INSECURE: this disables API server certificate validation,

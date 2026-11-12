@@ -388,6 +388,10 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+        # Namespace in the DPU host cluster, not in the cluster this pod runs in, so it
+        # cannot be read from metadata.namespace the way the host-side charts do.
+        - name: OVN_KUBERNETES_NAMESPACE
+          value: {{ .Values.dpuHostClusterNamespace | default "ovn-kubernetes" | quote }}
         {{- if and .Values.spiffeDerivedK8sToken.enabled .Values.spiffeDerivedK8sToken.k8sTokenFile }}
         - name: K8S_TOKEN_FILE
           value: {{ .Values.spiffeDerivedK8sToken.k8sTokenFile | quote }}
