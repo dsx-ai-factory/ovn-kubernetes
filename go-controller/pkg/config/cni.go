@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -23,6 +24,29 @@ import (
 
 var ErrorAttachDefNotOvnManaged = errors.New("net-attach-def not managed by OVN")
 var ErrorChainingNotSupported = errors.New("CNI plugin chaining is not supported")
+
+// CNILogDir is the only directory the CNI shim is allowed to log to. The shim
+// runs as root and takes its logFile from the CNI config on stdin, which for
+// secondary networks is the user-provided NAD spec.
+const CNILogDir = "/var/log/ovn-kubernetes"
+
+// ValidateCNILogFile ensures the CNI shim log file is a canonical absolute path
+// inside CNILogDir. The shim only runs on Linux, so the check uses slash-separated
+// path semantics regardless of the platform this binary is built for. This keeps
+// the Linux default valid for the Windows hybrid-overlay-node, which shares the
+// config parsing but never uses the CNI log file.
+func ValidateCNILogFile(logFile string) error {
+	if logFile == "" {
+		return nil
+	}
+	if !path.IsAbs(logFile) || path.Clean(logFile) != logFile {
+		return fmt.Errorf("CNI log file %q must be a canonical absolute path", logFile)
+	}
+	if !strings.HasPrefix(logFile, CNILogDir+"/") {
+		return fmt.Errorf("CNI log file %q must be inside %s", logFile, CNILogDir)
+	}
+	return nil
+}
 
 // CNISpecVersion is the CNI spec version used when OVN-Kubernetes renders CNI config.
 const CNISpecVersion = "1.1.0"
@@ -131,6 +155,9 @@ func parseNetConfSingle(bytes []byte) (*ovncnitypes.NetConf, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = ValidateCNILogFile(netconf.LogFile); err != nil {
+		return nil, err
+	}
 
 	return netconf, nil
 }
@@ -157,6 +184,9 @@ func parseNetConfList(confList *libcni.NetworkConfigList) (*ovncnitypes.NetConf,
 	netconf.CNIVersion = confList.CNIVersion
 
 	if err := ValidateNetConfNameFields(netconf); err != nil {
+		return nil, err
+	}
+	if err := ValidateCNILogFile(netconf.LogFile); err != nil {
 		return nil, err
 	}
 
