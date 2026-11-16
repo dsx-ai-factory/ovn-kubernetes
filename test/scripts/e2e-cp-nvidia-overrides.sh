@@ -119,9 +119,6 @@ skip "Allow connection to an external IP using a source port that is equal to a 
 skip "Creates a service with session-affinity, and ensures it works after backend deletion"
 
 # TODO: consider a separate downstream serial lane.
-if [ "${WHAT:-}" != "Serial" ]; then
-  skip_label "Serial"
-fi
 
 # Skip ClusterNetworkConnect unconditionally for downstream:
 # central mode does not support it, and IC mode needs helm feature enablement.
