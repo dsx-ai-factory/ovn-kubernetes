@@ -63,7 +63,7 @@ rules:
       - ""
     resources:
       - pods
-    verbs: ["get", "list", "watch", "update"]
+    verbs: ["get", "list", "watch"]
   - apiGroups:
       - ""
     resources:
