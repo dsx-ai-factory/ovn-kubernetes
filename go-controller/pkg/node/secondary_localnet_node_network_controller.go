@@ -100,6 +100,15 @@ func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMappi
 	// A mutex is required to prevent concurrent overwrites of external_ids:ovn-bridge-mappings.
 	ovsMutex.Lock()
 	defer ovsMutex.Unlock()
+	// NVIDIA: add br-localnet suffix to retain original downstream behavior. Otherwise we'd have to
+	// change bridge mappings on all nodes to use the new suffix-less names.
+	networkName := nc.GetNetworkScopedName(types.LocalNetBridgeName)
+	// ovn-bridge-mappings is serialized as "<name>:<bridge>,...", so the key written for this
+	// network must not contain the delimiters. It is derived from the NAD spec and cannot be trusted.
+	if strings.ContainsAny(networkName, ",:") {
+		return fmt.Errorf("invalid localnet network name %q: bridge mapping key %q cannot contain ',' or ':'",
+			nc.GetNetworkName(), networkName)
+	}
 	bridgeName := ""
 	if toAdd {
 		// Reset any stale value from a previous run before trying to discover
@@ -162,10 +171,6 @@ func (nc *UserDefinedLocalnetNodeNetworkController) updateLocalnetOvnBridgeMappi
 	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
-
-	// NVIDIA: add br-localnet suffix to retain original downstream behavior. Otherwise we'd have to
-	// change bridge mappings on all nodes to use the new suffix-less names.
-	networkName := nc.GetNetworkScopedName(types.LocalNetBridgeName)
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
