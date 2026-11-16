@@ -120,6 +120,10 @@ skip "Creates a service with session-affinity, and ensures it works after backen
 
 # TODO: consider a separate downstream serial lane.
 
+# Restarting a multi-network Kind node can change its InternalIP to the underlay
+# address and break later tests. TBD - Re-enable once node IPs remain stable on restart.
+skip "Node Shutdown and Startup should maintain cluster health after node shutdown and startup"
+
 # Skip ClusterNetworkConnect unconditionally for downstream:
 # central mode does not support it, and IC mode needs helm feature enablement.
 skip "ClusterNetworkConnect"
