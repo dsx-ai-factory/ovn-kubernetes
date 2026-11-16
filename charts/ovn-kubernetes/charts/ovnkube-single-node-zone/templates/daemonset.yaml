@@ -550,6 +550,8 @@ spec:
               key: host_network_namespace
         - name: OVN_NETWORK_SEGMENTATION_ENABLE
           value: {{ hasKey .Values.global "enableNetworkSegmentation" | ternary .Values.global.enableNetworkSegmentation false | quote }}
+        - name: OVN_DISABLE_UDN_ARP_NDP_FLOOD
+          value: {{ .Values.global.disableUDNARPNDPFlood | quote }}
         - name: OVN_NETWORK_CONNECT_ENABLE
           value: {{ default "false" .Values.global.enableNetworkConnect | quote }}
         - name: OVNKUBE_NODE_MGMT_PORT_DP_RESOURCE_NAME

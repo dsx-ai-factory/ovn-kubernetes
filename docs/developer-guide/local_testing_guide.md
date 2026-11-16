@@ -89,7 +89,7 @@ export PLATFORM_IPV6_SUPPORT=[true|false]
 export OVN_SECOND_BRIDGE=[true|false]
 ```
 
-You can refer to a recent CI run from any pull request in [https://github.com/ovn-kubernetes/ovn-kubernetes/actions](https://github.com/ovn-kubernetes/ovn-kubernetes/actions) to get a valid set of settings.
+You can refer to a recent upstream CI run from a pull request in [https://github.com/ovn-kubernetes/ovn-kubernetes/actions](https://github.com/ovn-kubernetes/ovn-kubernetes/actions) to get a valid set of settings.
 
 As an example for the `control-plane-local-ipv4-snatGW-1br` job, the settings are at time of this writing:
 ```
@@ -230,9 +230,8 @@ kube-apiserver + etcd started by [envtest](https://pkg.go.dev/sigs.k8s.io/contro
 They verify CRD admission behaviour — defaulting, validation, and CEL rules —
 without requiring a full KinD cluster.
 
-The tests are the intended future home for scenarios currently living in
-`test/e2e/testscenario/` that do not need live pod networking. This migration
-is tracked in
+Some scenarios that do not need live pod networking have been migrated to
+`test/crd-integration/testscenario/`. The remaining scenarios are tracked upstream in
 [ovn-kubernetes#6932](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6932).
 
 ### Prerequisites

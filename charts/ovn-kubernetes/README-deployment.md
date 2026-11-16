@@ -74,6 +74,15 @@ false
 			<td>fallback coredns cluster IP, required when the coredns service can't be looked up (e.g. lookup is disabled in argocd)</td>
 		</tr>
 		<tr>
+			<td>global.disableUDNARPNDPFlood</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>Disable ARP/NDP flooding on user defined networks</td>
+		</tr>
+		<tr>
 			<td>global.dockerConfigSecret.auth</td>
 			<td>string</td>
 			<td><pre lang="json">

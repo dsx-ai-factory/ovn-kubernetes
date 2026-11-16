@@ -82,6 +82,8 @@ global:
   hybridOverlaySubnetWriters: []
   # -- Whether or not enable network segmentation, aka UDN
   enableNetworkSegmentation: true
+  # -- Disable ARP/NDP flooding on user defined networks
+  disableUDNARPNDPFlood: false
   # -- Enables network QoS support from/to pods
   enableNetworkQos: false
   # -- Enable pod hostPort support (full-mode, shared gateway). Disable CRI-O/CNI port mapping first.

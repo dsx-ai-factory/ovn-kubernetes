@@ -280,8 +280,11 @@ func Test_allocatePodAnnotationWithTunnelIDReturnsUpdatedPod(t *testing.T) {
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 
 	initialMAC := net.HardwareAddr{0x0a, 0x58, 0x0a, 0x80, 0x00, 0x02}
+	// An annotation written by an older controller must survive unrelated updates.
+	initialGatewayLLA := ovntest.MustParseIP("fe80::858:c0ff:fea8:1")
 	podAnnotations, err := util.MarshalPodAnnotation(nil, &util.PodAnnotation{
-		MAC: initialMAC,
+		MAC:            initialMAC,
+		GatewayIPv6LLA: initialGatewayLLA,
 	}, nadKey)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -322,6 +325,7 @@ func Test_allocatePodAnnotationWithTunnelIDReturnsUpdatedPod(t *testing.T) {
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(updatedPodAnnotation).To(gomega.Equal(podAnnotation))
 	g.Expect(updatedPodAnnotation.TunnelID).To(gomega.Equal(100))
+	g.Expect(updatedPodAnnotation.GatewayIPv6LLA).To(gomega.Equal(initialGatewayLLA))
 }
 
 func Test_allocatePodAnnotationWithRollback(t *testing.T) {
@@ -500,7 +504,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			role:                      types.NetworkRolePrimary,
 		},
 		{
-			name:                   "expect new IP and ipv6 gateway LLA for primary udn layer2 with dual stack",
+			name:                   "expect new IP without ipv6 gateway LLA for primary udn layer2 with dual stack",
 			ipam:                   true,
 			tunnelIDAllocation:     true,
 			persistentIPAllocation: true,
@@ -514,10 +518,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 			wantUpdatedPod: true,
 			wantPodAnnotation: &util.PodAnnotation{
-				IPs:            ovntest.MustParseIPNets("192.168.0.3/24", "2010:100:200::3/60"),
-				MAC:            util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
-				Gateways:       []net.IP{ovntest.MustParseIP("192.168.0.1").To4(), ovntest.MustParseIP("2010:100:200::1")},
-				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("192.168.0.1"))),
+				IPs:      ovntest.MustParseIPNets("192.168.0.3/24", "2010:100:200::3/60"),
+				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.3/24")[0].IP),
+				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4(), ovntest.MustParseIP("2010:100:200::1")},
 				Routes: []util.PodRoute{
 					{
 						Dest: &net.IPNet{
@@ -539,7 +542,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			role:                      types.NetworkRolePrimary,
 		},
 		{
-			name:                   "expect new IP and ipv6 gateway LLA for primary udn layer2 with single stack IPv6",
+			name:                   "expect new IP without ipv6 gateway LLA for primary udn layer2 with single stack IPv6",
 			isSingleStackIPv6:      true,
 			ipam:                   true,
 			tunnelIDAllocation:     true,
@@ -554,10 +557,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 			wantUpdatedPod: true,
 			wantPodAnnotation: &util.PodAnnotation{
-				IPs:            ovntest.MustParseIPNets("2010:100:200::3/60"),
-				MAC:            util.IPAddrToHWAddr(ovntest.MustParseIPNets("2010:100:200::3/60")[0].IP),
-				Gateways:       []net.IP{ovntest.MustParseIP("2010:100:200::1")},
-				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("2010:100:200::1"))),
+				IPs:      ovntest.MustParseIPNets("2010:100:200::3/60"),
+				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("2010:100:200::3/60")[0].IP),
+				Gateways: []net.IP{ovntest.MustParseIP("2010:100:200::1")},
 				Routes: []util.PodRoute{
 					{
 						Dest:    ovntest.MustParseIPNet("fd99::/64"),
@@ -994,10 +996,9 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			},
 			wantUpdatedPod: true,
 			wantPodAnnotation: &util.PodAnnotation{
-				IPs:            ovntest.MustParseIPNets("192.168.0.101/24", "2001:db8::101/64"),
-				MAC:            util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.101/24")[0].IP),
-				Gateways:       []net.IP{ovntest.MustParseIP("192.168.0.1").To4(), ovntest.MustParseIP("2001:db8::1")},
-				GatewayIPv6LLA: util.HWAddrToIPv6LLA(util.IPAddrToHWAddr(ovntest.MustParseIP("192.168.0.1"))),
+				IPs:      ovntest.MustParseIPNets("192.168.0.101/24", "2001:db8::101/64"),
+				MAC:      util.IPAddrToHWAddr(ovntest.MustParseIPNets("192.168.0.101/24")[0].IP),
+				Gateways: []net.IP{ovntest.MustParseIP("192.168.0.1").To4(), ovntest.MustParseIP("2001:db8::1")},
 				Routes: []util.PodRoute{
 					{
 						Dest:    ovntest.MustParseIPNet("100.65.0.0/16"),

@@ -179,6 +179,10 @@
           "type": "boolean",
           "description": "Whether or not enable network segmentation, aka UDN"
         },
+        "disableUDNARPNDPFlood": {
+          "type": "boolean",
+          "description": "Disable ARP/NDP flooding on user defined networks"
+        },
         "enableNetworkQos": {
           "type": "boolean",
           "description": "Enables network QoS support from/to pods"
