@@ -1586,6 +1586,15 @@ null
 			<td>extra annotations for the ovnkube-node pod template.</td>
 		</tr>
 		<tr>
+			<td>ovnkube-single-node-zone.secureManagementPort</td>
+			<td>bool</td>
+			<td><pre lang="json">
+true
+</pre>
+</td>
+			<td>add ACLs on every node switch that drop new connections sent directly to the management port IP, other than the EgressIP health check port</td>
+		</tr>
+		<tr>
 			<td>ovnkube-single-node-zone.tolerations</td>
 			<td>list</td>
 			<td><pre lang="json">

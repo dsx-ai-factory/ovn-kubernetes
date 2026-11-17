@@ -584,6 +584,10 @@ spec:
         - name: OVNKUBE_CLUSTER_DEFAULT_NAD
           value: {{ . }}
         {{- end }}
+        {{- with .Values.secureManagementPort }}
+        - name: OVNKUBE_SECURE_MGMT_PORT
+          value: {{ . | quote }}
+        {{- end }}
         - name: COREDNS_CLUSTER_IP
           value: {{ include "ovn-kubernetes.corednsClusterIP" (dict "Values" $.Values) }}
         # ovnkube-node-liveness-check.sh checks

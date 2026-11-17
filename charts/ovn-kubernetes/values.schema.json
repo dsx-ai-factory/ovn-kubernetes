@@ -1010,6 +1010,10 @@
           "properties": {},
           "description": "extra annotations for the ovnkube-node pod template."
         },
+        "secureManagementPort": {
+          "type": "boolean",
+          "description": "add ACLs on every node switch that drop new connections sent directly to the management port IP, other than the EgressIP health check port"
+        },
         "nodeMgmtPortNetdev": {
           "type": "string"
         },

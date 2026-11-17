@@ -76,6 +76,10 @@ affinity:
 # -- extra annotations for the ovnkube-node pod template.
 podAnnotations: {}
 
+# -- add ACLs on every node switch that drop new connections sent directly to the
+# management port IP, other than the EgressIP health check port
+secureManagementPort: true
+
 # To utilize hardware offloading for management ports, a netdevice or a deviceplugin resource name that
 # specifies a pool of devices can be specified.
 # mgmtPortVFResourceName will override nodeMgmtPortNetdev if both are specified
