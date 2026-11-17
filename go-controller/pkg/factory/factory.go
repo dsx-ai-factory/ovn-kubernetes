@@ -1066,17 +1066,16 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.vtepFactory.K8s().V1().VTEPs().Informer()
 	}
 
-	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
-	// need to know what is the primary network for a namespace on the CNI side, which
-	// needs the NAD factory whenever the UDN feature is used.
-	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || !config.IsModeDPUHost()) {
-		// TBD-merge util.IsRouteAdvertisementsEnabled()) {
+	// Full nodes and DPUs watch NADs for secondary networks. DPU hosts also
+	// need the watch for primary network selection or route advertisements.
+	if config.OVNKubernetesFeature.EnableMultiNetwork && (!config.IsModeDPUHost() ||
+		config.OVNKubernetesFeature.EnableNetworkSegmentation || util.IsRouteAdvertisementsEnabled()) {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(
 			NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(),
 			wf.stopChan, minNumEventQueues, eventQueueSize, minNumEventQueues, eventQueueSize)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create NAD queued informer: %w", err)
 		}
 	}
 
