@@ -98,6 +98,8 @@ spec:
           name: host-var-lib-ovs
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
+        - mountPath: /var/lib/ovn/
+          name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
         - mountPath: /var/log/ovn/
@@ -161,6 +163,8 @@ spec:
         - mountPath: /etc/openvswitch/
           name: host-var-lib-ovs
         - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/lib/ovn/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
