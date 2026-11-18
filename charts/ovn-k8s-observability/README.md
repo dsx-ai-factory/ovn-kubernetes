@@ -92,7 +92,7 @@ Kubernetes container CPU and memory panels are unchanged by this setting.
 helm package charts/ovn-k8s-observability
 ```
 
-That produces `ovn-k8s-observability-2.4.2.tgz`. `obs-as-code/` and the
+That produces `ovn-k8s-observability-<VERSION>.tgz`. `obs-as-code/` and the
 raw `files/dashboards/` sources are excluded by `.helmignore` and are not part
 of the package.
 
