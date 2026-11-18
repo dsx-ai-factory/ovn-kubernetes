@@ -903,7 +903,7 @@ spec:
           matchExpressions:
           - key: tenant
             operator: NotIn
-            value: yellow
+            values: [yellow]
   egress:
     - action: Deny
       to:
@@ -911,7 +911,7 @@ spec:
           matchExpressions:
           - key: tenant
             operator: NotIn
-            value: yellow
+            values: [yellow]
 ```
 In that case you don't need a 43 priority ANP.
 However note that if you define it this way then each

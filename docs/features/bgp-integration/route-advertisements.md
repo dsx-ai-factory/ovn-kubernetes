@@ -306,7 +306,7 @@ spec:
     clusterUserDefinedNetworkSelector:
       networkSelector:
         matchLabels:
-          advertise: true
+          advertise: "true"
 ```
 
 Note that this configuration also results in the BGP installed routes of the
@@ -335,7 +335,7 @@ spec:
     clusterUserDefinedNetworkSelector:
       networkSelector:
         matchLabels:
-          advertise: true
+          advertise: "true"
 ```
 
 ### Import and export routes to a CUDN over the network VRF (VRF-Lite)
@@ -393,7 +393,7 @@ spec:
     clusterUserDefinedNetworkSelector:
       networkSelector:
         matchLabels:
-          advertise: true
+          advertise: "true"
 ```
 
 `targetVRF` value `auto` is a magic helper value that tells OVN-Kubernetes to
