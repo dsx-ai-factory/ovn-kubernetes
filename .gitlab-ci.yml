@@ -2,3 +2,37 @@ include:
   - project: 'sdn/sdn-cicd'
     file: 'gitlab-cicd/ovn-kubernetes-gitlab-ci.yaml'
     ref: 'main'
+
+mirror_main_to_github:
+  stage: .post
+  # Schedule the mirror independently of the build and test stages.
+  needs: []
+  resource_group: github-main-mirror
+  variables:
+    GIT_DEPTH: "0"
+    GIT_TERMINAL_PROMPT: "0"
+  rules:
+    - if: >-
+        $CI_PROJECT_PATH == "sdn/ovn-kubernetes" &&
+        $CI_PIPELINE_SOURCE == "push" &&
+        $CI_COMMIT_BRANCH == "main"
+      when: always
+  script:
+    - |
+      set -eu
+      : "${GITHUB_MIRROR_USER:?Set GITHUB_MIRROR_USER in GitLab CI/CD variables}"
+      : "${GITHUB_MIRROR_TOKEN:?Set GITHUB_MIRROR_TOKEN in GitLab CI/CD variables}"
+      askpass=$(mktemp)
+      trap 'rm -f "$askpass"' EXIT
+      printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$GITHUB_MIRROR_TOKEN"' > "$askpass"
+      chmod 700 "$askpass"
+      export GIT_ASKPASS="$askpass"
+
+      github_url="https://${GITHUB_MIRROR_USER}@github.com/dsx-ai-factory/ovn-kubernetes.git"
+      if ! git -c credential.helper= -c push.followTags=false push \
+        "$github_url" "${CI_COMMIT_SHA}:refs/heads/main"; then
+        # A newer pipeline may have published first. Check whether GitHub already has this commit.
+        git -c credential.helper= fetch --no-tags "$github_url" refs/heads/main
+        git merge-base --is-ancestor "$CI_COMMIT_SHA" FETCH_HEAD
+        printf 'GitHub main already contains %s\n' "$CI_COMMIT_SHA"
+      fi
