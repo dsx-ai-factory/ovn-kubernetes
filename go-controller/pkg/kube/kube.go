@@ -125,7 +125,7 @@ func (k *Kube) SetLabelsOnPod(pod *corev1.Pod, labels map[string]string) error {
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
+	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.MergePatchType, patchData, metav1.PatchOptions{}, "status")
 	if err != nil {
 		klog.Errorf("Error in setting labels on pod %s: %v", podDesc, err)
 	}
