@@ -14,7 +14,7 @@ module github.com/ovn-kubernetes/ovn-kubernetes/test/crd-integration
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/onsi/ginkgo/v2 v2.28.1

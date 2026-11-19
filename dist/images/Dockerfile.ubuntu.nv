@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 
 ARG BASE_IMAGE=artifactory.nvidia.com/sw-ipp-lws2-internal-docker/base-container/ubuntu:24.04-fips-stig_lws_pb@sha256:35955f271108aead7d93eaff2e18bb1a1ae2364b871fd2d1acc752432214c0c9
-FROM golang:1.26.10@sha256:670bb5aa5349ae03b8516764718486f4f16399134bdc9acd0c46a23f043ab05c as builder
+FROM golang:1.26.11@sha256:4165ee6bf3b7811fd7b40373290405c83d0167dcb87ee5f29c427cdcef45ff8f as builder
 ARG OVN_K8S_SRC_ROOT=.
 COPY ${OVN_K8S_SRC_ROOT} /ovn-kubernetes
 RUN make bld -C /ovn-kubernetes/dist/images
