@@ -23,6 +23,12 @@ and `ovnkube_clustermanager_udn_nodes_rendered` series are also removed when it 
 deleted or disappears. The latter metric is registered only when dynamic UDN
 allocation is enabled.
 
+### RouteAdvertisements
+
+The `ovnkube_clustermanager_route_advertisement_condition` gauge reports both
+`Accepted` and `Degraded`. A valid RA can be accepted while programming fails
+on a subset of its nodes.
+
 ## Change log
 This list is to help notify if there are additions, changes or removals to metrics. Latest changes are at the top of this list.
 

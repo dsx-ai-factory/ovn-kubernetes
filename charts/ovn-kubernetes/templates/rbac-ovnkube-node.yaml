@@ -239,6 +239,9 @@ rules:
     resources:
       - routeadvertisements
     verbs: [ "get", "list", "watch" ]
+  - apiGroups: ["frrk8s.metallb.io"]
+    resources: ["frrconfigurations"]
+    verbs: ["get", "list", "watch"]
 {{- end }}
 {{- if .Values.global.enableOvnKubeIdentity }}
   - apiGroups: ["certificates.k8s.io"]

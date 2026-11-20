@@ -1220,7 +1220,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 			}
 		}
 		gomega.Expect(createRouteAdvertisements(
-			f,
+			ctx, f,
 			ictx,
 			networkName,
 			"auto",
@@ -1420,7 +1420,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 		}
 
 		gomega.Expect(createRouteAdvertisements(
-			f,
+			ctx, f,
 			ictx,
 			networkName,
 			"auto",
@@ -1535,7 +1535,7 @@ var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation
 		testSuffix = framework.RandomSuffix()
 	})
 
-	ginkgo.It("allows node-disjoint Dynamic CUDNs to share a targetVRF auto Uplink and rejects overlap", func() {
+	ginkgo.It("allows node-disjoint Dynamic CUDNs to share a targetVRF auto Uplink and rejects overlap", func(ctx context.Context) {
 		if !isDynamicUDNEnabled() {
 			e2eskipper.Skipf("test requires Dynamic UDN allocation")
 		}
@@ -1646,7 +1646,7 @@ var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation
 				frrNeighborIPsByNode[network.node.Name],
 			)).To(gomega.Succeed())
 			gomega.Expect(createRouteAdvertisements(
-				f,
+				ctx, f,
 				ictx,
 				network.name,
 				"auto",
@@ -4244,7 +4244,7 @@ func createUplinkAdvertisedCUDN(
 		return nil, err
 	}
 	if err := createRouteAdvertisements(
-		f,
+		context.Background(), f,
 		ictx,
 		networkName,
 		targetVRF,

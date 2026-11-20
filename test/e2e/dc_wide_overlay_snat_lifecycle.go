@@ -225,7 +225,7 @@ func (n *dcWideOverlayTestNetwork) create() {
 		framework.ExpectNoError(err, "creating RouteAdvertisements %s for CUDN %s", n.name, n.name)
 		n.raCreated = true
 	}
-	gomega.Eventually(routeAdvertisementsReadyFunc(*raClient, n.name), 60*time.Second, time.Second).Should(gomega.Succeed(), "waiting for RouteAdvertisements %s for CUDN %s to become ready", n.name, n.name)
+	gomega.Eventually(routeAdvertisementsReadyFunc(context.Background(), *raClient, n.name), 60*time.Second, time.Second).Should(gomega.Succeed(), "waiting for RouteAdvertisements %s for CUDN %s to become ready", n.name, n.name)
 	gomega.Eventually(func() ([]string, error) {
 		return dcWideOverlayAddressSets(n.f, n.node, ovnutil.GenerateCUDNNetworkName(n.name))
 	}, 60*time.Second, time.Second).ShouldNot(gomega.BeEmpty(), "CUDN %s must have exemption address sets on node %s", n.name, n.node)
