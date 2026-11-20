@@ -46,19 +46,87 @@ subjects:
 Note: By default, the generated certificates have a brief lifetime set (10min).
 This is intentional as it helps ensure that the certificate rotation works seamlessly, but it might be adjusted in production environments.
 
+## UplinkState Ownership
+
+When node identity is enabled, only `system:ovn-node:<nodeName>` may create or
+update an `UplinkState` whose `spec.nodeName` matches that identity.
+A `ValidatingAdmissionPolicy` enforces update ownership and unchanged finalizers
+inside the API server. The CRD makes both spec identity fields immutable.
+The policy also preserves owner references, allowing only the owning node to
+set `blockOwnerDeletion` to `false` on existing references. All updates,
+including patches and server-side apply, avoid the identity webhook.
+
+The webhook validates the caller's node identity and the canonical object name,
+including hashed names, on creation. It does not look up Uplinks or Nodes or
+validate owner references. Nodes cannot set finalizers at creation.
+Administrators and `--extra-allowed-user` identities have no create or update
+exemption.
+
+The existing naming scheme can generate the same object name for different
+Uplink/node pairs containing dots. Admission does not resolve those collisions;
+both pairs still compete for one object name.
+
+Nodes manage their own states. The admission policy rejects deletion of another
+node's state using the existing object's identity. Other RBAC-authorized callers
+can delete states, including cluster-manager when a Node is deleted and garbage
+collection when an Uplink is deleted. Deletes do not call the webhook.
+
+In split DPU deployments, the DPU and DPU-host need a trusted identity mapping
+before enabling this restriction. The DPU Helm values currently disable node
+identity.
+
 ## Validating Admission Webhook
 
-The feature introduces a validating webhook for updates to `pod/status` and `node/status`.\
-The `ovnkube-node` pod exclusively updates the status on both resources, so it is sufficient to verify only update requests.\
+The feature introduces validating webhooks for pod creation, updates to `pods` and
+`pods/status`, creation and updates of `nodes`, including `nodes/status`, and
+creation of `uplinkstates`.
+
+For cluster-wide pod annotation protection, see [Security](security.md#protected-pod-annotations).
+
+Node annotations can also be written through the main Node resource, so both paths must be checked.
+An API-server match condition skips the node webhook for other callers unless
+an annotation with the `k8s.ovn.org/` prefix is added, changed, or removed.
+Ordinary node registration without OVN annotations and unrelated label, taint,
+and status updates therefore do not depend on webhook availability. Requests
+using `system:ovn-node` credentials always reach the webhook so that their
+metadata and status restrictions remain enforced. Matching requests fail closed
+if the webhook cannot be reached. Custom deployments must include this match
+condition along with the expanded resource rules.
+
 The webhooks include the following checks for each `ovnkube-node` pod:
+
 - Modifying annotations on pods hosted on its own node.
 - Modifying annotations on its own node.
 - Modifying only allowed annotations.
 - Not modifying anything other than annotations.
 
 The allowed annotations list contains both common and feature specific values:
+
  - By default, the webhook will verify common node annotations and pod/node annotations set by the ovnkube-node component.
  - When `enable-hybrid-overlay` parameter is provided the webhook will validate additional node annotations set by the ovnkube-node component for hybrid overlay.
+
+Cluster-manager's allocation annotations, including `k8s.ovn.org/node-id` and
+`k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids`, are protected by a
+separate [admission policy](index.md#controller-owned-node-annotations).
+That protection remains active when NodeIdentity is disabled and authorizes
+only the cluster-manager service account; `--extra-allowed-user` does not
+override it. Node credentials cannot write these annotations, even on their
+own node. Other users can update unrelated annotations and node status while
+preserving protected annotations.
+
+Custom deployments must update the node webhook rules to include `CREATE` and
+`UPDATE` on `nodes`, and `UPDATE` on `nodes/status`. Configure all required trusted
+controller identities before enabling these protections. Administrative repair
+requires an identity authorized by every applicable webhook and admission
+policy. Existing annotation values are not revalidated when they remain
+unchanged; this protection does not repair preexisting corrupt allocations or
+validate NAD/CNC resources.
+
+When recreating a Node from saved YAML, normally omit protected OVN annotations
+and let the controllers regenerate them. Replaying those annotations during
+creation may be rejected even if they were valid on the original Node. See
+[Controller-owned Node annotations](index.md#controller-owned-node-annotations)
+for allocations protected independently of NodeIdentity.
 
 The specific annotation values can be found in `go-controller/pkg/ovnwebhook/nodeadmission.go` and `go-controller/pkg/ovnwebhook/podadmission.go` files.
 

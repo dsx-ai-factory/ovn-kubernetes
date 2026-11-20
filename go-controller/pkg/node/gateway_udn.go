@@ -455,8 +455,8 @@ func (udng *UserDefinedNetworkGateway) getUplinkState() (*uplinkv1alpha1.UplinkS
 	state, err := uplinkutil.GetState(udng.uplinkStateLister, udng.Uplink(), udng.node.Name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("waiting for UplinkState %s for uplink %q on node %q",
-				stateName, udng.Uplink(), udng.node.Name)
+			return nil, fmt.Errorf("waiting for UplinkState %s for uplink %q on node %q: %w",
+				stateName, udng.Uplink(), udng.node.Name, err)
 		}
 		return nil, fmt.Errorf("failed to get UplinkState %s: %w", stateName, err)
 	}
@@ -838,6 +838,7 @@ func (udng *UserDefinedNetworkGateway) unconfigureUplinkGateway() error {
 	}
 	udng.uplinkGatewayPartial = true
 	if err := udng.delNetwork(); err != nil {
+		udng.uplinkGatewayPartial = true
 		return fmt.Errorf("failed to unconfigure Uplink gateway for network %s: %w", udng.GetNetworkName(), err)
 	}
 	udng.uplinkGatewayCleanupRequired = false
@@ -875,6 +876,10 @@ func (udng *UserDefinedNetworkGateway) replaceUplinkGateway(
 	return nil
 }
 
+// uplinkStatePending reports unavailable discovery input without scheduling a
+// retry. The informer will enqueue the gateway when that input changes.
+type uplinkStatePending struct{ error }
+
 // reconcileUplinkConfiguration reads the newest informer state and makes this
 // UDN's dataplane match it. The caller serializes it with all other operations
 // on this gateway.
@@ -891,6 +896,9 @@ func (udng *UserDefinedNetworkGateway) reconcileUplinkConfiguration() (
 				uplinkv1alpha1.UplinkStateReasonGatewayProgrammingFailed,
 				utilerrors.Join(err, unconfigureErr),
 			)
+		}
+		if apierrors.IsNotFound(err) {
+			return "", uplinkGatewayFingerprint{}, &uplinkStatePending{err}
 		}
 		return "", uplinkGatewayFingerprint{}, newUplinkGatewayError(
 			uplinkv1alpha1.UplinkStateReasonGatewayProgrammingFailed,
@@ -917,7 +925,7 @@ func (udng *UserDefinedNetworkGateway) reconcileUplinkConfiguration() (
 		}
 		return state.UID, observedFingerprint, newUplinkGatewayError(
 			uplinkv1alpha1.UplinkStateReasonGatewayProgrammingFailed,
-			err,
+			&uplinkStatePending{err},
 		)
 	}
 
@@ -1005,7 +1013,8 @@ func (udng *UserDefinedNetworkGateway) managedDefaultRouteKey(isV6 bool) netlink
 }
 
 // reconcileUplinkState makes this CUDN's gateway match the newest informer
-// state. The controller retries errors indefinitely; operationMutex serializes
+// state. Missing or invalid discovery input waits for informer events; errors
+// programming or cleaning up the gateway retry. operationMutex serializes
 // each attempt with initial setup, advertised-state reconciliation, and cleanup.
 func (udng *UserDefinedNetworkGateway) reconcileUplinkState(key string) error {
 	if key != uplinkutil.StateName(udng.Uplink(), udng.node.Name) {
@@ -1018,6 +1027,10 @@ func (udng *UserDefinedNetworkGateway) reconcileUplinkState(key string) error {
 		udng.reconcileUplinkConfiguration()
 	udng.uplinkStateGatewayStatusController.ReportNetworkResult(
 		udng.NetInfo, observedUID, observedFingerprint, reconcileErr)
+	var pending *uplinkStatePending
+	if errors.As(reconcileErr, &pending) {
+		return nil
+	}
 	return reconcileErr
 }
 
@@ -1615,6 +1628,11 @@ func (udng *UserDefinedNetworkGateway) reconcileGateway(_ string) error {
 	defer udng.operationMutex.Unlock()
 	if udng.Uplink() == "" {
 		return udng.reconcileAdvertisedState()
+	}
+	if udng.uplinkStateUID == "" || !udng.uplinkGatewayCleanupRequired || udng.uplinkGatewayPartial {
+		// Uplink reconciliation applies the latest advertisement when it
+		// programs the gateway. Do not retry or report success before then.
+		return nil
 	}
 	// Reconcile and report against the UplinkState configuration last handled by
 	// this gateway, not a newer informer object that has not been handled yet.

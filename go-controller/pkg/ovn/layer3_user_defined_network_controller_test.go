@@ -1033,7 +1033,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netInfo.Transport()).To(Equal(types.NetworkTransportNoOverlay))
 
-				node1 := createTestNode(node1Name, "1")
+				node1 := createTestNode(node1Name, "4")
 				clusterRouterName := netInfo.GetNetworkScopedClusterRouterName()
 				transitSwitchName := netInfo.GetNetworkScopedName(types.TransitSwitch)
 
@@ -1198,7 +1198,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netInfo.Transport()).NotTo(Equal(types.NetworkTransportNoOverlay))
 
-				node1 := createTestNode(node1Name, "1")
+				node1 := createTestNode(node1Name, "4")
 				clusterRouterName := netInfo.GetNetworkScopedClusterRouterName()
 				transitSwitchName := netInfo.GetNetworkScopedName(types.TransitSwitch)
 

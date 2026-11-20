@@ -35,7 +35,7 @@ GO_IMAGE ?= quay.io/projectquay/golang:1.26@sha256:506a668eb4c763a964ffc4d4ad012
 OVN_KUBERNETES_DIR ?= .
 KUBECTL_MINOR ?= $(shell awk '/^[[:space:]]*k8s.io\/kubernetes v/ {gsub(/^v/, "", $$2); split($$2, version, "."); print version[1] "." version[2]; exit}' ../../go-controller/go.mod)
 UBUNTU_BASE_IMAGE ?= ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
-FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:43@sha256:c45b30a84cf2fb151e3d8f8683707ce42356f674357f10951b4dd71014a502f3
+FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:44@sha256:fda16b8254a181b9f010930f16f0b33c8dc7cb680a8f6c934bc9da5b3c3a5fed
 
 ifeq ($(strip $(KUBECTL_MINOR)),)
 $(error failed to derive KUBECTL_MINOR from ../../go-controller/go.mod)
