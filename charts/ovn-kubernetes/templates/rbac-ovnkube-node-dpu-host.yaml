@@ -103,6 +103,10 @@ rules:
     resources:
       - routeadvertisements
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["frrk8s.metallb.io"]
+    resources:
+      - frrconfigurations
+    verbs: ["get", "list", "watch"]
 {{- end }}
   - apiGroups: [""]
     resources:
