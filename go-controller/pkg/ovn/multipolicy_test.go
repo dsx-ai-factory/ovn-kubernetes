@@ -24,6 +24,7 @@ import (
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -533,6 +534,78 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 			},
 			ginkgo.Entry("with allow ICMP network policy disabled", false),
 			ginkgo.Entry("with allow ICMP network policy enabled", true),
+		)
+
+		ginkgo.DescribeTable("stops the multi network policies with the network controller",
+			func(topology string) {
+				app.Action = func(*cli.Context) error {
+					setUserDefinedNetworkTestData(topology, "10.1.0.0/24")
+					namespace1 := *ovntest.NewNamespace(namespaceName1)
+					nPodTest := getTestPod(namespace1.Name, nodeName)
+					nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, "", "", "", "10.1.0.1", "0a:58:0a:01:00:01", fmt.Sprintf("%d", config.Default.MTU), "secondary", 1, nil)
+					netPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)
+					mpolicy := convertNetPolicyToMultiNetPolicy(netPolicy)
+					mpolicy.Annotations = map[string]string{PolicyForAnnotation: nadNamespacedName}
+
+					startOvn(initialDB, false, []corev1.Node{*newNode(nodeName, "192.168.126.202/24")}, []corev1.Namespace{namespace1}, nil,
+						nil, []nettypes.NetworkAttachmentDefinition{*nad}, []testPod{nPodTest}, map[string]string{labelName: labelVal})
+					// the controller applies the multi network policy once the network manager knows its NAD
+					gomega.Eventually(func() string {
+						return fakeOvn.networkManager.Interface().GetNetworkNameForNADKey(nadNamespacedName)
+					}).Should(gomega.Equal(userDefinedNetworkName))
+					_, err := fakeOvn.fakeClient.MultiNetworkPolicyClient.K8sCniCncfIoV1beta2().MultiNetworkPolicies(mpolicy.Namespace).
+						Create(context.TODO(), mpolicy, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					bnc := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName].bnc
+					var np *networkPolicy
+					gomega.Eventually(func() *factory.Handler {
+						var handler *factory.Handler
+						np, handler = getNetworkPolicyLocalPodHandler(&bnc.BaseNetworkController, getPolicyKey(netPolicy))
+						return handler
+					}).ShouldNot(gomega.BeNil())
+
+					var stopController func()
+					switch topology {
+					case ovntypes.Layer2Topology:
+						stopController = fakeOvn.fullL2UDNControllers[userDefinedNetworkName].Stop
+					case ovntypes.LocalnetTopology:
+						stopController = fakeOvn.fullLocalnetUDNControllers[userDefinedNetworkName].Stop
+					}
+
+					ginkgo.By("stopping the controller while a network policy event is in progress")
+					// network policy add and delete hold policyLifecycle for reading
+					bnc.policyLifecycle.RLock()
+					stopped := make(chan struct{})
+					go func() {
+						defer close(stopped)
+						stopController()
+					}()
+					gomega.Consistently(stopped).ShouldNot(gomega.BeClosed())
+					bnc.policyLifecycle.RUnlock()
+					gomega.Eventually(stopped).Should(gomega.BeClosed())
+
+					np.RLock()
+					gomega.Expect(np.deleted).To(gomega.BeTrue())
+					gomega.Expect(np.localPodHandler).To(gomega.BeNil())
+					np.RUnlock()
+
+					ginkgo.By("ignoring network policy events after the stop")
+					gomega.Expect(bnc.deleteNetworkPolicy(netPolicy)).To(gomega.Succeed())
+					_, found := bnc.networkPolicies.Load(getPolicyKey(netPolicy))
+					gomega.Expect(found).To(gomega.BeTrue(), "the stopped policy is left for Cleanup")
+					otherPolicy := getPortNetworkPolicy("networkpolicy2", namespace1.Name, labelName, labelVal, portNum)
+					gomega.Expect(bnc.addNetworkPolicy(otherPolicy)).To(gomega.Succeed())
+					_, found = bnc.networkPolicies.Load(getPolicyKey(otherPolicy))
+					gomega.Expect(found).To(gomega.BeFalse())
+					return nil
+				}
+
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			},
+			ginkgo.Entry("on a layer2 network", ovntypes.Layer2Topology),
+			ginkgo.Entry("on a localnet network", ovntypes.LocalnetTopology),
 		)
 
 		ginkgo.It("correctly creates, updates and deletes multi network policies", func() {

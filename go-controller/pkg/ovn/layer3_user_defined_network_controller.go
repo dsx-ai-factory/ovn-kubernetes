@@ -375,6 +375,7 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 	if oc.multiNetPolicyHandler != nil {
 		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetPolicyHandler)
 	}
+	oc.stopNetworkPolicies()
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
 	}

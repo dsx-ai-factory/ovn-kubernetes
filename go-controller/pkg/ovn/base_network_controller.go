@@ -156,6 +156,13 @@ type BaseNetworkController struct {
 	// make sure to keep this order to avoid deadlocks
 	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
+	// network policy add and delete hold policyLifecycle for reading,
+	// stopNetworkPolicies holds it for writing and sets policiesStopped.
+	// Allowed order of locking is policyLifecycle -> namespace Lock -> networkPolicy.Lock
+	policyLifecycle sync.RWMutex
+	// policiesStopped makes network policy add and delete no-ops after the controller is stopped
+	policiesStopped bool
+
 	addressSetManager *addresssetmanager.AddressSetManager
 
 	// stopChan per controller

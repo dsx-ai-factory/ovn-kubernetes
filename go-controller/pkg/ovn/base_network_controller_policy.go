@@ -1260,6 +1260,13 @@ func (bnc *BaseNetworkController) addNetworkPolicy(policy *knet.NetworkPolicy) e
 			metrics.RecordNetpolEvent("add", duration)
 		}()
 	}
+	npKey := getPolicyKey(policy)
+	bnc.policyLifecycle.RLock()
+	defer bnc.policyLifecycle.RUnlock()
+	if bnc.policiesStopped {
+		klog.Infof("Network controller for %s is stopped, skip adding network policy %s", bnc.GetNetworkName(), npKey)
+		return nil
+	}
 
 	// To not hold nsLock for the whole process on network policy creation, we do the following:
 	// 1. save required namespace information to use for netpol create
@@ -1270,7 +1277,6 @@ func (bnc *BaseNetworkController) addNetworkPolicy(policy *knet.NetworkPolicy) e
 	// 6. unlock namespace
 
 	// 1. save required namespace information to use for netpol create,
-	npKey := getPolicyKey(policy)
 	nsInfo, nsUnlock := bnc.getNamespaceLocked(policy.Namespace, true)
 	if nsInfo == nil {
 		return fmt.Errorf("unable to get namespace for network policy %s: namespace doesn't exist", npKey)
@@ -1372,6 +1378,12 @@ func (bnc *BaseNetworkController) deleteNetworkPolicy(policy *knet.NetworkPolicy
 			metrics.RecordNetpolEvent("delete", duration)
 		}()
 	}
+	bnc.policyLifecycle.RLock()
+	defer bnc.policyLifecycle.RUnlock()
+	if bnc.policiesStopped {
+		klog.Infof("Network controller for %s is stopped, skip deleting network policy %s", bnc.GetNetworkName(), npKey)
+		return nil
+	}
 	// First lock and update namespace
 	nsInfo, nsUnlock := bnc.getNamespaceLocked(policy.Namespace, false)
 	if nsInfo != nil {
@@ -1468,6 +1480,29 @@ func (bnc *BaseNetworkController) shutdownHandlers(np *networkPolicy) {
 		np.localPodHandler = nil
 		np.localPodSelector = nil
 		np.localPodRetry = nil
+	}
+}
+
+// stopNetworkPolicies stops the handlers of every network policy when the network controller is stopped.
+// A local pod handler left behind keeps changing the default deny port groups, which a new controller
+// for the same network finds by name. Logical entities are left for Cleanup to delete.
+// Call it after the network policy handlers are removed.
+func (bnc *BaseNetworkController) stopNetworkPolicies() {
+	// wait for network policy add and delete in progress, and make the later ones no-ops
+	bnc.policyLifecycle.Lock()
+	defer bnc.policyLifecycle.Unlock()
+	bnc.policiesStopped = true
+
+	for _, npKey := range bnc.networkPolicies.GetKeys() {
+		np, found := bnc.networkPolicies.Load(npKey)
+		if !found {
+			continue
+		}
+		// np.Lock waits for local pod events in progress, and deleted makes the later ones no-ops
+		np.Lock()
+		np.deleted = true
+		bnc.shutdownHandlers(np)
+		np.Unlock()
 	}
 }
 
