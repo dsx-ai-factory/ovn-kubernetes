@@ -1,3 +1,36 @@
+# 2.4.3
+- helm: scope subchart selection with `condition: tags.<name>` instead of the
+  `dependencies[].tags` field, which Helm resolves only against the
+  release-root `tags` map. Value names and defaults are unchanged, so
+  standalone installs are unaffected, but an umbrella chart passing root-level
+  tags has to move them under the `ovn-kubernetes` key. Every tag is now
+  required by `values.schema.json`, and a `NOTES.txt` lists the components a
+  release rendered.
+- helm: drop `NET_ADMIN` from the `nb-ovsdb` and `sb-ovsdb` containers of the
+  `ovnkube-single-node-zone` and `ovnkube-single-node-zone-dpu` charts. They
+  serve only unix sockets; the containers still run as root.
+- helm: remove the `update` verb on pods from the `ovnkube` RBAC, now that the
+  `k8s.ovn.org/nodeName` label is written through `pods/status`, and allow a
+  node to update that label on its own pods in the admission policy.
+- helm: set `OVN_KUBERNETES_NAMESPACE` on the `ovnkube-node-dpu-host` and
+  `ovnkube-node-dpu` charts, so installing into a namespace other than
+  `ovn-kubernetes` no longer leaves `ovnkube` writing its lease where its
+  service account has no permissions. Both default to `ovn-kubernetes`.
+- helm: persist the OVN databases by mounting the shared volume at
+  `/var/lib/ovn` for the NB and SB containers.
+- helm: add `global.secureMgmtPort`, passed to `ovnkube-node` as
+  `OVNKUBE_SECURE_MGMT_PORT` and enabled by default.
+- helm: raise the `ovnkube-node` readiness probe `timeoutSeconds` to 15 in the
+  two charts that run the script, which now bounds every check it makes.
+- helm: remove the dangling OVS D-Bus mount that no container used.
+- helm: drop `SECURITY.md`, the internal security triage metadata, and
+  maintainer scripts from the packaged chart.
+- helm: pin every `image.sha256` to the digest of the tag this chart ships.
+  The 2.4.0, 2.4.1, and 2.4.2 cuts each repointed `image.tag` and left the
+  digest behind.
+- helm: regenerate `values.schema.json` and `README-deployment.md`, and teach
+  the schema generator to carry element types for lists whose default is empty.
+
 # 2.4.2
 - helm: protect node subnet ownership — add a `ValidatingAdmissionPolicy` and
   binding to `ovnkube-control-plane` that restrict `k8s.ovn.org/node-subnets`
