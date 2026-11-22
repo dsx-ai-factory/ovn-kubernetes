@@ -7,6 +7,203 @@ its comparison baseline. Small fixes and internal refactoring are omitted.
 Downstream releases are numbered `2.MINOR.PATCH`, where `MINOR` tracks the
 upstream minor release the drop is based on.
 
+## [2.4.3]
+
+Changes since 2.4.2 on `release-2.4`. The upstream baseline moves for the first
+time in this series, from `release-1.4` at tag `v1.4.0` to `release-1.4` at
+commit
+[`d6fb77aaf7f643e5c7b8ae6b1ba595645def1b08`](https://github.com/ovn-kubernetes/ovn-kubernetes/commit/d6fb77aaf7f643e5c7b8ae6b1ba595645def1b08),
+which carries no upstream tag. That merge brings the 69 commits made on
+`release-1.4` after `v1.4.0`; the entries below describe the NVIDIA changes
+only.
+
+### Removals
+
+- **Pod-controlled skip-IPAM:** Remove the remaining pod-driven skip-IPAM
+  support, completing the removal of the pod-writable port security surface
+  that took `k8s.ovn.org/port-security-info` and
+  `k8s.ovn.org/skip-spoofchk-on-networks` in 2.4.1.
+- **`ovnkube` pod `update` permission:** Drop the `update` verb on pods from
+  the `ovnkube` RBAC. The NVIDIA-specific `k8s.ovn.org/nodeName` label is
+  written through the `pods/status` subresource instead, and the admission
+  policy is relaxed so a node may still set that label on its own pods.
+- **`NET_ADMIN` on the OVN database containers:** `nb-ovsdb` and `sb-ovsdb`
+  serve only unix sockets, so the `securityContext` granting them `NET_ADMIN`
+  is dropped from the `ovnkube-single-node-zone` and
+  `ovnkube-single-node-zone-dpu` charts. The containers still run as root,
+  which `ovnkube.sh` needs for the `setpriv` call that hands `ovsdb-server` to
+  the `ovs` user.
+
+### Networking and IP management
+
+- **Uplink bridge deleted under an active CUDN:** An admin deleting an Uplink
+  OVS bridge no longer restarts `ovnkube-node` on every node running a CUDN on
+  it. The periodic port check skips a bridge gone from OVSDB, network cleanup
+  treats a vanished bridge as already cleaned up and deregisters it, masquerade
+  neighbour cleanup tolerates the missing link, and discovery now re-runs on
+  OVSDB bridge additions and deletions so `UplinkState` stops reporting a
+  bridge that no longer exists.
+- **Uplink default gateway changes:** Update the next hops and managed default
+  routes of the families that changed instead of tearing down and rebuilding
+  the whole gateway. The rebuild released the gateway interface from the
+  network VRF and enslaved it again, which under VRF-Lite dropped the BGP
+  session running over it and looped at the pace of the BGP reconnect.
+- **Uplink VF recovery:** Recover the downstream uplink VF before resolving
+  `UplinkState`, so a CUDN teardown that took the VF down no longer leaves
+  gateway resolution failing ahead of the helper that raises it.
+- **Stale `UplinkState`s of deleted nodes:** Cluster-manager deletes them on
+  the Node delete event rather than only during its initial sync. Their owner
+  is the Uplink rather than the Node, so garbage collection does not remove
+  them and they used to accumulate until the next restart.
+- **Stale localnet port:** Remove any other localnet port on the external
+  switch in the same transaction that creates the current one, so a changed
+  interface ID no longer leaves two.
+- **Localnet bridge mappings:** Clear `ovn-bridge-mappings` when the last
+  mapping is removed, by deleting the `external_ids` key rather than setting an
+  empty map, which `ovs-vsctl` rejects. Cleanup previously reported success
+  while `ovn-controller` kept a patch port for a network that was gone.
+  Mappings are also preserved across node shutdown.
+- **Localnet pod ports across restart:** The startup pod sync no longer deletes
+  the port of every local pod on a localnet network with subnets or DHCP, where
+  the annotation is written by the cluster manager or the CNI rather than by
+  the sync itself. Those pods lost their datapath until the recreated port was
+  bound.
+- **VRF route tracking:** Replace a tracked route carrying the same
+  destination, table, and metric instead of appending to the VRF cache. A
+  default route via a new gateway used to leave the old one tracked, so each
+  sync re-applied both and flipped the kernel default.
+- **EVPN VTEP reconcile:** A fast CUDN create-then-delete no longer loses the
+  VTEP reconcile to workqueue coalescing, which could leave a VTEP stuck in its
+  last condition or blocked on its finalizer. The racy side cache is replaced
+  by an optional `OnDelete` hook on the shared controller framework, which
+  delivers the deleted object itself.
+- **RouteAdvertisements partial failures:** Isolate per-node and per-template
+  failures so one failing node no longer withdraws the advertisements of
+  healthy ones, and publish `Accepted` and `Degraded` through the existing
+  condition gauge.
+- **Managed BGP self-peer filtering:** Filter self-peers out of the managed
+  full-mesh template using node `InternalIP`s, the same addresses used to
+  populate its neighbors, and reconcile node address changes. Missing
+  `InternalIP`s now return a retryable error that preserves the existing
+  configuration instead of entering pending cleanup.
+- **RouteAdvertisements reconcile scope:** Index NADs by the advertisements
+  they reference so an event reconciles only the networks that can be affected
+  by it, rather than re-evaluating every running network. The node NAD informer
+  is also initialised whenever route advertisements are enabled, which the node
+  previously dereferenced as nil when segmentation and DPU mode were both off.
+- **CUDN NAD tracking and deletion:** Track a NAD as soon as it is created, and
+  record its namespace before the create request is sent, so a CUDN deleted
+  after a partially failed or timed-out sync still releases its NADs and drops
+  its finalizer instead of leaving the network controller running. Deletions
+  blocked on a network still in use are paced by the controller's exponential
+  limiter rather than retried about ten times a second.
+- **NetworkQoS event handling:** Skip pod and namespace events while no policy
+  exists and skip host-network pods, seed the label and IP caches when the
+  first policy appears, handle deletion tombstones and namespaces that vanish
+  before a queued pod event is processed, version the cached history across
+  policy lifetimes so a stale snapshot cannot be trusted, and release informer
+  handlers on controller shutdown.
+- **Gateway MTU support change:** Resync the cluster router port as well as the
+  gateway router when `k8s.ovn.org/gateway-mtu-support` changes. The stale
+  `options:gateway_mtu` left behind broke hardware offload.
+- **VFIO DHCP:** Address the temporary netdev by ifindex rather than by name
+  throughout the localnet VFIO DHCP exchange, since udev can rename it mid-way
+  and fail the CNI ADD. A failed rebind to `vfio-pci` no longer leaves a host
+  interface up on the VM's network.
+- **DPU host node lifecycle:** `ovnkube-node` in DPU mode exits when the Node
+  object it manages is deleted, rather than continuing to serve a node that no
+  longer exists, and `ovnkube.sh` re-resolves the DPU's host node on container
+  restart so a host reprovisioned under a new name is picked up instead of the
+  stale one cached by the init container.
+- **No-overlay DC-wide SNAT exemptions:** Preserve source addresses for
+  configured DC-wide overlay subnets in DPU no-overlay deployments, kept in
+  step with the LaunchLayer subnet configuration.
+
+### Security and hardening
+
+- **VTEP advertisement validation:** Validate VTEP addresses and detect
+  conflicting claims across RouteAdvertisements sharing an underlay, so a
+  malformed or conflicting node annotation can no longer advertise incorrect
+  reachability and blackhole traffic meant for another node. A unique
+  established advertiser is preserved, rejected node configurations are
+  withdrawn, and unmanaged annotations are repaired regardless of field
+  manager.
+- **Management port security:** Pass `OVNKUBE_SECURE_MGMT_PORT` to
+  `ovnkube-node`, enabled by default.
+- **Leader election identity:** Key the lease on the pod UID rather than the
+  node name. client-go treats a lease whose holder matches its own identity as
+  already won, so a replacement pod scheduled onto the same node inherited a
+  lease the outgoing process still held and both ran as leader until the old
+  renew deadline expired.
+- **Dependency and toolchain CVEs:** Build with Go 1.26.10 and then 1.26.11,
+  for the `crypto/x509` fix for CVE-2026-111943 and the standard library fix
+  for CVE-2026-97043. Raise `go-jose/v4` to v4.1.6 (CVE-2026-116585,
+  CVE-2026-116586, CVE-2026-116587), `golang.org/x/net` to v0.62.0
+  (CVE-2026-78661, CVE-2026-97045), and `klauspost/compress` to v1.20.4.
+
+### Observability
+
+- **Per-cluster alert isolation:** Add `global.clusterLabel`, defaulting to
+  `cluster`, and include it in the aggregation and join clauses of the 16 alert
+  rules that previously merged series from different clusters when several
+  clusters forward metrics to one store. `OvnKubeClusterManagerNotRunning` no
+  longer uses `absent()`, which only fired when no cluster had a cluster
+  manager, and `OvnControllerGeneveTunnelCountIsLow` compares each node against
+  its own cluster's node count. The dashboards take the same label, and
+  `dashboard.clusterLabel.discoveryMetric` is flattened to
+  `dashboard.clusterDiscoveryMetric`.
+- **Pod creation latency alert:** Correct the comparison order of
+  `OvnKubeIncreaseInPodCreationLatencyP100` so a rising latency fires it, and
+  reduce the pending duration below the comparison window.
+- **Dashboards and rule configuration:** Fix the `ovsdb-server` CPU panel unit
+  and the NOT READY and UNAVAILABLE colours, and declare
+  `rules.ovsNoOffloadIntraNodeBytes.filter` in `values.yaml`, which the
+  template requires but neither the values nor the README documented.
+- **Interconnect log volume:** Move the six loudest interconnect log sites to
+  `V(6)`.
+
+### Deployment and images
+
+- **Readiness and liveness probes:** Bound every check in the `ovnkube-node`
+  readiness script so a blackholed API VIP or resolver is reported by name
+  instead of as a generic `command timed out`, honour `METRICS_IP` the way
+  `ovnkube.sh` does when choosing the metrics address, and fix the IPv6
+  bracketing that `ncat` and `curl` want in opposite forms, which made the
+  probe unpassable on an IPv6 cluster. `timeoutSeconds` rises to 15 in the two
+  charts that run the script, and the liveness script's CNI socket check gains
+  a 3s limit.
+- **OVN database persistence:** Mount the shared OVN DB volume at
+  `/var/lib/ovn` for the NB and SB containers, so the database files survive
+  container restarts and stay visible to `ovnkube-controller`.
+- **DPU chart namespace:** Set `OVN_KUBERNETES_NAMESPACE` on the
+  `ovnkube-node-dpu-host` and `ovnkube-node-dpu` charts. Neither did, so
+  installing the host cluster into any namespace other than `ovn-kubernetes`
+  left `ovnkube` writing its lease where its service account has no
+  permissions — fatal on the host side, and a silent renewal failure on the
+  DPU side that drove the node `NotReady`. Both default to `ovn-kubernetes`, so
+  existing deployments are unaffected.
+- **Subchart selection:** Select each component with `condition: tags.<name>`
+  rather than the `dependencies[].tags` field, which Helm resolves only against
+  the release-root `tags` map. The value names and defaults are unchanged and
+  standalone installs are unaffected, but an umbrella chart passing root-level
+  tags has to move them under the `ovn-kubernetes` key. Every tag is now
+  required by `values.schema.json`, since an absent condition path leaves a
+  dependency enabled.
+- **Image digests:** Set all fourteen `image.sha256` entries to the digest the
+  registry reports for the tag the chart ships. The 2.4.0, 2.4.1, and 2.4.2
+  cuts each repointed `image.tag` and left the digest untouched, so installs
+  setting `global.useImageDigest` pulled a digest belonging to another tag.
+- **Chart package contents:** Drop `SECURITY.md`, the internal security triage
+  metadata, and maintainer scripts from the packaged chart, and remove the
+  dangling OVS D-Bus mount no container used.
+- **Node initialisation:** Install `python3`, which `ovnkube-init.sh` needs to
+  compute DPU network and gateway addresses, and derive a `/31` gateway from
+  the node IP rather than from the network address, which is the gateway only
+  when the node holds the odd address of the pair.
+- **Generated chart files:** Bring `values.schema.json` back in step with its
+  generator, teaching it to carry element types for lists whose default is
+  empty, and regenerate `README-deployment.md`.
+
 ## [2.4.2]
 
 Changes since 2.4.1 on `release-2.4`. The upstream baseline is unchanged —
