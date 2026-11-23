@@ -70,9 +70,13 @@ jobs:
       - name: Install VRF kernel module
         run: |
           set -x
-          sudo apt-get update
-          sudo apt-get install -y linux-modules-extra-$(uname -r)
-          sudo modprobe vrf
+          # Newer Ubuntu kernels ship vrf in linux-modules and have no
+          # linux-modules-extra package, so only install it when needed.
+          if ! sudo modprobe vrf; then
+            sudo apt-get update
+            sudo apt-get install -y linux-modules-extra-$(uname -r)
+            sudo modprobe vrf
+          fi
 
       - name: Run unit tests
         working-directory: go-controller
