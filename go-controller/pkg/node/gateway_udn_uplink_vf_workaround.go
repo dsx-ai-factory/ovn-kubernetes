@@ -275,13 +275,13 @@ func (udng *UserDefinedNetworkGateway) uplinkHostInterfaceName() (string, error)
 	if udng.gwInterfaceName != "" {
 		return udng.gwInterfaceName, nil
 	}
-	state, err := uplinkutil.GetState(udng.uplinkStateLister, udng.Uplink(), udng.node.Name)
+	state, err := uplinkutil.GetState(udng.uplinkStateLister, udng.Uplink(), udng.nodeName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return "", nil
 		}
 		return "", fmt.Errorf("failed to get UplinkState %s for network %s: %w",
-			uplinkutil.StateName(udng.Uplink(), udng.node.Name), udng.GetNetworkName(), err)
+			uplinkutil.StateName(udng.Uplink(), udng.nodeName), udng.GetNetworkName(), err)
 	}
 	return string(state.Status.HostInterfaceName), nil
 }
