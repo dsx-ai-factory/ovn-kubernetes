@@ -164,9 +164,6 @@ func (d *OvnControllerDashboard) Build() (dashboard.Dashboard, error) {
 	// Ofctrl Seqno Run Performance Counters
 	lib.AppendPerformanceCounterPanelsToRow(perfRow, d, "OpenFlow Control SeqNo Run", "Time spent managing OpenFlow sequence numbers for flow synchronization.", "ovn_controller", "ofctrl_seqno_run")
 
-	// Ofctrl Seqno Update Performance Counters
-	lib.AppendPerformanceCounterPanelsToRow(perfRow, d, "OpenFlow Control SeqNo Update", "Time spent managing patch ports between integration and provider bridges.", "ovn_controller", "ofctrl_seqno_update")
-
 	// Patch Port Run Performance Counters
 	lib.AppendPerformanceCounterPanelsToRow(perfRow, d, "Patch Run", "Time spent managing patch ports between integration and provider bridges.", "ovn_controller", "patch_run")
 
