@@ -277,6 +277,10 @@ func (o *FakeOVN) shutdown() {
 	}
 	o.nbsbCleanup.Cleanup()
 	for _, ocInfo := range o.userDefinedNetworkControllers {
+		if ocInfo.bnc.stopChan == nil {
+			// the test stopped this controller
+			continue
+		}
 		close(ocInfo.bnc.stopChan)
 		ocInfo.bnc.cancelableCtx.Cancel()
 		ocInfo.bnc.wg.Wait()

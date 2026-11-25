@@ -48,6 +48,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 	if oc.multiNetPolicyHandler != nil {
 		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetPolicyHandler)
 	}
+	oc.stopNetworkPolicies()
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
 	}

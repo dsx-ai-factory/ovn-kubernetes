@@ -594,6 +594,19 @@ func getPortNetworkPolicy(policyName, namespace, labelName, labelVal string, tcp
 	)
 }
 
+// getNetworkPolicyLocalPodHandler returns the network policy with the given key and its local pod handler.
+// It holds the policy key lock, which network policy add holds while it starts the handler.
+func getNetworkPolicyLocalPodHandler(bnc *BaseNetworkController, npKey string) (np *networkPolicy, handler *factory.Handler) {
+	_ = bnc.networkPolicies.DoWithLock(npKey, func(npKey string) error {
+		np, _ = bnc.networkPolicies.Load(npKey)
+		if np != nil {
+			handler = np.localPodHandler
+		}
+		return nil
+	})
+	return np, handler
+}
+
 func getTestPod(namespace, nodeName string) testPod {
 	return getTestPodAdvanced(namespace, nodeName, "10.128.1.3", false)
 }

@@ -590,6 +590,137 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 		Expect(app.Run([]string{app.Name})).To(Succeed())
 	})
 
+	It("primary Layer 3 UDN: a stopped controller does not change the default deny port groups of its replacement", func() {
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		netInfo := dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16", "192.168.1.0/24")
+		app.Action = func(*cli.Context) error {
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netInfo.netconf())
+			Expect(err).NotTo(HaveOccurred())
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, "192.168.126.202/24", netInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			newPolicy := func(name, selectedLabel string, policyTypes ...networkingv1.PolicyType) *networkingv1.NetworkPolicy {
+				return &networkingv1.NetworkPolicy{
+					ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+					Spec: networkingv1.NetworkPolicySpec{
+						PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{selectedLabel: "true"}},
+						PolicyTypes: policyTypes,
+					},
+				}
+			}
+			policyA := newPolicy("policy-a", "sg-a", networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress)
+			policyB := newPolicy("policy-b", "sg-b", networkingv1.PolicyTypeIngress)
+
+			fakeOvn.startWithDBSetup(
+				initialDB,
+				&corev1.NamespaceList{Items: []corev1.Namespace{*newUDNNamespace(ns)}},
+				&corev1.NodeList{Items: []corev1.Node{*testNode}},
+				&corev1.PodList{Items: []corev1.Pod{}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+				&networkingv1.NetworkPolicyList{Items: []networkingv1.NetworkPolicy{*policyA}},
+			)
+			// each controller's init() checks for Load_Balancer_Group support
+			fexec := util.GetExec().(*testing.FakeExec)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group",
+				"ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group",
+			})
+			Expect(fakeOvn.controller.WatchNamespaces()).To(Succeed())
+			Expect(fakeOvn.controller.WatchPods()).To(Succeed())
+
+			startController := func(oc *Layer3UserDefinedNetworkController) {
+				Expect(oc.init()).To(Succeed())
+				Expect(oc.RegisterNodeHandler()).To(Succeed())
+				Expect(oc.WatchNamespaces()).To(Succeed())
+				Expect(oc.waitForLocalZoneNodeLogicalSwitches()).To(Succeed())
+				Expect(oc.WatchPods()).To(Succeed())
+				Expect(oc.WatchNetworkPolicy()).To(Succeed())
+			}
+
+			By("starting the network controller with policy A and no local pod")
+			oldController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
+			startController(oldController)
+			Eventually(func() *factory.Handler {
+				_, handler := getNetworkPolicyLocalPodHandler(&oldController.BaseNetworkController, getPolicyKey(policyA))
+				return handler
+			}).ShouldNot(BeNil())
+
+			By("stopping it, as dynamic UDN does when the network has no local pod left")
+			oldController.Stop()
+			Expect(oldController.Cleanup()).To(Succeed())
+
+			By("starting a new controller for the same network")
+			newController, err := NewLayer3UserDefinedNetworkController(
+				&oldController.CommonNetworkControllerInfo,
+				util.NewMutableNetInfo(oldController.GetNetInfo()),
+				fakeOvn.networkManager.Interface(),
+				nil,
+				fakeOvn.eIPController,
+				fakeOvn.portCache,
+				fakeOvn.addressSetManager,
+				fakeOvn.udnNodeController,
+				fakeOvn.controller.ServiceController(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			// fakeOvn.shutdown stops the controllers it knows about
+			fakeOvn.fullL3UDNControllers[userDefinedNetworkName] = newController
+			newControllerInfo := userDefinedNetworkControllerInfo{bnc: &newController.BaseUserDefinedNetworkController}
+			fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName] = newControllerInfo
+			podInfo := dummyTestPod(ns, netInfo)
+			podInfo.populateLogicalSwitchCache(fakeOvn)
+			podInfo.populateUserDefinedNetworkLogicalSwitchCache(newControllerInfo)
+			startController(newController)
+
+			portName := util.GetUserDefinedNetworkLogicalPortName(ns, podInfo.podName, netInfo.nadName)
+			portGroupHasPod := func(pgName string) func() (bool, error) {
+				return func() (bool, error) {
+					lsp, err := libovsdbops.GetLogicalSwitchPort(fakeOvn.nbClient, &nbdb.LogicalSwitchPort{Name: portName})
+					if err != nil {
+						return false, err
+					}
+					pg, err := libovsdbops.GetPortGroup(fakeOvn.nbClient, &nbdb.PortGroup{Name: pgName})
+					if err != nil {
+						return false, err
+					}
+					return slices.Contains(pg.Ports, lsp.UUID), nil
+				}
+			}
+			policyAPG := newController.getNetworkPolicyPGName(ns, policyA.Name)
+			policyBPG := newController.getNetworkPolicyPGName(ns, policyB.Name)
+			ingressDenyPG := newController.defaultDenyPortGroupName(ns, libovsdbutil.ACLIngress)
+			egressDenyPG := newController.defaultDenyPortGroupName(ns, libovsdbutil.ACLEgress)
+
+			By("creating policy B and a local pod selected by A and B")
+			_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(ns).Create(context.Background(), policyB, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			pod := newMultiHomedPod(podInfo, netInfo)
+			pod.Labels = map[string]string{"sg-a": "true", "sg-b": "true"}
+			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(ns).Create(context.Background(), pod, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			for _, pgName := range []string{policyAPG, policyBPG, ingressDenyPG, egressDenyPG} {
+				Eventually(portGroupHasPod(pgName)).WithTimeout(5*time.Second).Should(BeTrue(), "pod port in %s", pgName)
+			}
+
+			By("deselecting the pod from policy A")
+			pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(ns).Get(context.Background(), pod.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			pod.Labels = map[string]string{"sg-b": "true"}
+			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(ns).Update(context.Background(), pod, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(portGroupHasPod(policyAPG)).Should(BeFalse())
+			Eventually(portGroupHasPod(egressDenyPG)).Should(BeFalse())
+			// policy B still isolates the pod for ingress
+			Consistently(portGroupHasPod(ingressDenyPG)).WithTimeout(time.Second).Should(BeTrue())
+
+			By("checking that the stopped controller holds no policy handler")
+			_, handler := getNetworkPolicyLocalPodHandler(&oldController.BaseNetworkController, getPolicyKey(policyA))
+			Expect(handler).To(BeNil())
+			return nil
+		}
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+
 	It("primary Layer 3 UDN: reconciles options:gateway_mtu on the cluster router port when gateway MTU support changes", func() {
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
