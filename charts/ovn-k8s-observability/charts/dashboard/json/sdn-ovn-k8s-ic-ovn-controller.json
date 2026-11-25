@@ -2128,114 +2128,6 @@
           "type": "timeseries",
           "targets": [
             {
-              "expr": "topk($topk, rate(ovn_controller_ofctrl_seqno_update_total_samples{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
-              "legendFormat": "{{instance}}/{{pod}}",
-              "refId": "A"
-            }
-          ],
-          "title": "OpenFlow Control SeqNo Update Sample Rate (Top K)",
-          "description": "Time spent managing patch ports between integration and provider bridges.",
-          "transparent": false,
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 0,
-            "y": 176
-          },
-          "interval": "120s",
-          "fieldConfig": {
-            "defaults": {
-              "unit": "recps",
-              "min": 0
-            },
-            "overrides": []
-          }
-        },
-        {
-          "type": "timeseries",
-          "targets": [
-            {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_minimum{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
-              "legendFormat": "MIN: {{instance}}/{{pod}}",
-              "refId": "A"
-            },
-            {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_maximum{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
-              "legendFormat": "MAX: {{instance}}/{{pod}}",
-              "refId": "B"
-            },
-            {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_95th_percentile{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
-              "legendFormat": "P95: {{instance}}/{{pod}}",
-              "refId": "C"
-            }
-          ],
-          "title": "OpenFlow Control SeqNo Update Time (Top K)",
-          "description": "Time spent managing patch ports between integration and provider bridges.",
-          "transparent": false,
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 176
-          },
-          "interval": "120s",
-          "fieldConfig": {
-            "defaults": {
-              "unit": "s",
-              "min": 0
-            },
-            "overrides": []
-          }
-        },
-        {
-          "type": "timeseries",
-          "targets": [
-            {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_short_term_avg{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
-              "legendFormat": "short-term: {{instance}}/{{pod}}",
-              "refId": "A"
-            },
-            {
-              "expr": "topk($topk, ovn_controller_ofctrl_seqno_update_long_term_avg{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"})",
-              "legendFormat": "long-term: {{instance}}/{{pod}}",
-              "refId": "B"
-            }
-          ],
-          "title": "OpenFlow Control SeqNo Update Average Time (Top K)",
-          "description": "Time spent managing patch ports between integration and provider bridges.",
-          "transparent": false,
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 176
-          },
-          "interval": "120s",
-          "fieldConfig": {
-            "defaults": {
-              "unit": "s",
-              "min": 0
-            },
-            "overrides": []
-          }
-        },
-        {
-          "type": "timeseries",
-          "targets": [
-            {
               "expr": "topk($topk, rate(ovn_controller_patch_run_total_samples{`}}{{ .Values.global.clusterLabel }}{{`=\"$cluster\", instance=~\"$instance\", pod=~\"$pod\", namespace=\"ovn-kubernetes\"}[5m]))",
               "legendFormat": "{{instance}}/{{pod}}",
               "refId": "A"
@@ -2252,7 +2144,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 184
+            "y": 176
           },
           "interval": "120s",
           "fieldConfig": {
@@ -2293,7 +2185,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 184
+            "y": 176
           },
           "interval": "120s",
           "fieldConfig": {
@@ -2329,7 +2221,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 184
+            "y": 176
           },
           "interval": "120s",
           "fieldConfig": {
@@ -2360,7 +2252,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 192
+            "y": 184
           },
           "interval": "120s",
           "fieldConfig": {
@@ -2401,7 +2293,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 192
+            "y": 184
           },
           "interval": "120s",
           "fieldConfig": {
@@ -2437,7 +2329,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 192
+            "y": 184
           },
           "interval": "120s",
           "fieldConfig": {
