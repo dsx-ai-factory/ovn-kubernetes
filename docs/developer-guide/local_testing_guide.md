@@ -32,7 +32,7 @@ environmental variable `K8S_VERSION` to the same value. Also make sure to export
 your go directory with `export GOPATH=(...)`.
 
 ```
-K8S_VERSION=v1.36.4
+K8S_VERSION=v1.37.0
 git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
 pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
@@ -230,9 +230,8 @@ kube-apiserver + etcd started by [envtest](https://pkg.go.dev/sigs.k8s.io/contro
 They verify CRD admission behaviour — defaulting, validation, and CEL rules —
 without requiring a full KinD cluster.
 
-Some scenarios that do not need live pod networking have been migrated to
-`test/crd-integration/testscenario/`. The remaining scenarios are tracked upstream in
-[ovn-kubernetes#6932](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6932).
+Schema-only scenarios that do not need live pod networking live in
+`test/crd-integration/testscenario/`.
 
 ### Prerequisites
 
@@ -263,7 +262,7 @@ not the Ginkgo `It` description. Pass `-ginkgo.focus` to the test binary using
 ```bash
 cd $REPO/test/crd-integration
 KUBEBUILDER_ASSETS="$(go tool setup-envtest \
-    use 1.36.2 --bin-dir /tmp/envtest-bin -p path)" \
+    use 1.37.0 --bin-dir /tmp/envtest-bin -p path)" \
   go test -v ./... -args -ginkgo.focus "fills in the egress-assignable default"
 ```
 

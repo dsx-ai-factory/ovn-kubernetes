@@ -8,6 +8,7 @@ import (
 	"context"
 
 	nadinformer "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
+	frrinformer "github.com/metallb/frr-k8s/pkg/client/informers/externalversions/api/v1beta1"
 
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -78,6 +79,7 @@ type NodeWatchFactory interface {
 	UplinkInformer() uplinkinformer.UplinkInformer
 	UplinkStateInformer() uplinkinformer.UplinkStateInformer
 	RouteAdvertisementsInformer() routeadvertisementsinformer.RouteAdvertisementsInformer
+	FRRConfigurationsInformer() frrinformer.FRRConfigurationInformer
 	ConfigMapCoreInformer() coreinformers.ConfigMapInformer
 	SecretCoreInformer() coreinformers.SecretInformer
 	VTEPInformer() vtepinformer.VTEPInformer

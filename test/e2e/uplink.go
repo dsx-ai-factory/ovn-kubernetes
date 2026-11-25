@@ -1443,7 +1443,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 			}
 		}
 		gomega.Expect(createRouteAdvertisements(
-			f,
+			ctx, f,
 			ictx,
 			networkName,
 			"auto",
@@ -1645,7 +1645,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 		}
 
 		gomega.Expect(createRouteAdvertisements(
-			f,
+			ctx, f,
 			ictx,
 			networkName,
 			"auto",
@@ -1816,7 +1816,7 @@ var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation
 				frrNeighborIPsByNode[network.node.Name],
 			)).To(gomega.Succeed())
 			gomega.Expect(createRouteAdvertisements(
-				f,
+				ctx, f,
 				ictx,
 				network.name,
 				"auto",
@@ -1946,7 +1946,7 @@ var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation
 			)).To(gomega.Succeed())
 		}
 		gomega.Expect(createRouteAdvertisements(
-			f,
+			ctx, f,
 			ictx,
 			networkName,
 			"auto",
@@ -4659,7 +4659,7 @@ func createUplinkAdvertisedCUDN(
 		return nil, err
 	}
 	if err := createRouteAdvertisements(
-		f,
+		ctx, f,
 		ictx,
 		networkName,
 		targetVRF,
