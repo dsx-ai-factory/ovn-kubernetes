@@ -1,3 +1,6 @@
+# 2.4.4
+- observability: remove invalid ofctrl seqno update panels
+
 # 2.4.3
 - alert-rule, dashboard: add `global.clusterLabel`, defaulting to `cluster`,
   and include it in the aggregation and join clauses of the 16 alert rules

@@ -1,6 +1,6 @@
 # ovn-k8s-observability
 
-![Version: 2.4.3](https://img.shields.io/badge/Version-2.4.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.4.3](https://img.shields.io/badge/AppVersion-2.4.3-informational?style=flat-square)
+![Version: 2.4.4](https://img.shields.io/badge/Version-2.4.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.4.4](https://img.shields.io/badge/AppVersion-2.4.4-informational?style=flat-square)
 
 ## Maintainers
 
@@ -101,7 +101,7 @@ of the package.
 | Chart | Version | Path |
 | --- | --- | --- |
 | `alert-rule` | `2.4.3` | `charts/alert-rule` |
-| `dashboard` | `2.4.3` | `charts/dashboard` |
+| `dashboard` | `2.4.4` | `charts/dashboard` |
 
 ## Values
 
