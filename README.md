@@ -208,7 +208,7 @@ Three numbers appear in this tree:
 |---|---|---|
 | Distribution release | `release-*` branches, `v*` tags, `DistroVersion` in [`config.go`](go-controller/pkg/config/config.go), and `version` in `charts/*/Chart.yaml` | this snapshot of the source tree |
 | Upstream baseline | `Version` in [`config.go`](go-controller/pkg/config/config.go) | the upstream release this tree is built from |
-| Container image version | `appVersion` in `charts/*/Chart.yaml`, dated `YYYY-MM.N` | the image build |
+| Container image version | `appVersion` in `charts/*/Chart.yaml`, dated `YYYY-MM.<commit>` | the image build |
 
 `ovnkube --version` prints the first two, as `Version` and `Upstream baseline`.
 

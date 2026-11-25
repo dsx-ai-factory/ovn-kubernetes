@@ -209,130 +209,130 @@ ovs-node:
   ovsDaemonsContainer:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
 ovnkube-node-dpu-host:
   image:
     repository: ovnkube
-    # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+    # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
     # @default -- `""`
-    tag: 9fc75774
-    # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+    tag: ""
+    # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
     # @default -- `""`
-    sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+    sha256: ""
 ovnkube-identity:
   ovnkubeIdentity:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
 ovnkube-control-plane:
   ovnkubeControlPlane:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
 ovnkube-single-node-zone:
   ovnkubeSingleNodeZone:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
   ovnkubeSingleNodeZoneNbdb:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
   ovnkubeSingleNodeZoneSbdb:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
   ovnkubeSingleNodeZoneNorthd:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
   ovnkubeSingleNodeZoneOvnHost:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
 ovnkube-single-node-zone-dpu:
   ovnkubeSingleNodeZone:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
   ovnkubeSingleNodeZoneNbdb:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
   ovnkubeSingleNodeZoneSbdb:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
   ovnkubeSingleNodeZoneNorthd:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""
   ovnkubeSingleNodeZoneOvnHost:
     image:
       repository: ovnkube
-      # -- Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with.
+      # -- Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release.
       # @default -- `""`
-      tag: 9fc75774
-      # -- Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with.
+      tag: ""
+      # -- Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed.
       # @default -- `""`
-      sha256: 7ee941aed085986d135ff4b11b1697c030116b645bf50af41e1a2aeb7e9b3b96
+      sha256: ""

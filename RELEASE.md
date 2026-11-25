@@ -81,30 +81,27 @@ together:
 | Distribution version | `DistroVersion` in [`config.go`](go-controller/pkg/config/config.go) |
 | Upstream baseline | `Version` in [`config.go`](go-controller/pkg/config/config.go) |
 | Chart version | `version` in `charts/*/Chart.yaml`, across each chart, its subcharts, and its dependency constraints |
-| Image version | `appVersion` in `charts/*/Chart.yaml`, dated `YYYY-MM.N` |
+| Image version | `appVersion` in `charts/*/Chart.yaml`, dated `YYYY-MM.<commit>` wherever the chart deploys the image |
 | Image tag and digest | `tag` and `sha256` on every `image` in `charts/ovn-kubernetes/values.yaml` |
 
 The chart dependency constraints matter in particular: a subchart left behind
 makes Helm report a wrong dependency version rather than fail outright.
 
-`tag` and `sha256` have to move together. A digest describes one tag, so
-repointing the tag without re-resolving the digest leaves the chart naming an
-image that does not exist. Deployments only read the digest when
-`global.useImageDigest` is set, so the mismatch stays invisible until a cluster
-pins by digest. Resolve the new digest from the registry and apply it to every
-entry:
-
-```bash
-docker buildx imagetools inspect example.com/sdn/ovnkube:<tag> \
-  --format '{{json .}}' | jq -r .manifest.digest
-```
-
-The `verify_digest` CI job makes the same query and fails the pipeline when the
-two disagree.
+**The release commit leaves `tag` and `sha256` empty.** Both are filled in by
+the release pipeline, which builds the image from the release commit, pushes
+it, and substitutes the tag it assigned along with the digest the registry
+reports for it. A digest describes one tag, so the two can only be resolved
+together and only once the image exists — which is why neither is written by
+hand. Installing from the tree rather than from a published chart therefore
+needs `global.image`, or a `tag` per component.
 
 Subsequent patch releases on an existing series repeat steps 1 and 2 on the
 existing branch — the branch already exists, so a patch is a version bump and
 a new tag, with no change to `main`.
+
+A patch is cut as a single commit, `releasing vX.Y.Z helm charts`, carrying the
+version bump, the CHANGELOG entries, and the chart bumps together. Tagging that
+commit `release-X.Y.Z` is what starts the pipeline.
 
 ## Release cadence
 

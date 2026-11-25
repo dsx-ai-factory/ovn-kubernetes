@@ -137,6 +137,9 @@ Generate full container image string by combining repository, tag and possible s
     {{- $prefix := required "global.imageRepositoryPrefix is required unless image.repository includes a registry host" .Values.global.imageRepositoryPrefix | trimSuffix "/" }}
     {{- $repository = printf "%s/%s" $prefix $repository }}
   {{- end }}
+  {{- if empty $image.tag }}
+    {{- fail "image.tag is empty; the release pipeline fills it in when it publishes the chart, so rendering this tree directly needs global.image.repository and global.image.tag, or a tag per component" }}
+  {{- end }}
   {{- $imageString := printf "%s:%s" $repository $image.tag }}
   {{- if .Values.global.useImageDigest | default false }}
     {{- if empty $image.sha256 }}

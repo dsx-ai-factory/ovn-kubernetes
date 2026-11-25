@@ -457,11 +457,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -507,11 +507,11 @@
             },
             "tag": {
               "type": "string",
-              "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+              "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
             },
             "sha256": {
               "type": "string",
-              "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+              "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
             }
           }
         }
@@ -562,11 +562,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -627,11 +627,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -746,11 +746,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -803,11 +803,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -860,11 +860,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -917,11 +917,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -974,11 +974,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -1101,11 +1101,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -1130,11 +1130,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -1159,11 +1159,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -1188,11 +1188,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }
@@ -1217,11 +1217,11 @@
                 },
                 "tag": {
                   "type": "string",
-                  "description": "Image tag. Pinned to the image built for this chart release and left out of the generated docs because it changes on every image rebuild; see `values.yaml` for the tag this release ships with."
+                  "description": "Image tag. Left empty in the tree; the release pipeline substitutes the tag of the image it built for this release."
                 },
                 "sha256": {
                   "type": "string",
-                  "description": "Image digest, without the `sha256:` prefix. Pinned alongside `tag` and left out of the generated docs for the same reason; see `values.yaml` for the digest this release ships with."
+                  "description": "Image digest, without the `sha256:` prefix. Left empty alongside `tag`; the release pipeline substitutes the digest the registry reports for the tag it pushed."
                 }
               }
             }

@@ -7,6 +7,52 @@ its comparison baseline. Small fixes and internal refactoring are omitted.
 Downstream releases are numbered `2.MINOR.PATCH`, where `MINOR` tracks the
 upstream minor release the drop is based on.
 
+## [2.4.4]
+
+Changes since 2.4.3 on `release-2.4`. The upstream baseline moves from
+`release-1.4` at commit
+[`d6fb77aaf7f643e5c7b8ae6b1ba595645def1b08`](https://github.com/ovn-kubernetes/ovn-kubernetes/commit/d6fb77aaf7f643e5c7b8ae6b1ba595645def1b08)
+to `release-1.4` at commit
+[`0ae378849bed8dc1265168e26925f8522221fc75`](https://github.com/ovn-kubernetes/ovn-kubernetes/commit/0ae378849bed8dc1265168e26925f8522221fc75),
+which carries no upstream tag. All 17 commits in that window are NVIDIA changes
+this tree already carried and upstream has since taken, so the only content the
+merge adds here is the Uplink readiness fix below.
+
+### Networking and IP management
+
+- **UDN gateway programmed before its subnet was allocated:** Read the current
+  Node from the informer cache while programming a UDN gateway, rather than
+  holding the Node the attempt started with, so a setup that ran ahead of
+  subnet allocation sees the assignment on retry instead of retrying forever
+  against a Node that has none. The allocation read at the start of an attempt
+  is reused throughout it, so one attempt cannot straddle two allocations.
+- **Uplink and CUDN readiness lost to cache lag:** An interface change
+  publishes `Ready=False` on the Uplink and `UplinksReady=False` on its CUDNs,
+  and the resolved `UplinkState` can arrive before the informer sees that
+  write. Reconciliation then read the stale `True` still in cache and skipped
+  restoring it in the API, and the delayed `False` event was discarded as
+  status-only, leaving both not ready indefinitely even though gateway
+  programming and egress worked. Changes to those two conditions now trigger
+  another readiness evaluation; conditions owned by other controllers are still
+  ignored.
+
+### Security and hardening
+
+- **Network policy handlers outliving their controller:** Stopping a UDN
+  network controller left the local pod handler of every network policy
+  running. Those handlers kept editing the default deny port groups, which the
+  next controller for the same network recreates under the same names, so a pod
+  could end up outside ingress deny while a policy still selected it. Stop now
+  marks every policy deleted and removes its handlers, after waiting for policy
+  adds and deletes already in flight, across layer3, layer2, and localnet, and
+  on a failed `Start`.
+
+### Observability
+
+- **ovn-controller dashboard:** Remove the ofctrl seqno update panels. They
+  were added by mistake and query metrics that do not exist, so they only ever
+  rendered empty.
+
 ## [2.4.3]
 
 Changes since 2.4.2 on `release-2.4`. The upstream baseline moves for the first

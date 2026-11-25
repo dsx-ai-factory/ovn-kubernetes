@@ -5,7 +5,7 @@ apiVersion: v2
 name: ovn-kubernetes
 description: A Helm chart for deploying ovn-kubernetes CNI
 type: application
-version: 2.4.3
+version: 2.4.4
 keywords:
 - SDN
 - SDNaaS
@@ -25,7 +25,7 @@ sources:
 - https://github.com/ovn-org/ovn
 - https://github.com/openvswitch/ovs
 - https://github.com/ovn-org/libovsdb
-appVersion: "2026-10.3"
+appVersion: "2026-10.commitID"
 # Components are selected by `condition`, not by the `tags` dependency field.
 # Helm resolves that field only against the release-root `tags` map, so when
 # this chart is a dependency of an umbrella chart the embedder has to set a
@@ -38,23 +38,23 @@ appVersion: "2026-10.3"
 # every name below must keep a default in values.yaml.
 dependencies:
 - name: ovs-node
-  version: 2.4.3
+  version: 2.4.4
   condition: tags.ovs-node
 - name: ovnkube-identity
-  version: 2.4.3
+  version: 2.4.4
   condition: tags.ovnkube-identity
 - name: ovnkube-node-dpu-host
-  version: 2.4.3
+  version: 2.4.4
   condition: tags.ovnkube-node-dpu-host
 - name: ovnkube-control-plane
-  version: 2.4.3
+  version: 2.4.4
   condition: tags.ovnkube-control-plane
 - name: ovnkube-single-node-zone
-  version: 2.4.3
+  version: 2.4.4
   condition: tags.ovnkube-single-node-zone
 - name: ovnkube-single-node-zone-dpu
-  version: 2.4.3
+  version: 2.4.4
   condition: tags.ovnkube-single-node-zone-dpu
 - name: ovnkube-crds
-  version: 2.4.3
+  version: 2.4.4
   condition: tags.ovnkube-crds

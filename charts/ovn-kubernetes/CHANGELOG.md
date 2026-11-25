@@ -1,3 +1,21 @@
+# 2.4.4
+- ovn: stop the pod handlers of every network policy when a UDN network
+  controller stops. They kept editing the default deny port groups that the
+  next controller for the network recreates by name, so a pod could leave
+  ingress deny while a policy still selected it.
+- node: read the current Node when programming a UDN gateway, so a gateway set
+  up before its subnet was allocated picks the allocation up on retry.
+- clustermanager: reconcile the Uplink `Ready` and CUDN `UplinksReady`
+  conditions on status events, so an interface change whose status write lands
+  after the resolved `UplinkState` no longer leaves either stuck not ready.
+- helm: leave every `image.tag` and `image.sha256` empty, and set `appVersion`
+  to `2026-10.commitID` on this chart and its subcharts. The release pipeline
+  builds the image from the release tag and substitutes all three, so the chart
+  no longer carries an image reference resolved by hand. Installing straight
+  from the tree needs `global.image` or a per-component `image.tag`, and
+  rendering without one now fails saying so rather than on the invalid image
+  reference an empty tag produced.
+
 # 2.4.3
 - helm: scope subchart selection with `condition: tags.<name>` instead of the
   `dependencies[].tags` field, which Helm resolves only against the
