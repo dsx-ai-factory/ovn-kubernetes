@@ -152,9 +152,9 @@ The following scenarios represent the primary security concerns for this project
    ClusterRoles in `charts/ovn-kubernetes/templates/rbac-ovnkube-node.yaml`,
    `charts/ovn-kubernetes/charts/ovnkube-control-plane/templates/rbac-ovnkube-cluster-manager.yaml`,
    and `charts/ovn-kubernetes/charts/ovnkube-identity/templates/rbac-ovnkube-identity.yaml`
-   grant broad watch/patch/update on core and `k8s.ovn.org` resources — including
-   `secrets` — plus CSR create and approve paths, bound to the `system:ovn-nodes`
-   group. Theft of these ServiceAccount tokens or a node client certificate — via
+   grant broad watch/patch/update on core and `k8s.ovn.org` resources, plus CSR
+   create and approve paths, bound to the `system:ovn-nodes` group. Theft of
+   these ServiceAccount tokens or a node client certificate — via
    a mounted volume, a log leak, or a compromised node agent — enables
    cluster-wide network reconfiguration and further privilege escalation.
    Credentials supplied to the chart compound this:

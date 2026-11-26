@@ -281,7 +281,6 @@ rules:
   - apiGroups: [""]
     resources:
       - configmaps
-      - secrets
     verbs: ["get", "list", "watch"]
 
 # https://github.com/ovn-kubernetes/ovn-kubernetes/blob/e1e7d40f9a6c6038b52696c1b8f8915a4d73160e/go-controller/pkg/ovn/topology_version.go#L28
