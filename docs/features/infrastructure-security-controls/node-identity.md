@@ -43,6 +43,12 @@ subjects:
       name: system:ovn-nodes
       apiGroup: rbac.authorization.k8s.io
 ```
+The rules do not include Secrets. In the namespace where OVN-Kubernetes runs, node
+credentials can read ConfigMaps but cannot get, list or watch Secrets, so a compromised
+node cannot read the `ovnkube-identity` webhook private key or an image pull secret. The
+same holds for the extra groups that the Helm chart binds to the node Roles through
+`global.ovnNodeExtraGroups`.
+
 Note: By default, the generated certificates have a brief lifetime set (10min).
 This is intentional as it helps ensure that the certificate rotation works seamlessly, but it might be adjusted in production environments.
 

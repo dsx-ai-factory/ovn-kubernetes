@@ -156,7 +156,6 @@ rules:
   - apiGroups: [""]
     resources:
       - configmaps
-      - secrets
     verbs: ["get", "list", "watch"]
   # moved from only-ovnk8s-endpoints RoleBinding
   - apiGroups: [""]
