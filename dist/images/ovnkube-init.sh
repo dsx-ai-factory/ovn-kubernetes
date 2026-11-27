@@ -218,12 +218,12 @@ echo "set external_ids:ovn-gw-interface to ${external_ids["ovn-gw-interface"]}"
 # Both lookups are retried: the dpu-host ovnkube-node labels the node before it
 # writes host-cidrs, and a transient API error must not fail the container.
 get_host_cidrs() {
-  host_cidrs=$(kubectl get node $k8s_nodename -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/host-cidrs}') || return 1
+  host_cidrs=$(kubectl get node "$k8s_nodename" -o jsonpath='{.metadata.annotations.k8s\.ovn\.org/host-cidrs}') || return 1
   [ -n "$host_cidrs" ]
 }
 get_node_ip() {
-  node_ip=$(kubectl get node $k8s_nodename -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}') || return 1
-  node_ip=$(echo $node_ip | awk '{print $1}')
+  node_ip=$(kubectl get node "$k8s_nodename" -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}') || return 1
+  read -r node_ip _ <<<"$node_ip"  # take the first InternalIP only
   [ -n "$node_ip" ]
 }
 wait_for_event attempts=24 get_host_cidrs
@@ -239,20 +239,30 @@ if [ -z "$cidr" ]; then
   echo "failed to find host-cidr matching node InternalIP $node_ip in [$host_cidrs], exiting..."
   exit 1
 fi
-suffix=${cidr##*/}
-if [ "$suffix" == "31" ]; then
-  # A /31 holds exactly two addresses: the host holds $node_ip, so our next hop
-  # is the other one. Which of the two is even varies by deployment.
-  # output is like: network=10.192.0.0/31 gateway=10.192.0.1
-  output=`python3 -c "import ipaddress; net=ipaddress.ip_network(\"$cidr\", strict=False); ip=ipaddress.ip_address(\"$node_ip\"); print('network=%s\ngateway=%s'%(net, next(a for a in net if a != ip)))"`
-  network=$(echo "$output" | awk -F= '/^network=/ {print $2}')
-  gateway=$(echo "$output" | awk -F= '/^gateway=/ {print $2}')
-else
-  # gateway is on the switch, output is like: network=10.192.0.0/16 gateway=10.192.0.1
-  output=`python3 -c "import ipaddress; net=ipaddress.ip_network(\"$cidr\", strict=False); print('network=%s\ngateway=%s'%(net, net.network_address + 1))"`
-  network=$(echo "$output" | awk -F= '/^network=/ {print $2}')
-  gateway=$(echo "$output" | awk -F= '/^gateway=/ {print $2}')
-fi
+# A /31 holds exactly two addresses: the host holds $node_ip, so our next hop is
+# the other one (which of the two is even varies by deployment), output is like:
+# network=10.192.0.0/31 gateway=10.192.0.1
+# Otherwise the gateway is on the switch, output is like:
+# network=10.192.0.0/16 gateway=10.192.0.1
+# Nothing is printed for a CIDR or an address that does not parse. The program
+# takes both values as arguments, so that neither becomes part of its source.
+output=$(python3 -c '
+import ipaddress
+import sys
+
+try:
+    net = ipaddress.ip_network(sys.argv[1], strict=False)
+    ip = ipaddress.ip_address(sys.argv[2])
+    if net.prefixlen == 31:
+        gateway = next(a for a in net if a != ip)
+    else:
+        gateway = net.network_address + 1
+except ValueError:
+    sys.exit(1)
+print("network=%s\ngateway=%s" % (net, gateway))
+' "$cidr" "$node_ip")
+network=$(echo "$output" | awk -F= '/^network=/ {print $2}')
+gateway=$(echo "$output" | awk -F= '/^gateway=/ {print $2}')
 if [ -z "$network" ] || [ -z "$gateway" ]; then
   echo "failed to get network and gateway from $cidr, exiting..."
   exit 1
