@@ -92,7 +92,6 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 			},
 		}
 		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
-		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
@@ -117,12 +116,9 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 			},
 		}
 		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
-		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
 		factoryMock.On("GetNodes").Return(nodeList, nil)
-		nodeInformer := coreinformermocks.NodeInformer{}
-		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
-		nodeLister := v1mocks.NodeLister{}
-		nodeInformer.On("Lister").Return(&nodeLister)
+		nodeInformer := nodeInformerWithNode(Default, nodeList[0])
+		factoryMock.On("NodeCoreInformer").Return(nodeInformer)
 		uplinkFactory := uplinkinformerfactory.NewSharedInformerFactory(
 			uplinkfake.NewSimpleClientset(),
 			time.Second,
@@ -164,7 +160,6 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 			},
 		}
 		cnnci := CommonNodeNetworkControllerInfo{name: "worker1", watchFactory: &factoryMock}
-		factoryMock.On("GetNode", "worker1").Return(nodeList[0], nil)
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		nad = ovntest.GenerateNAD("bluenet", "rednad", "greenamespace",
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
@@ -350,7 +345,6 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeList := []*corev1.Node{node}
-		factoryMock.On("GetNode", nodeName).Return(nodeList[0], nil)
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		nodeInformer := coreinformermocks.NodeInformer{}
 		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
